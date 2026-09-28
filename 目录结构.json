@@ -1,0 +1,102 @@
+{
+  "name": "bai",
+  "type": "dir",
+  "children": [
+    {
+      "name": "backend",
+      "type": "dir",
+      "description": "FastAPI 后端（待初始化）",
+      "children": []
+    },
+    {
+      "name": "frontend",
+      "type": "dir",
+      "description": "uni-app x 前端",
+      "children": [
+        {
+          "name": "pages",
+          "type": "dir",
+          "description": "页面目录",
+          "children": [
+            {
+              "name": "index",
+              "type": "dir",
+              "children": [
+                {
+                  "name": "index.uvue",
+                  "type": "file",
+                  "description": "首页（启动页）"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "static",
+          "type": "dir",
+          "description": "静态资源",
+          "children": [
+            {
+              "name": "logo.png",
+              "type": "file"
+            }
+          ]
+        },
+        {
+          "name": "App.uvue",
+          "type": "file",
+          "description": "应用入口组件"
+        },
+        {
+          "name": "index.html",
+          "type": "file",
+          "description": "Web 端模板"
+        },
+        {
+          "name": "main.uts",
+          "type": "file",
+          "description": "应用入口文件"
+        },
+        {
+          "name": "manifest.json",
+          "type": "file",
+          "description": "应用配置"
+        },
+        {
+          "name": "pages.json",
+          "type": "file",
+          "description": "页面注册与导航栏配置"
+        },
+        {
+          "name": "platformConfig.json",
+          "type": "file",
+          "description": "平台专属配置"
+        },
+        {
+          "name": "uni.scss",
+          "type": "file",
+          "description": "全局样式变量（须与 DESIGN_bai.md 一致）"
+        }
+      ]
+    },
+    {
+      "name": "AGENTS.md",
+      "type": "file",
+      "description": "AI 编程执行规范"
+    },
+    {
+      "name": "DESIGN_bai.md",
+      "type": "file",
+      "description": "设计令牌（颜色/字体/圆角/间距唯一真源）"
+    },
+    {
+      "name": "LICENSE",
+      "type": "file"
+    },
+    {
+      "name": "项目规范.md",
+      "type": "file",
+      "description": "固定项目技术规范"
+    }
+  ]
+}
