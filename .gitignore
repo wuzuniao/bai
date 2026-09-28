@@ -1,0 +1,43 @@
+# 前端 uni-app x / HBuilderX
+unpackage/
+.hbuilderx/
+node_modules/
+
+# 操作系统
+.DS_Store
+Thumbs.db
+
+# IDE / 编辑器
+.idea/
+.vscode/
+.trae/
+.codebuddy/
+*.swp
+*.swo
+*~
+
+# Python 后端
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# 环境变量与敏感配置（禁止提交）
+.env
+.env.*
+!.env.example
+
+# JWKS 公钥磁盘缓存（auth 服务公钥，运行时生成）
+backend/.jwks_cache.json
+
+# 日志文件
+logs/
+*.log
+
+# 临时文件
+*.tmp
+*.bak
+*_output.txt
+*_out.txt
