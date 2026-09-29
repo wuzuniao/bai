@@ -1,0 +1,100 @@
+<template>
+	<view class="navbar-layer">
+		<view class="navbar-pill">
+			<view
+				v-for="(item, index) in items"
+				:key="item.key"
+				class="nav-btn"
+				:class="index === modelValue ? 'nav-btn-active' : 'nav-btn-idle'"
+				@click="onTap(index)"
+			>
+				<image
+					class="nav-icon"
+					:src="index === modelValue ? item.iconActive : item.icon"
+					:style="'width:' + item.iconWidth + 'rpx;height:' + item.iconHeight + 'rpx'"
+				/>
+				<text class="nav-text" :class="index === modelValue ? 'nav-text-active' : ''">{{ item.text }}</text>
+			</view>
+		</view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { BottomNavItem } from './navItem.uts'
+
+	const props = defineProps<{
+		/** 导航项列表 */
+		items: BottomNavItem[]
+		/** 当前激活项索引 */
+		modelValue: number
+	}>()
+
+	const emit = defineEmits(['change'])
+
+	function onTap(index: number) : void {
+		if (index === props.modelValue) {
+			return
+		}
+		emit('change', index)
+	}
+</script>
+
+<style>
+	/* 定位层：悬浮于视口底部（fixed 全端一致：App 相对页面、小程序/Web 相对视口，不随内容滚动） */
+	.navbar-layer {
+		position: fixed;
+		left: 0;
+		right: 0;
+		bottom: 46rpx;
+		flex-direction: row;
+		justify-content: center;
+	}
+
+	/* 白色胶囊容器（Stitch 原始文件: 343x54, 内留白 7, 项间距 23.1, 圆角 pill, 描边 #868685/10%） */
+	.navbar-pill {
+		width: 660rpx;
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+		padding: 13rpx;
+		background-color: #ffffff;
+		border-radius: 9999px;
+		border: 1px solid rgba(134, 134, 133, 0.1);
+		box-shadow: 0rpx 15rpx 58rpx rgba(0, 0, 0, 0.06);
+	}
+
+	/* 导航项：左右各留 22rpx，相邻两项间距 44rpx（Figma 23.1px），两端空隙由容器居中产生 */
+	.nav-btn {
+		margin-left: 22rpx;
+		margin-right: 22rpx;
+	}
+
+	/* 激活项：墨黑胶囊（Figma: padding 10x20, gap 8, 背景 #0E0F0C） */
+	.nav-btn-active {
+		flex-direction: row;
+		align-items: center;
+		padding: 20rpx 38rpx;
+		background-color: #0e0f0c;
+		border-radius: 9999px;
+	}
+
+	/* 未激活项：透明底（Figma: padding 10x16, gap 6） */
+	.nav-btn-idle {
+		flex-direction: row;
+		align-items: center;
+		padding: 20rpx 31rpx;
+		border-radius: 9999px;
+	}
+
+	.nav-text {
+		margin-left: 12rpx;
+		font-size: 27rpx;
+		line-height: 38rpx;
+		color: #0e0f0c;
+	}
+
+	.nav-text-active {
+		margin-left: 15rpx;
+		color: #ffffff;
+	}
+</style>

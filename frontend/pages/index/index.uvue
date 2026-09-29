@@ -1,24 +1,416 @@
 <template>
-	<view>
-		<image class="logo" src="/static/logo.png"></image>
-		<text class="title">{{title}}</text>
+	<view class="page">
+		<scroll-view class="scroll" direction="vertical" :show-scrollbar="false">
+			<view class="main" :style="'padding-top:' + topInset + 'px'">
+				<!-- 诗文卡片（Figma: 白底 圆角28px 阴影 0 4 24 @3% 内边距 24x16） -->
+				<view class="poem-card">
+					<!-- 诗文主体：16 行，每行 7 字（拼音 + 汉字）+ 行尾标点 -->
+					<view class="poem-body">
+						<view
+							v-for="(line, li) in poemLines"
+							:key="li"
+							class="poem-line"
+							:class="lineClass(li)"
+						>
+							<view v-for="(c, ci) in line.chars" :key="ci" class="poem-unit">
+								<text class="poem-pinyin">{{ c.pinyin }}</text>
+								<text class="poem-char">{{ c.char }}</text>
+							</view>
+							<view class="poem-punct-wrap">
+								<text class="poem-punct">{{ line.punct }}</text>
+							</view>
+						</view>
+					</view>
+					<!-- 底部铭文（Figma: 11px 灰色 衬线体） -->
+					<text class="inscription">《无题》无足鸟著 2017年2月</text>
+				</view>
+			</view>
+		</scroll-view>
+		<BottomNavBar :items="navItems" :model-value="navActive" @change="onNavChange" />
 	</view>
 </template>
 
 <script setup lang="uts">
-	const title = ref('Hello')
+	import BottomNavBar from '@/components/BottomNavBar/BottomNavBar.uvue'
+	import { BottomNavItem } from '@/components/BottomNavBar/navItem.uts'
+
+	type PoemChar = {
+		char: string
+		pinyin: string
+	}
+
+	type PoemLine = {
+		chars: PoemChar[]
+		punct: string
+	}
+
+	/** 诗文内容（8 联 16 行，逐字拼音取自设计稿） */
+	const poemLines = ref<PoemLine[]>([
+		{
+			chars: [
+				{ char: '世', pinyin: 'shì' } as PoemChar,
+				{ char: '界', pinyin: 'jiè' } as PoemChar,
+				{ char: '尽', pinyin: 'jìn' } as PoemChar,
+				{ char: '头', pinyin: 'tóu' } as PoemChar,
+				{ char: '千', pinyin: 'qiān' } as PoemChar,
+				{ char: '般', pinyin: 'bān' } as PoemChar,
+				{ char: '法', pinyin: 'fǎ' } as PoemChar
+			],
+			punct: '，'
+		} as PoemLine,
+		{
+			chars: [
+				{ char: '不', pinyin: 'bù' } as PoemChar,
+				{ char: '外', pinyin: 'wài' } as PoemChar,
+				{ char: '彼', pinyin: 'bǐ' } as PoemChar,
+				{ char: '岸', pinyin: 'àn' } as PoemChar,
+				{ char: '七', pinyin: 'qī' } as PoemChar,
+				{ char: '色', pinyin: 'sè' } as PoemChar,
+				{ char: '花', pinyin: 'huā' } as PoemChar
+			],
+			punct: '。'
+		} as PoemLine,
+		{
+			chars: [
+				{ char: '滚', pinyin: 'gǔn' } as PoemChar,
+				{ char: '滚', pinyin: 'gǔn' } as PoemChar,
+				{ char: '红', pinyin: 'hóng' } as PoemChar,
+				{ char: '尘', pinyin: 'chén' } as PoemChar,
+				{ char: '修', pinyin: 'xiū' } as PoemChar,
+				{ char: '玲', pinyin: 'líng' } as PoemChar,
+				{ char: '珑', pinyin: 'lóng' } as PoemChar
+			],
+			punct: '，'
+		} as PoemLine,
+		{
+			chars: [
+				{ char: '业', pinyin: 'yè' } as PoemChar,
+				{ char: '业', pinyin: 'yè' } as PoemChar,
+				{ char: '罪', pinyin: 'zuì' } as PoemChar,
+				{ char: '火', pinyin: 'huǒ' } as PoemChar,
+				{ char: '炼', pinyin: 'liàn' } as PoemChar,
+				{ char: '金', pinyin: 'jīn' } as PoemChar,
+				{ char: '身', pinyin: 'shēn' } as PoemChar
+			],
+			punct: '。'
+		} as PoemLine,
+		{
+			chars: [
+				{ char: '三', pinyin: 'sān' } as PoemChar,
+				{ char: '生', pinyin: 'shēng' } as PoemChar,
+				{ char: '长', pinyin: 'cháng' } as PoemChar,
+				{ char: '有', pinyin: 'yǒu' } as PoemChar,
+				{ char: '心', pinyin: 'xīn' } as PoemChar,
+				{ char: '虚', pinyin: 'xū' } as PoemChar,
+				{ char: '节', pinyin: 'jié' } as PoemChar
+			],
+			punct: '，'
+		} as PoemLine,
+		{
+			chars: [
+				{ char: '六', pinyin: 'liù' } as PoemChar,
+				{ char: '道', pinyin: 'dào' } as PoemChar,
+				{ char: '依', pinyin: 'yī' } as PoemChar,
+				{ char: '旧', pinyin: 'jiù' } as PoemChar,
+				{ char: '意', pinyin: 'yì' } as PoemChar,
+				{ char: '昆', pinyin: 'kūn' } as PoemChar,
+				{ char: '仑', pinyin: 'lún' } as PoemChar
+			],
+			punct: '。'
+		} as PoemLine,
+		{
+			chars: [
+				{ char: '自', pinyin: 'zì' } as PoemChar,
+				{ char: '有', pinyin: 'yǒu' } as PoemChar,
+				{ char: '傲', pinyin: 'ào' } as PoemChar,
+				{ char: '雪', pinyin: 'xuě' } as PoemChar,
+				{ char: '寒', pinyin: 'hán' } as PoemChar,
+				{ char: '梅', pinyin: 'méi' } as PoemChar,
+				{ char: '意', pinyin: 'yì' } as PoemChar
+			],
+			punct: '，'
+		} as PoemLine,
+		{
+			chars: [
+				{ char: '何', pinyin: 'hé' } as PoemChar,
+				{ char: '惧', pinyin: 'jù' } as PoemChar,
+				{ char: '风', pinyin: 'fēng' } as PoemChar,
+				{ char: '雷', pinyin: 'léi' } as PoemChar,
+				{ char: '与', pinyin: 'yǔ' } as PoemChar,
+				{ char: '天', pinyin: 'tiān' } as PoemChar,
+				{ char: '争', pinyin: 'zhēng' } as PoemChar
+			],
+			punct: '。'
+		} as PoemLine,
+		{
+			chars: [
+				{ char: '步', pinyin: 'bù' } as PoemChar,
+				{ char: '履', pinyin: 'lǚ' } as PoemChar,
+				{ char: '铿', pinyin: 'kēng' } as PoemChar,
+				{ char: '锵', pinyin: 'qiāng' } as PoemChar,
+				{ char: '竞', pinyin: 'jìng' } as PoemChar,
+				{ char: '逐', pinyin: 'zhú' } as PoemChar,
+				{ char: '上', pinyin: 'shàng' } as PoemChar
+			],
+			punct: '，'
+		} as PoemLine,
+		{
+			chars: [
+				{ char: '无', pinyin: 'wú' } as PoemChar,
+				{ char: '惧', pinyin: 'jù' } as PoemChar,
+				{ char: '枷', pinyin: 'jiā' } as PoemChar,
+				{ char: '锁', pinyin: 'suǒ' } as PoemChar,
+				{ char: '紧', pinyin: 'jǐn' } as PoemChar,
+				{ char: '缠', pinyin: 'chán' } as PoemChar,
+				{ char: '身', pinyin: 'shēn' } as PoemChar
+			],
+			punct: '。'
+		} as PoemLine,
+		{
+			chars: [
+				{ char: '今', pinyin: 'jīn' } as PoemChar,
+				{ char: '日', pinyin: 'rì' } as PoemChar,
+				{ char: '登', pinyin: 'dēng' } as PoemChar,
+				{ char: '临', pinyin: 'lín' } as PoemChar,
+				{ char: '太', pinyin: 'tài' } as PoemChar,
+				{ char: '山', pinyin: 'shān' } as PoemChar,
+				{ char: '顶', pinyin: 'dǐng' } as PoemChar
+			],
+			punct: '，'
+		} as PoemLine,
+		{
+			chars: [
+				{ char: '身', pinyin: 'shēn' } as PoemChar,
+				{ char: '旁', pinyin: 'páng' } as PoemChar,
+				{ char: '早', pinyin: 'zǎo' } as PoemChar,
+				{ char: '已', pinyin: 'yǐ' } as PoemChar,
+				{ char: '无', pinyin: 'wú' } as PoemChar,
+				{ char: '一', pinyin: 'yī' } as PoemChar,
+				{ char: '人', pinyin: 'rén' } as PoemChar
+			],
+			punct: '。'
+		} as PoemLine,
+		{
+			chars: [
+				{ char: '魑', pinyin: 'chī' } as PoemChar,
+				{ char: '魅', pinyin: 'mèi' } as PoemChar,
+				{ char: '魍', pinyin: 'wǎng' } as PoemChar,
+				{ char: '魉', pinyin: 'liǎng' } as PoemChar,
+				{ char: '齐', pinyin: 'qí' } as PoemChar,
+				{ char: '登', pinyin: 'dēng' } as PoemChar,
+				{ char: '临', pinyin: 'lín' } as PoemChar
+			],
+			punct: '，'
+		} as PoemLine,
+		{
+			chars: [
+				{ char: '为', pinyin: 'wéi' } as PoemChar,
+				{ char: '鬼', pinyin: 'guǐ' } as PoemChar,
+				{ char: '为', pinyin: 'wéi' } as PoemChar,
+				{ char: '蜮', pinyin: 'yù' } as PoemChar,
+				{ char: '逞', pinyin: 'chěng' } as PoemChar,
+				{ char: '凶', pinyin: 'xiōng' } as PoemChar,
+				{ char: '威', pinyin: 'wēi' } as PoemChar
+			],
+			punct: '。'
+		} as PoemLine,
+		{
+			chars: [
+				{ char: '挺', pinyin: 'tǐng' } as PoemChar,
+				{ char: '然', pinyin: 'rán' } as PoemChar,
+				{ char: '相', pinyin: 'xiāng' } as PoemChar,
+				{ char: '斗', pinyin: 'dòu' } as PoemChar,
+				{ char: '一', pinyin: 'yī' } as PoemChar,
+				{ char: '千', pinyin: 'qiān' } as PoemChar,
+				{ char: '场', pinyin: 'chǎng' } as PoemChar
+			],
+			punct: '，'
+		} as PoemLine,
+		{
+			chars: [
+				{ char: '轮', pinyin: 'lún' } as PoemChar,
+				{ char: '回', pinyin: 'huí' } as PoemChar,
+				{ char: '路', pinyin: 'lù' } as PoemChar,
+				{ char: '上', pinyin: 'shàng' } as PoemChar,
+				{ char: '是', pinyin: 'shì' } as PoemChar,
+				{ char: '初', pinyin: 'chū' } as PoemChar,
+				{ char: '心', pinyin: 'xīn' } as PoemChar
+			],
+			punct: '。'
+		} as PoemLine
+	])
+
+	/** 悬浮导航项（图标尺寸对应 Figma：首页/我的 16px，书架 20px） */
+	const navItems = ref<BottomNavItem[]>([
+		{
+			key: 'home',
+			text: '首页',
+			icon: '/static/icons/home.svg',
+			iconActive: '/static/icons/home-active.svg',
+			iconWidth: 31,
+			iconHeight: 31
+		} as BottomNavItem,
+		{
+			key: 'bookshelf',
+			text: '书架',
+			icon: '/static/icons/bookshelf.svg',
+			iconActive: '/static/icons/bookshelf-active.svg',
+			iconWidth: 38,
+			iconHeight: 38
+		} as BottomNavItem,
+		{
+			key: 'mine',
+			text: '我的',
+			icon: '/static/icons/mine.svg',
+			iconActive: '/static/icons/mine-active.svg',
+			iconWidth: 31,
+			iconHeight: 31
+		} as BottomNavItem
+	])
+
+	const navActive = ref(0)
+
+	/** 顶部留白：设计稿 48px 含状态栏，优先取系统状态栏高度（Web 端回退 48px） */
+	const topInset = ref(48)
+
+	onLoad(() => {
+		const win = uni.getWindowInfo()
+		let top = 48
+		if (win.statusBarHeight > 0) {
+			top = win.statusBarHeight + 1
+		}
+		// #ifdef MP-WEIXIN
+		// 小程序端避开右上角胶囊按钮（胶囊规格：高 32px、top = 状态栏 + 4~8px，
+		// 取状态栏 + 48 保证卡片顶部与胶囊底留 8~12px 间距）
+		if (win.statusBarHeight > 0) {
+			top = win.statusBarHeight + 48
+		}
+		// #endif
+		topInset.value = top
+	})
+
+	/** 行间距：联内行 12px，联首行 20px（首行无间距） */
+	function lineClass(index: number) : string {
+		if (index === 0) {
+			return ''
+		}
+		return index % 2 === 1 ? 'poem-line-gap-inner' : 'poem-line-gap-outer'
+	}
+
+	function onNavChange(index: number) : void {
+		if (index === 1) {
+			// 跳转书架页（阅读子目录），首页保持"首页"激活态
+			uni.navigateTo({
+				url: '/pages/reading/bookshelf'
+			})
+			return
+		}
+		navActive.value = index
+	}
 </script>
 
 <style>
-	.logo {
-		height: 100px;
-		width: 100px;
-		margin: 100px auto 25px auto;
+	.page {
+		flex: 1;
+		background-color: #f4f4f2;
 	}
 
-	.title {
-		font-size: 18px;
-		color: #8f8f94;
-		text-align: center;
+	.scroll {
+		flex: 1;
+	}
+
+	/* 主内容容器（Figma: 左右边距 16px；底部预留悬浮导航区，滚动到底时卡片与导航保持 24px 间距） */
+	.main {
+		padding-left: 31rpx;
+		padding-right: 31rpx;
+		padding-bottom: 196rpx;
+		flex-direction: column;
+		align-items: center;
+	}
+
+	/* 诗文卡片（Figma: 白底、圆角 28px、内边距 24x16、阴影 0 4 24 @3%） */
+	.poem-card {
+		width: 688rpx;
+		flex-direction: column;
+		align-items: center;
+		padding: 46rpx 31rpx;
+		background-color: #ffffff;
+		border-radius: 54rpx;
+		box-shadow: 0rpx 8rpx 46rpx rgba(0, 0, 0, 0.03);
+	}
+
+	/* 诗文主体（Figma: 上下内边距 8px） */
+	.poem-body {
+		flex-direction: column;
+		align-items: center;
+		padding: 15rpx 0;
+	}
+
+	/* 诗行：7 字单元 + 标点，字间 8px，整体居中 */
+	.poem-line {
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.poem-line-gap-inner {
+		margin-top: 23rpx;
+	}
+
+	.poem-line-gap-outer {
+		margin-top: 38rpx;
+	}
+
+	/* 字单元（Figma: 28px 宽 = 拼音区 14px + 汉字区 16px；右侧 15rpx 对应字间距 8px） */
+	.poem-unit {
+		width: 54rpx;
+		margin-right: 15rpx;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+	}
+
+	/* 拼音（Figma: 10px/10px 灰 #868685 衬线，上下留白 1.5/2.5px） */
+	.poem-pinyin {
+		font-size: 19rpx;
+		line-height: 19rpx;
+		padding-top: 3rpx;
+		padding-bottom: 5rpx;
+		color: #868685;
+		font-family: 'Songti SC', 'Noto Serif SC', serif;
+	}
+
+	/* 汉字（Figma: 字面 16px 墨黑 #0E0F0C 衬线） */
+	.poem-char {
+		font-size: 33rpx;
+		line-height: 31rpx;
+		color: #0e0f0c;
+		font-family: 'Songti SC', 'Noto Serif SC', serif;
+	}
+
+	/* 行尾标点单元（Figma: 14x19.66px，内容贴底、整体行内居中） */
+	.poem-punct-wrap {
+		width: 27rpx;
+		height: 38rpx;
+		flex-direction: column;
+		align-items: center;
+		justify-content: flex-end;
+		padding-bottom: 4rpx;
+	}
+
+	.poem-punct {
+		font-size: 19rpx;
+		line-height: 19rpx;
+		color: #0e0f0c;
+		font-family: 'Songti SC', 'Noto Serif SC', serif;
+	}
+
+	/* 底部铭文（Figma: 11px/16.5px 灰 #868685，与诗文主体间距 20px） */
+	.inscription {
+		margin-top: 38rpx;
+		font-size: 21rpx;
+		line-height: 33rpx;
+		color: #868685;
+		font-family: 'Songti SC', 'Noto Serif SC', serif;
 	}
 </style>

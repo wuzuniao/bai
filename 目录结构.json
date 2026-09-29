@@ -25,7 +25,43 @@
                 {
                   "name": "index.uvue",
                   "type": "file",
-                  "description": "首页（启动页）"
+                  "description": "首页（启动页，诗文卡片+悬浮导航）"
+                }
+              ]
+            },
+            {
+              "name": "reading",
+              "type": "dir",
+              "description": "阅读子页面目录",
+              "children": [
+                {
+                  "name": "bookshelf.uvue",
+                  "type": "file",
+                  "description": "书架页（搜索导航+阅读统计卡+3×3 书籍网格+悬浮导航）"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "components",
+          "type": "dir",
+          "description": "复用组件目录（PascalCase，目录与文件同名）",
+          "children": [
+            {
+              "name": "BottomNavBar",
+              "type": "dir",
+              "description": "底部悬浮导航栏组件",
+              "children": [
+                {
+                  "name": "BottomNavBar.uvue",
+                  "type": "file",
+                  "description": "悬浮胶囊导航（数据驱动导航项，激活态墨黑胶囊）"
+                },
+                {
+                  "name": "navItem.uts",
+                  "type": "file",
+                  "description": "导航单项数据类型 BottomNavItem"
                 }
               ]
             }
@@ -39,6 +75,78 @@
             {
               "name": "logo.png",
               "type": "file"
+            },
+            {
+              "name": "icons",
+              "type": "dir",
+              "description": "界面图标（SVG）",
+              "children": [
+                {
+                  "name": "home.svg",
+                  "type": "file",
+                  "description": "首页图标（未激活，墨色描边）"
+                },
+                {
+                  "name": "home-active.svg",
+                  "type": "file",
+                  "description": "首页图标（激活，白色描边）"
+                },
+                {
+                  "name": "bookshelf.svg",
+                  "type": "file",
+                  "description": "书架图标（未激活，墨色实心）"
+                },
+                {
+                  "name": "bookshelf-active.svg",
+                  "type": "file",
+                  "description": "书架图标（激活，白色实心）"
+                },
+                {
+                  "name": "mine.svg",
+                  "type": "file",
+                  "description": "我的图标（未激活，墨色描边）"
+                },
+                {
+                  "name": "mine-active.svg",
+                  "type": "file",
+                  "description": "我的图标（激活，白色描边）"
+                },
+                {
+                  "name": "search.svg",
+                  "type": "file",
+                  "description": "搜索图标（墨色描边放大镜）"
+                },
+                {
+                  "name": "plus-small.svg",
+                  "type": "file",
+                  "description": "添加图标（墨色加号）"
+                },
+                {
+                  "name": "chevron-down.svg",
+                  "type": "file",
+                  "description": "下拉箭头（墨色 V 形）"
+                },
+                {
+                  "name": "plus-large.svg",
+                  "type": "file",
+                  "description": "添加格大加号（中性灰描边）"
+                },
+                {
+                  "name": "close.svg",
+                  "type": "file",
+                  "description": "搜索栏清空按钮（灰色 ✕）"
+                },
+                {
+                  "name": "check.svg",
+                  "type": "file",
+                  "description": "排序菜单选中对勾（蓝色实心）"
+                },
+                {
+                  "name": "search-gray.svg",
+                  "type": "file",
+                  "description": "搜索栏内部灰色放大镜"
+                }
+              ]
             }
           ]
         },

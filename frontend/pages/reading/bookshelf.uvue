@@ -1,0 +1,699 @@
+<template>
+	<view class="page">
+		<scroll-view class="scroll" direction="vertical" :show-scrollbar="false">
+			<!-- 顶部导航：书架标题（含排序下拉）+ 内联搜索栏 + 搜索/添加按钮 -->
+			<view class="nav" :style="'padding-top:' + (statusBarInset + 14) + 'px'">
+				<view class="nav-inner">
+					<!-- 书架标题（Stitch: 点击展开排序菜单，箭头旋转 180°） -->
+					<view class="nav-title-btn" @click="toggleMenu">
+						<text class="nav-title">书架</text>
+						<image class="nav-chevron" :class="menuOpen ? 'nav-chevron-open' : ''" src="/static/icons/chevron-down.svg" />
+					</view>
+					<!-- 内联搜索栏（Stitch: 点搜索图标展开于标题右侧，含清空与取消） -->
+					<view v-if="searchOpen" class="header-search">
+						<view class="search-field" :class="searchFocused ? 'search-field-focus' : ''">
+							<image class="search-field-icon" src="/static/icons/search-gray.svg" />
+							<input
+								class="search-input"
+								v-model="searchText"
+								placeholder="搜索书名..."
+								placeholder-style="color:#868685"
+								:focus="true"
+								@focus="onSearchFocus"
+								@blur="onSearchBlur"
+							/>
+							<image v-if="searchText.length > 0" class="search-clear" src="/static/icons/close.svg" @click="clearSearch" />
+						</view>
+						<text class="search-cancel" @click="closeSearch">取消</text>
+					</view>
+					<!-- 右侧操作按钮（Stitch: 搜索书籍 / 添加与更多） -->
+					<view class="nav-actions">
+						<view v-if="!searchOpen" class="nav-action-btn" @click="openSearch">
+							<image class="nav-action-search" src="/static/icons/search.svg" />
+						</view>
+						<view class="nav-action-btn nav-action-btn-second" @click="togglePlusMenu">
+							<image class="nav-action-plus" src="/static/icons/plus-small.svg" />
+						</view>
+					</view>
+				</view>
+			</view>
+			<!-- 主内容 -->
+			<view class="main">
+				<!-- 阅读统计卡 -->
+				<view class="stats-card">
+					<view class="stats-left">
+						<view class="stats-num-row">
+							<text class="stats-num">11</text>
+							<text class="stats-unit">分钟</text>
+						</view>
+						<text class="stats-label">今日已读</text>
+					</view>
+					<view class="stats-pill">
+						<text class="stats-pill-text">再读 5 分钟</text>
+						<view class="stats-pill-dot"></view>
+						<text class="stats-pill-coin">领 1 铜币</text>
+					</view>
+				</view>
+				<!-- 书架网格（3 列） -->
+				<view class="shelf-grid">
+					<view v-for="(row, ri) in shelfRows" :key="ri" class="shelf-row" :class="ri > 0 ? 'shelf-row-gap' : ''">
+						<view v-for="(book, bi) in row" :key="bi" class="book-item">
+							<!-- 图封面：徽章 + 底部书名/作者 -->
+							<view v-if="book.kind === 'photo'" class="cover-photo" :class="'cover-photo-' + book.key">
+								<view class="cover-badge" :class="book.badgeKind === 'blue' ? 'cover-badge-blue' : 'cover-badge-orange'">
+									<text class="cover-badge-text">{{ book.badge }}</text>
+								</view>
+								<view class="cover-info">
+									<text class="cover-title">{{ book.title }}</text>
+									<text class="cover-author">{{ book.author }}</text>
+								</view>
+							</view>
+							<!-- 白封面：左上书名 -->
+							<view v-else-if="book.kind === 'plain'" class="cover-plain">
+								<text class="cover-plain-title">{{ book.title }}</text>
+							</view>
+							<!-- 添加格 -->
+							<view v-else class="cover-add">
+								<image class="cover-add-icon" src="/static/icons/plus-large.svg" />
+							</view>
+							<!-- 书名与阅读进度（添加格不显示） -->
+							<view v-if="book.kind !== 'add'" class="book-text">
+								<text class="book-title">{{ book.title }}</text>
+								<text class="book-meta">{{ book.meta }}</text>
+							</view>
+						</view>
+					</view>
+				</view>
+			</view>
+		</scroll-view>
+
+		<!-- 浮层遮罩：菜单打开时覆盖全屏，点击外部关闭（Stitch: 全局点击 dismiss） -->
+		<view v-if="menuOpen || plusMenuOpen" class="menu-mask" @click="closeMenus" />
+		<!-- 排序下拉菜单（置于页面根、scroll-view 外，避免滚动容器裁剪；悬浮于标题下方 8px） -->
+		<view v-if="menuOpen" class="shelf-menu" :style="'top:' + (statusBarInset + 62) + 'px'">
+			<view
+				v-for="(opt, oi) in sortOptions"
+				:key="oi"
+				class="menu-item"
+				@click="onSelectSort(opt)"
+			>
+				<text class="menu-item-text" :class="currentSort === opt ? 'menu-item-text-active' : ''">{{ opt }}</text>
+				<image v-if="currentSort === opt" class="menu-check" src="/static/icons/check.svg" />
+			</view>
+		</view>
+		<!-- 加号浮动菜单（Stitch: 导入书籍 / 编辑书架，右对齐悬浮） -->
+		<view v-if="plusMenuOpen" class="plus-menu" :style="'top:' + (statusBarInset + 62) + 'px'">
+			<view class="plus-menu-item" @click="onPlusAction">
+				<text class="plus-menu-item-text">导入书籍</text>
+			</view>
+			<view class="plus-menu-item" @click="onPlusAction">
+				<text class="plus-menu-item-text">编辑书架</text>
+			</view>
+		</view>
+
+		<BottomNavBar :items="navItems" :model-value="navActive" @change="onNavChange" @click="closeMenus" />
+	</view>
+</template>
+
+<script setup lang="uts">
+	import BottomNavBar from '@/components/BottomNavBar/BottomNavBar.uvue'
+	import { BottomNavItem } from '@/components/BottomNavBar/navItem.uts'
+
+	type BookItem = {
+		/** 唯一标识（同时用于图封面渐变样式类名） */
+		key: string
+		/** 封面类型：plain 白封面 / photo 图封面 / add 添加格 */
+		kind: string
+		title: string
+		/** 阅读进度或"未读" */
+		meta: string
+		/** 图封面左上角徽章文字 */
+		badge: string
+		/** 徽章配色：blue 推荐 / orange 精选 */
+		badgeKind: string
+		/** 图封面底部作者署名 */
+		author: string
+	}
+
+	/** 书架内容（3 行 × 3 列，取自设计稿示例数据） */
+	const shelfRows = ref<BookItem[][]>([
+		[
+			{ key: 'xingyuan', kind: 'plain', title: '星渊行者', meta: '第 12 章 / 共 1420 章', badge: '', badgeKind: '', author: '' } as BookItem,
+			{ key: 'qinglan', kind: 'plain', title: '青岚志', meta: '第 128 章 / 共 128 章', badge: '', badgeKind: '', author: '' } as BookItem,
+			{ key: 'fusheng', kind: 'plain', title: '浮生微澜', meta: '未读', badge: '', badgeKind: '', author: '' } as BookItem
+		],
+		[
+			{ key: 'wanxiang', kind: 'plain', title: '万象织梦', meta: '第 42 章 / 共 5621 章', badge: '', badgeKind: '', author: '' } as BookItem,
+			{ key: 'jiuyu', kind: 'plain', title: '九域风雷', meta: '第 1 章 / 共 3210 章', badge: '', badgeKind: '', author: '' } as BookItem,
+			{ key: 'muxue', kind: 'plain', title: '暮雪归舟', meta: '未读', badge: '', badgeKind: '', author: '' } as BookItem
+		],
+		[
+			{ key: 'shanyu', kind: 'photo', title: '山海余晖', meta: '第 88 章 / 共 620 章', badge: '推荐', badgeKind: 'blue', author: '无足鸟 著' } as BookItem,
+			{ key: 'youming', kind: 'photo', title: '幽冥幻旅', meta: '未读', badge: '精选', badgeKind: 'orange', author: '蜜蜂 著' } as BookItem,
+			{ key: 'add', kind: 'add', title: '', meta: '', badge: '', badgeKind: '', author: '' } as BookItem
+		]
+	])
+
+	/** 悬浮导航项（与首页一致，当前页激活"书架"） */
+	const navItems = ref<BottomNavItem[]>([
+		{
+			key: 'home',
+			text: '首页',
+			icon: '/static/icons/home.svg',
+			iconActive: '/static/icons/home-active.svg',
+			iconWidth: 31,
+			iconHeight: 31
+		} as BottomNavItem,
+		{
+			key: 'bookshelf',
+			text: '书架',
+			icon: '/static/icons/bookshelf.svg',
+			iconActive: '/static/icons/bookshelf-active.svg',
+			iconWidth: 38,
+			iconHeight: 38
+		} as BottomNavItem,
+		{
+			key: 'mine',
+			text: '我的',
+			icon: '/static/icons/mine.svg',
+			iconActive: '/static/icons/mine-active.svg',
+			iconWidth: 31,
+			iconHeight: 31
+		} as BottomNavItem
+	])
+
+	const navActive = ref(1)
+
+	/** 状态栏高度（Web 端为 0，顶部导航自行下移） */
+	const statusBarInset = ref(0)
+
+	/** 排序下拉菜单（Stitch: 手动顺序/最近阅读/添加时间，默认手动顺序） */
+	const sortOptions = ref<string[]>(['手动顺序', '最近阅读', '添加时间'])
+	const currentSort = ref('手动顺序')
+	const menuOpen = ref(false)
+	const plusMenuOpen = ref(false)
+
+	/** 内联搜索栏状态（Stitch: 打开时隐藏搜索图标，输入显示清空钮） */
+	const searchOpen = ref(false)
+	const searchText = ref('')
+	const searchFocused = ref(false)
+
+	onLoad(() => {
+		const win = uni.getWindowInfo()
+		let inset = win.statusBarHeight
+		// #ifdef MP-WEIXIN
+		// 小程序端下移避让右上角胶囊按钮：导航内容区最终位于 状态栏 + 48px（胶囊底约在状态栏 + 40px）
+		if (win.statusBarHeight > 0) {
+			inset = win.statusBarHeight + 34
+		}
+		// #endif
+		statusBarInset.value = inset
+	})
+
+	/** 关闭全部浮层（点击遮罩或底部导航触发） */
+	function closeMenus() : void {
+		menuOpen.value = false
+		plusMenuOpen.value = false
+	}
+
+	function toggleMenu() : void {
+		menuOpen.value = !menuOpen.value
+		plusMenuOpen.value = false
+	}
+
+	function onSelectSort(opt: string) : void {
+		currentSort.value = opt
+		menuOpen.value = false
+	}
+
+	function togglePlusMenu() : void {
+		plusMenuOpen.value = !plusMenuOpen.value
+		menuOpen.value = false
+	}
+
+	/** Stitch: 点击加号菜单项仅收起菜单 */
+	function onPlusAction() : void {
+		plusMenuOpen.value = false
+	}
+
+	function openSearch() : void {
+		searchOpen.value = true
+		closeMenus()
+	}
+
+	function closeSearch() : void {
+		searchOpen.value = false
+		searchText.value = ''
+		searchFocused.value = false
+	}
+
+	function clearSearch() : void {
+		searchText.value = ''
+	}
+
+	function onSearchFocus() : void {
+		searchFocused.value = true
+	}
+
+	function onSearchBlur() : void {
+		searchFocused.value = false
+	}
+
+	function onNavChange(index: number) : void {
+		if (index === 0) {
+			uni.navigateBack()
+			return
+		}
+		navActive.value = index
+	}
+</script>
+
+<style>
+	.page {
+		flex: 1;
+		position: relative;
+		background-color: #f4f4f2;
+	}
+
+	.scroll {
+		flex: 1;
+	}
+
+	/* 顶部导航（Stitch: 左右内边距 20px，上下 14px；顶部动态避让状态栏/小程序胶囊） */
+	.nav {
+		padding-left: 38rpx;
+		padding-right: 38rpx;
+		padding-bottom: 27rpx;
+	}
+
+	/* 高度固定 40px（设计值），浮层菜单 top 由此精确推导（状态栏 + 14 + 40 + 8） */
+	.nav-inner {
+		height: 40px;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+	}
+
+	/* 标题按钮（Stitch: "书架" 20px/900 + 16px 实心箭头，间距 6px） */
+	.nav-title-btn {
+		flex-shrink: 0;
+		flex-direction: row;
+		align-items: center;
+	}
+
+	.nav-title {
+		font-size: 38rpx;
+		line-height: 54rpx;
+		font-weight: 900;
+		color: #0e0f0c;
+	}
+
+	.nav-chevron {
+		margin-left: 12rpx;
+		width: 31rpx;
+		height: 31rpx;
+	}
+
+	.nav-chevron-open {
+		transform: rotate(180deg);
+	}
+
+	/* 浮层遮罩：全屏透明，点击外部关闭菜单 */
+	.menu-mask {
+		position: fixed;
+		left: 0;
+		right: 0;
+		top: 0;
+		bottom: 0;
+		z-index: 40;
+	}
+
+	/* 排序下拉菜单（Stitch: 宽 144px 白底 圆角 16px 边框黑 8% 阴影 xl 内边距 6px；置于页面根，top 由内联样式按状态栏动态计算） */
+	.shelf-menu {
+		position: absolute;
+		left: 38rpx;
+		width: 277rpx;
+		padding: 12rpx;
+		background-color: #ffffff;
+		border-radius: 31rpx;
+		border: 1px solid rgba(0, 0, 0, 0.08);
+		box-shadow: 0rpx 20rpx 40rpx rgba(0, 0, 0, 0.1);
+		z-index: 50;
+	}
+
+	.menu-item {
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		padding: 15rpx 23rpx;
+		border-radius: 23rpx;
+	}
+
+	.menu-item-text {
+		font-size: 27rpx;
+		font-weight: 500;
+		color: #868685;
+	}
+
+	.menu-item-text-active {
+		font-weight: 700;
+		color: #0e0f0c;
+	}
+
+	.menu-check {
+		width: 31rpx;
+		height: 31rpx;
+	}
+
+	/* 加号浮动菜单（Stitch: 宽 128px 白底 圆角 16px 边框 #E9E9E6 阴影 0 12 32 @12%，右对齐悬浮） */
+	.plus-menu {
+		position: absolute;
+		right: 38rpx;
+		width: 246rpx;
+		padding: 12rpx;
+		background-color: #ffffff;
+		border-radius: 31rpx;
+		border: 1px solid #e9e9e6;
+		box-shadow: 0rpx 23rpx 62rpx rgba(14, 15, 12, 0.12);
+		z-index: 50;
+	}
+
+	.plus-menu-item {
+		padding: 19rpx 27rpx;
+		border-radius: 23rpx;
+	}
+
+	.plus-menu-item-text {
+		font-size: 27rpx;
+		font-weight: 500;
+		color: #0e0f0c;
+	}
+
+	/* 内联搜索栏（Stitch: 占据标题右侧空间，白胶囊 + 清空 + 取消） */
+	.header-search {
+		flex: 1;
+		margin-left: 15rpx;
+		flex-direction: row;
+		align-items: center;
+	}
+
+	.search-field {
+		flex: 1;
+		flex-direction: row;
+		align-items: center;
+		padding: 8rpx 23rpx;
+		background-color: #ffffff;
+		border: 1px solid #e9e9e6;
+		border-radius: 9999px;
+		box-shadow: 0rpx 2rpx 8rpx rgba(0, 0, 0, 0.05);
+	}
+
+	.search-field-focus {
+		border-color: rgba(0, 0, 0, 0.3);
+	}
+
+	.search-field-icon {
+		margin-right: 12rpx;
+		width: 35rpx;
+		height: 35rpx;
+	}
+
+	.search-input {
+		flex: 1;
+		height: 34rpx;
+		font-size: 23rpx;
+		color: #0e0f0c;
+		background-color: transparent;
+	}
+
+	.search-clear {
+		margin-left: 8rpx;
+		width: 31rpx;
+		height: 31rpx;
+	}
+
+	.search-cancel {
+		margin-left: 8rpx;
+		padding: 8rpx 12rpx;
+		font-size: 23rpx;
+		font-weight: 500;
+		color: #454745;
+	}
+
+	/* 右侧圆形操作按钮（Stitch: 40x40，间距 4px） */
+	.nav-actions {
+		flex-direction: row;
+		align-items: center;
+		margin-left: 15rpx;
+	}
+
+	.nav-action-btn {
+		width: 77rpx;
+		height: 77rpx;
+		border-radius: 9999px;
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.nav-action-btn-second {
+		margin-left: 8rpx;
+	}
+
+	.nav-action-search {
+		width: 34rpx;
+		height: 34rpx;
+	}
+
+	.nav-action-plus {
+		width: 28rpx;
+		height: 28rpx;
+	}
+
+	/* 主内容（Stitch: 左右内边距 20px，底部预留悬浮导航区 128px） */
+	.main {
+		padding-left: 38rpx;
+		padding-right: 38rpx;
+		padding-bottom: 246rpx;
+		flex-direction: column;
+	}
+
+	/* 阅读统计卡（Stitch: 白底 圆角 20px 边框黑 4% 内边距 16x20 阴影 sm） */
+	.stats-card {
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		padding: 31rpx 38rpx;
+		background-color: #ffffff;
+		border-radius: 38rpx;
+		border: 1px solid rgba(0, 0, 0, 0.04);
+		box-shadow: 0rpx 2rpx 4rpx rgba(0, 0, 0, 0.05);
+	}
+
+	.stats-left {
+		flex-direction: column;
+	}
+
+	/* 阅读时长（Stitch: "11" 24px/900 + "分钟" 12px/600 基线对齐，间距 4px） */
+	.stats-num-row {
+		flex-direction: row;
+		align-items: flex-end;
+	}
+
+	.stats-num {
+		font-size: 46rpx;
+		line-height: 46rpx;
+		font-weight: 900;
+		color: #0e0f0c;
+	}
+
+	.stats-unit {
+		margin-left: 8rpx;
+		padding-bottom: 2rpx;
+		font-size: 23rpx;
+		line-height: 23rpx;
+		font-weight: 600;
+		color: #0e0f0c;
+	}
+
+	.stats-label {
+		margin-top: 8rpx;
+		font-size: 19rpx;
+		line-height: 19rpx;
+		font-weight: 500;
+		color: #868685;
+	}
+
+	/* 再读胶囊（Stitch: 背景 #F4F4F2 圆角 pill 边框黑 4% 内边距 6x12 间距 6px） */
+	.stats-pill {
+		flex-direction: row;
+		align-items: center;
+		padding: 12rpx 23rpx;
+		background-color: #f4f4f2;
+		border-radius: 9999px;
+		border: 1px solid rgba(0, 0, 0, 0.04);
+	}
+
+	.stats-pill-text {
+		font-size: 23rpx;
+		line-height: 23rpx;
+		font-weight: 500;
+		color: #0e0f0c;
+	}
+
+	.stats-pill-dot {
+		margin-left: 12rpx;
+		width: 8rpx;
+		height: 8rpx;
+		border-radius: 9999px;
+		background-color: #868685;
+		opacity: 0.5;
+	}
+
+	.stats-pill-coin {
+		margin-left: 12rpx;
+		font-size: 23rpx;
+		line-height: 23rpx;
+		font-weight: 600;
+		color: #e28b00;
+	}
+
+	/* 书架网格（Stitch: 3 列，列间距 14px，行间距 20px，与统计卡间距 24px） */
+	.shelf-grid {
+		margin-top: 46rpx;
+		flex-direction: column;
+	}
+
+	.shelf-row {
+		flex-direction: row;
+		align-items: flex-start;
+		justify-content: space-between;
+	}
+
+	.shelf-row-gap {
+		margin-top: 38rpx;
+	}
+
+	.book-item {
+		width: 206rpx;
+		flex-direction: column;
+	}
+
+	/* 白封面（Stitch: 白底 圆角 20px 边框 1px #E5E0D5 内边距 14px，左上书名 14px/500） */
+	.cover-plain {
+		height: 285rpx;
+		box-sizing: border-box;
+		padding: 27rpx;
+		background-color: #ffffff;
+		border-radius: 38rpx;
+		border: 1px solid #e5e0d5;
+	}
+
+	.cover-plain-title {
+		font-size: 27rpx;
+		line-height: 37rpx;
+		font-weight: 500;
+		letter-spacing: 1rpx;
+		color: #0e0f0c;
+	}
+
+	/* 图封面（Stitch: 圆角 12px；背景渐变底部并入黑色遮罩，承接白色书名/作者） */
+	.cover-photo {
+		height: 285rpx;
+		box-sizing: border-box;
+		position: relative;
+		overflow: hidden;
+		border-radius: 23rpx;
+		flex-direction: column;
+		justify-content: flex-end;
+		padding: 15rpx;
+	}
+
+	/* 封面示意渐变：设计稿封面为示例图片素材，此处以同色调渐变占位（底部并入 Stitch 的黑色渐变遮罩），接入真实数据时替换为 image 封面 */
+	.cover-photo-shanyu {
+		background-image: linear-gradient(180deg, #a9b6b1 0%, #6e7f78 40%, #1c211f 100%);
+	}
+
+	.cover-photo-youming {
+		background-image: linear-gradient(180deg, #40151a 0%, #8c2626 45%, #120a0b 100%);
+	}
+
+	/* 封面徽章（Stitch: 推荐 蓝#2563EB/90% / 精选 橙#E28B00/90%，右下圆角 8px，文字 9px/700 加宽字距） */
+	.cover-badge {
+		position: absolute;
+		left: 0;
+		top: 0;
+		padding: 4rpx 12rpx;
+		border-radius: 0 0 15rpx 0;
+	}
+
+	.cover-badge-blue {
+		background-color: rgba(37, 99, 235, 0.9);
+	}
+
+	.cover-badge-orange {
+		background-color: rgba(226, 139, 0, 0.9);
+	}
+
+	.cover-badge-text {
+		font-size: 17rpx;
+		line-height: 26rpx;
+		font-weight: 700;
+		letter-spacing: 1rpx;
+		color: #ffffff;
+	}
+
+	/* 封面底部信息（Stitch: 内边距 8px 底对齐；书名 14px/900 白、作者 8px 白 70%） */
+	.cover-info {
+		flex-direction: column;
+	}
+
+	.cover-title {
+		font-size: 27rpx;
+		line-height: 38rpx;
+		font-weight: 900;
+		color: #ffffff;
+	}
+
+	.cover-author {
+		font-size: 15rpx;
+		line-height: 23rpx;
+		color: rgba(255, 255, 255, 0.7);
+	}
+
+	/* 添加格（Stitch: 圆角 20px 边框 1px #D2D2CF，中央加号图标） */
+	.cover-add {
+		height: 285rpx;
+		box-sizing: border-box;
+		border-radius: 38rpx;
+		border: 1px solid #d2d2cf;
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.cover-add-icon {
+		width: 48rpx;
+		height: 48rpx;
+	}
+
+	/* 书名与阅读进度（Stitch: 书名 12px/700 与封面间距 8px；进度 10px/500 灰） */
+	.book-text {
+		margin-top: 15rpx;
+		flex-direction: column;
+	}
+
+	.book-title {
+		font-size: 23rpx;
+		line-height: 31rpx;
+		font-weight: 700;
+		color: #0e0f0c;
+	}
+
+	.book-meta {
+		font-size: 19rpx;
+		line-height: 29rpx;
+		font-weight: 500;
+		color: #868685;
+	}
+</style>
