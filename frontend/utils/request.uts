@@ -1,0 +1,153 @@
+/**
+ * 统一请求封装（基于 uni.request，规范见 项目规范.md 3.3）
+ * --------------------------------------------------------------------------
+ * - 当前仅直连 auth 统一认证服务（登录/注册/资料类接口），baseUrl 固定 AUTH_BASE_URL
+ * - 自动附加 Authorization: Bearer <access_token>（本地存储读取）
+ * - 统一解析 code/msg/data 响应结构；错误响应兼容 FastAPI detail 字段
+ * - 401 统一处理：清除本地登录态并跳转登录页
+ */
+import { AUTH_BASE_URL } from './config'
+
+/** 统一响应结构（code 非 0 表示业务错误，msg 面向用户） */
+export type ApiResponse = {
+	code: number
+	msg: string
+	data: UTSJSONObject | null
+}
+
+/** 请求选项 */
+export type RequestOptions = {
+	/** 接口路径（以 / 开头，如 /api/v1/users/login） */
+	url: string
+	/** 请求方法 */
+	method: RequestMethod
+	/** 请求体（无则为 null） */
+	data: UTSJSONObject | null
+	/** 是否附加 Authorization 头 */
+	auth: boolean
+	/** 超时毫秒数 */
+	timeout: number
+}
+
+// 标记是否已触发 401 跳转，防止并发请求重复跳转
+let handling401 = false
+
+/** 清除本地登录态 */
+function clearAuthStorage() : void {
+	try {
+		uni.removeStorageSync('accessToken')
+		uni.removeStorageSync('refreshToken')
+		uni.removeStorageSync('userInfo')
+	} catch (e) {
+		console.warn('清除本地登录态失败', e)
+	}
+}
+
+/** 401 统一处理：清除本地登录态，提示并跳转登录页 */
+function handleUnauthorized() : void {
+	if (handling401) {
+		return
+	}
+	handling401 = true
+	let hadToken = false
+	const stored = uni.getStorageSync('accessToken')
+	if (stored instanceof string && (stored as string).length > 0) {
+		hadToken = true
+	}
+	clearAuthStorage()
+	if (hadToken) {
+		uni.showToast({ title: '登录已过期，请重新登录', icon: 'none' })
+	}
+	setTimeout(() => {
+		uni.reLaunch({
+			url: '/pages/user/login',
+			complete: () => {
+				handling401 = false
+			}
+		})
+	}, hadToken ? 1500 : 0)
+}
+
+/** 读取本地 access_token */
+function getAccessToken() : string {
+	const stored = uni.getStorageSync('accessToken')
+	if (stored instanceof string) {
+		return stored as string
+	}
+	return ''
+}
+
+/**
+ * 从错误响应中提取面向用户的文案
+ * 兼容 auth 服务（FastAPI）的 { detail: string } 结构与业务 { msg: string } 结构
+ */
+function parseErrMsg(raw: UTSJSONObject | null, fallback: string) : string {
+	if (raw == null) {
+		return fallback
+	}
+	const detail = raw.getString('detail')
+	if (detail != null) {
+		return detail
+	}
+	const msg = raw.getString('msg')
+	if (msg != null) {
+		return msg
+	}
+	return fallback
+}
+
+/** 统一请求入口 */
+export function request(options: RequestOptions) : Promise<ApiResponse> {
+	return new Promise<ApiResponse>((resolve, reject) => {
+		// 构造请求头：默认 Content-Type，附加 JWT Authorization 头（若存在 token）
+		const header = {} as UTSJSONObject
+		header['Content-Type'] = 'application/json'
+		if (options.auth) {
+			const token = getAccessToken()
+			if (token.length > 0) {
+				header['Authorization'] = 'Bearer ' + token
+			}
+		}
+		uni.request({
+			url: AUTH_BASE_URL + options.url,
+			method: options.method,
+			data: options.data,
+			header: header,
+			timeout: options.timeout,
+			success: (res) => {
+				// 401 未授权：token 失效或缺失，统一清态跳登录
+				if (res.statusCode === 401) {
+					handleUnauthorized()
+					reject(new Error('登录已过期，请重新登录'))
+					return
+				}
+				// 429 限流：仅提示，不跳转登录页
+				if (res.statusCode === 429) {
+					reject(new Error(parseErrMsg(res.data, '操作过于频繁，请稍后再试')))
+					return
+				}
+				if (res.statusCode >= 200 && res.statusCode < 300) {
+					if (res.data == null) {
+						resolve({ code: 0, msg: 'success', data: null } as ApiResponse)
+						return
+					}
+					try {
+						const body = JSON.parse<ApiResponse>(JSON.stringify(res.data))
+						if (body != null) {
+							resolve(body)
+							return
+						}
+					} catch (e) {
+						// 响应体非预期结构，走通用失败
+					}
+					reject(new Error('响应解析失败，请稍后重试'))
+					return
+				}
+				reject(new Error(parseErrMsg(res.data, '请求失败')))
+			},
+			fail: (_err) => {
+				reject(new Error('网络请求失败，请检查网络后重试'))
+			}
+		})
+	})
+}

@@ -1,0 +1,47 @@
+<template>
+	<view class="back-button" :style="'top:' + topPx + 'px'" @click="handleClick">
+		<image class="back-button__icon" src="/static/icons/arrow-back.svg" mode="aspectFit" />
+	</view>
+</template>
+
+<script setup lang="uts">
+	/**
+	 * BackButton —— 次级页面返回按钮组件
+	 * 全项目唯一返回图标 arrow-back.svg（墨色），定位规则：状态栏高度驱动，
+	 * 左上角绝对定位。页面栈为空（如分享直达）时回退首页。
+	 */
+
+	// 距顶部偏移（px）：取系统状态栏高度，Web 端无状态栏回退 44
+	const topPx = ref(44)
+	const win = uni.getWindowInfo()
+	if (win.statusBarHeight > 0) {
+		topPx.value = win.statusBarHeight
+	}
+
+	function handleClick() : void {
+		const pages = getCurrentPages()
+		if (pages.length > 1) {
+			uni.navigateBack({ delta: 1 })
+		} else {
+			uni.reLaunch({ url: '/pages/index/index' })
+		}
+	}
+</script>
+
+<style lang="scss">
+	.back-button {
+		position: absolute;
+		left: 48rpx;
+		z-index: 10;
+		width: 80rpx;
+		height: 80rpx;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.back-button__icon {
+		width: 80rpx;
+		height: 80rpx;
+	}
+</style>

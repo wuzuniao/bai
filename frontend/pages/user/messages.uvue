@@ -1,0 +1,70 @@
+<template>
+	<view class="messages-page">
+		<!-- 顶部返回按钮（次级页面统一返回组件） -->
+		<BackButton />
+
+		<scroll-view class="messages-page__scroll" direction="vertical" :show-scrollbar="false">
+			<view class="messages-page__canvas" :style="'padding-top:' + mainTop + 'px'">
+				<PageHeader title="站内信" desc="查看您的提醒消息，点击未读消息可标记为已读。" />
+
+				<!-- 消息卡片列表（消息能力依赖本项目后端，暂未交付，当前展示空态） -->
+				<view class="messages-page__list">
+					<view class="messages-page__status">
+						<text class="messages-page__status-text">暂无站内信消息</text>
+					</view>
+				</view>
+			</view>
+		</scroll-view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import BackButton from '@/components/BackButton/BackButton.uvue'
+	import PageHeader from '@/components/PageHeader/PageHeader.uvue'
+
+	/** 顶部留白：返回按钮（状态栏高度 + 40px）之下再留 12px */
+	const mainTop = ref(96)
+	const win = uni.getWindowInfo()
+	if (win.statusBarHeight > 0) {
+		mainTop.value = win.statusBarHeight + 52
+	}
+</script>
+
+<style lang="scss">
+	.messages-page {
+		flex: 1;
+		position: relative;
+		background-color: $bai-canvas-soft;
+	}
+
+	.messages-page__scroll {
+		flex: 1;
+	}
+
+	.messages-page__canvas {
+		padding-left: 48rpx;
+		padding-right: 48rpx;
+		padding-bottom: 64rpx;
+		box-sizing: border-box;
+		flex-direction: column;
+	}
+
+	/* ===== 消息卡片列表 ===== */
+	.messages-page__list {
+		margin-top: 64rpx;
+		flex-direction: column;
+	}
+
+	/* ===== 状态提示（空数据） ===== */
+	.messages-page__status {
+		padding: 64rpx 32rpx;
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.messages-page__status-text {
+		color: $bai-mute;
+		font-size: 28rpx;
+	}
+</style>

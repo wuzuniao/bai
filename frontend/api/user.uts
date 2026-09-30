@@ -1,0 +1,159 @@
+/**
+ * 用户模块接口（全部直连 auth 统一认证服务，不经本项目后端转发）
+ * --------------------------------------------------------------------------
+ * - 登录/注册/重置密码/绑定邮箱成功响应的 data 含 OIDC 令牌三件套：
+ *   access_token / refresh_token / expires_in / token_type，由 store.setUser 落地
+ * - 需登录态的接口（Authorization 由 request 自动附加）：user_id 由 JWT 提供
+ */
+import { request, ApiResponse, RequestOptions } from '@/utils/request.uts'
+import { AUTH_CLIENT_ID } from '@/utils/config.uts'
+
+/** 构造请求选项（默认带认证头、10s 超时） */
+function opts(url: string, method: RequestMethod, data: UTSJSONObject | null, auth: boolean = true) : RequestOptions {
+	return {
+		url: url,
+		method: method,
+		data: data,
+		auth: auth,
+		timeout: 10000
+	} as RequestOptions
+}
+
+/** 发送注册验证码 */
+export function sendRegisterCode(email: string) : Promise<ApiResponse> {
+	const data = {} as UTSJSONObject
+	data['email'] = email
+	return request(opts('/api/v1/users/send-code', 'POST', data, false))
+}
+
+/** 用户注册 */
+export function registerUser(username: string, password: string, email: string, code: string) : Promise<ApiResponse> {
+	const data = {} as UTSJSONObject
+	data['username'] = username
+	data['password'] = password
+	data['email'] = email
+	data['code'] = code
+	data['client_id'] = AUTH_CLIENT_ID
+	return request(opts('/api/v1/users/register', 'POST', data, false))
+}
+
+/** 用户登录（username 支持用户名或邮箱） */
+export function loginUser(username: string, password: string) : Promise<ApiResponse> {
+	const data = {} as UTSJSONObject
+	data['username'] = username
+	data['password'] = password
+	data['client_id'] = AUTH_CLIENT_ID
+	return request(opts('/api/v1/users/login', 'POST', data, false))
+}
+
+/** 发送密码找回验证码 */
+export function sendResetCode(email: string) : Promise<ApiResponse> {
+	const data = {} as UTSJSONObject
+	data['email'] = email
+	return request(opts('/api/v1/users/send-reset-code', 'POST', data, false))
+}
+
+/** 重置密码（成功响应 data 含新令牌，直接写入登录态） */
+export function resetPassword(email: string, code: string, newPassword: string) : Promise<ApiResponse> {
+	const data = {} as UTSJSONObject
+	data['email'] = email
+	data['code'] = code
+	data['new_password'] = newPassword
+	data['client_id'] = AUTH_CLIENT_ID
+	return request(opts('/api/v1/users/reset-password', 'POST', data, false))
+}
+
+/** 获取当前登录用户信息（用于验证账号是否存在及刷新本地资料） */
+export function getUserInfo() : Promise<ApiResponse> {
+	return request(opts('/api/v1/users/info', 'GET', null))
+}
+
+/** 更新用户名（含唯一性校验） */
+export function updateUsername(newUsername: string) : Promise<ApiResponse> {
+	const data = {} as UTSJSONObject
+	data['new_username'] = newUsername
+	return request(opts('/api/v1/users/update-username', 'PUT', data))
+}
+
+/** 更新个性签名 */
+export function updateSignature(signature: string) : Promise<ApiResponse> {
+	const data = {} as UTSJSONObject
+	data['signature'] = signature
+	return request(opts('/api/v1/users/update-signature', 'PUT', data))
+}
+
+/** 更新头像（存头像 key） */
+export function updateAvatar(avatarUrl: string) : Promise<ApiResponse> {
+	const data = {} as UTSJSONObject
+	data['avatar_url'] = avatarUrl
+	return request(opts('/api/v1/users/update-avatar', 'PUT', data))
+}
+
+/** 修改密码（已设密码用户） */
+export function changePassword(oldPassword: string, newPassword: string) : Promise<ApiResponse> {
+	const data = {} as UTSJSONObject
+	data['old_password'] = oldPassword
+	data['new_password'] = newPassword
+	return request(opts('/api/v1/users/change-password', 'PUT', data))
+}
+
+/** 设置密码（无密码用户首次设置） */
+export function setPassword(newPassword: string) : Promise<ApiResponse> {
+	const data = {} as UTSJSONObject
+	data['new_password'] = newPassword
+	return request(opts('/api/v1/users/set-password', 'PUT', data))
+}
+
+/** 发送修改邮箱的旧邮箱验证码 */
+export function sendChangeEmailOldCode() : Promise<ApiResponse> {
+	return request(opts('/api/v1/users/send-change-email-old-code', 'POST', {} as UTSJSONObject))
+}
+
+/** 发送修改/绑定邮箱的新邮箱验证码（绑定场景 allowExisting 传 true 以触发账号合并提示） */
+export function sendChangeEmailNewCode(newEmail: string, allowExisting: boolean) : Promise<ApiResponse> {
+	const data = {} as UTSJSONObject
+	data['new_email'] = newEmail
+	data['allow_existing'] = allowExisting
+	return request(opts('/api/v1/users/send-change-email-new-code', 'POST', data))
+}
+
+/** 修改邮箱（需旧邮箱验证码 + 新邮箱验证码） */
+export function changeEmail(oldCode: string, newEmail: string, newCode: string) : Promise<ApiResponse> {
+	const data = {} as UTSJSONObject
+	data['old_code'] = oldCode
+	data['new_email'] = newEmail
+	data['new_code'] = newCode
+	return request(opts('/api/v1/users/change-email', 'PUT', data))
+}
+
+/** 绑定邮箱（无邮箱用户首次绑定；邮箱已存在时响应 data 含 need_merge） */
+export function bindEmail(newEmail: string, newCode: string) : Promise<ApiResponse> {
+	const data = {} as UTSJSONObject
+	data['new_email'] = newEmail
+	data['new_code'] = newCode
+	data['client_id'] = AUTH_CLIENT_ID
+	return request(opts('/api/v1/users/bind-email', 'PUT', data))
+}
+
+/** 计划删除账号（status 置 0，24 小时冷静期） */
+export function scheduleDeletion() : Promise<ApiResponse> {
+	return request(opts('/api/v1/users/schedule-deletion', 'POST', {} as UTSJSONObject))
+}
+
+/** 取消账号删除计划（status 恢复 1） */
+export function cancelDeletion() : Promise<ApiResponse> {
+	return request(opts('/api/v1/users/cancel-deletion', 'POST', {} as UTSJSONObject))
+}
+
+/** 退出登录（撤销全部令牌；调用方需同步清除本地登录态） */
+export function logout() : Promise<ApiResponse> {
+	return request(opts('/api/v1/users/logout', 'POST', {} as UTSJSONObject))
+}
+
+/** 微信一键登录（仅微信小程序端调用） */
+export function wechatLogin(code: string) : Promise<ApiResponse> {
+	const data = {} as UTSJSONObject
+	data['code'] = code
+	data['client_id'] = AUTH_CLIENT_ID
+	return request(opts('/api/v1/users/wechat-login', 'POST', data, false))
+}

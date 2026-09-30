@@ -305,6 +305,13 @@
 			})
 			return
 		}
+		if (index === 2) {
+			// 跳转「我的」页（用户子包），首页保持"首页"激活态
+			uni.navigateTo({
+				url: '/pages/user/settings'
+			})
+			return
+		}
 		navActive.value = index
 	}
 </script>

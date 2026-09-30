@@ -1,0 +1,371 @@
+<template>
+	<view class="announcement-page">
+		<!-- 顶部返回按钮（次级页面统一返回组件） -->
+		<BackButton />
+
+		<scroll-view class="announcement-page__scroll" direction="vertical" :show-scrollbar="false">
+			<view class="announcement-page__main" :style="'padding-top:' + mainTop + 'px'">
+				<PageHeader title="公告管理" desc="发布与管理全站公告，仅管理员可操作。" />
+
+				<!-- 公告模板入口卡（点击后切换为模板编辑表单） -->
+				<view v-if="!showForm && !isEditingTemplate" class="announcement-page__template-entry" @click="handleTemplateEntry">
+					<text class="announcement-page__template-entry-title">公告模板</text>
+					<text class="announcement-page__template-entry-subtitle">点击编辑公告模板</text>
+				</view>
+
+				<!-- 发布公告入口卡（点击后切换为发布表单） -->
+				<view v-if="!showForm && !isEditingTemplate" class="announcement-page__new-entry" @click="handleNewEntry">
+					<image class="announcement-page__new-entry-icon" src="/static/icons/plus-small.svg" mode="aspectFit" />
+					<text class="announcement-page__new-entry-text">发布公告</text>
+				</view>
+
+				<!-- 发布表单（公告发布依赖本项目后端，暂未交付，仅前端界面） -->
+				<view v-if="showForm" class="announcement-page__form">
+					<text class="announcement-page__form-heading">发布新公告</text>
+
+					<view class="announcement-page__field">
+						<text class="announcement-page__label">公告标题</text>
+						<input
+							class="announcement-page__input"
+							v-model="formTitle"
+							placeholder="请输入公告标题"
+							:placeholder-style="PLACEHOLDER_STYLE"
+							:maxlength="200"
+						/>
+					</view>
+
+					<view class="announcement-page__field">
+						<text class="announcement-page__label">公告内容</text>
+						<textarea
+							class="announcement-page__textarea"
+							v-model="formContent"
+							placeholder="请输入公告内容"
+							:placeholder-style="PLACEHOLDER_STYLE"
+							:maxlength="5000"
+						/>
+					</view>
+
+					<view class="announcement-page__actions">
+						<view class="announcement-page__cancel" @click="cancelForm">
+							<text class="announcement-page__cancel-text">取消</text>
+						</view>
+						<view class="announcement-page__save" @click="handlePublish">
+							<text class="announcement-page__save-text">提交</text>
+						</view>
+					</view>
+				</view>
+
+				<!-- 模板编辑表单 -->
+				<view v-if="isEditingTemplate" class="announcement-page__form">
+					<text class="announcement-page__form-heading">编辑公告模板</text>
+
+					<view class="announcement-page__field">
+						<text class="announcement-page__label">公告标题</text>
+						<input
+							class="announcement-page__input"
+							v-model="templateTitle"
+							placeholder="请输入公告标题"
+							:placeholder-style="PLACEHOLDER_STYLE"
+							:maxlength="200"
+						/>
+					</view>
+
+					<view class="announcement-page__field">
+						<text class="announcement-page__label">公告内容</text>
+						<textarea
+							class="announcement-page__textarea"
+							v-model="templateContent"
+							placeholder="请输入公告内容"
+							:placeholder-style="PLACEHOLDER_STYLE"
+							:maxlength="5000"
+						/>
+					</view>
+
+					<view class="announcement-page__actions">
+						<view class="announcement-page__cancel" @click="cancelTemplate">
+							<text class="announcement-page__cancel-text">取消</text>
+						</view>
+						<view class="announcement-page__save" @click="handleTemplateUpdate">
+							<text class="announcement-page__save-text">更新</text>
+						</view>
+					</view>
+				</view>
+			</view>
+		</scroll-view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import BackButton from '@/components/BackButton/BackButton.uvue'
+	import PageHeader from '@/components/PageHeader/PageHeader.uvue'
+	import { PLACEHOLDER_STYLE } from '@/utils/theme.uts'
+	import { useUserStore } from '@/stores/user.uts'
+
+	const userStore = useUserStore()
+
+	/** 顶部留白：返回按钮（状态栏高度 + 40px）之下再留 12px */
+	const mainTop = ref(96)
+	const win = uni.getWindowInfo()
+	if (win.statusBarHeight > 0) {
+		mainTop.value = win.statusBarHeight + 52
+	}
+
+	// 卡片切换：默认显示入口卡，点击后切换为对应表单
+	const showForm = ref(false)
+	const isEditingTemplate = ref(false)
+	const formTitle = ref('')
+	const formContent = ref('')
+	const templateTitle = ref('')
+	const templateContent = ref('')
+
+	// 发布/模板/公告列表均依赖本项目后端（暂未交付），当前仅还原前端界面，
+	// 提交动作统一提示暂未开放。
+	function handleNewEntry() : void {
+		showForm.value = true
+		isEditingTemplate.value = false
+	}
+
+	function cancelForm() : void {
+		showForm.value = false
+	}
+
+	function handleTemplateEntry() : void {
+		isEditingTemplate.value = true
+		showForm.value = false
+	}
+
+	function cancelTemplate() : void {
+		isEditingTemplate.value = false
+	}
+
+	// 角色守卫：非管理员禁止进入（公告管理仅管理员可操作）
+	onLoad(() => {
+		const info = userStore.userInfo
+		if (info == null || info.role !== 7) {
+			uni.showToast({ title: '无权限访问', icon: 'none' })
+			setTimeout(() => {
+				uni.navigateBack()
+			}, 800)
+		}
+	})
+
+	function checkBeforeSubmit() : boolean {
+		const info = userStore.userInfo
+		if (info == null) {
+			uni.showToast({ title: '请先登录', icon: 'none' })
+			return false
+		}
+		return true
+	}
+
+	function handlePublish() : void {
+		if (!checkBeforeSubmit()) {
+			return
+		}
+		if (formTitle.value.trim().length == 0) {
+			uni.showToast({ title: '请输入公告标题', icon: 'none' })
+			return
+		}
+		if (formContent.value.trim().length == 0) {
+			uni.showToast({ title: '请输入公告内容', icon: 'none' })
+			return
+		}
+		uni.showToast({ title: '公告功能暂未开放', icon: 'none' })
+	}
+
+	function handleTemplateUpdate() : void {
+		if (!checkBeforeSubmit()) {
+			return
+		}
+		if (templateTitle.value.trim().length == 0) {
+			uni.showToast({ title: '请输入公告标题', icon: 'none' })
+			return
+		}
+		if (templateContent.value.trim().length == 0) {
+			uni.showToast({ title: '请输入公告内容', icon: 'none' })
+			return
+		}
+		uni.showToast({ title: '公告功能暂未开放', icon: 'none' })
+	}
+</script>
+
+<style lang="scss">
+	.announcement-page {
+		flex: 1;
+		position: relative;
+		background-color: $bai-canvas-soft;
+	}
+
+	.announcement-page__scroll {
+		flex: 1;
+	}
+
+	.announcement-page__main {
+		padding-left: 48rpx;
+		padding-right: 48rpx;
+		padding-bottom: 64rpx;
+		box-sizing: border-box;
+		flex-direction: column;
+	}
+
+	/* ===== 公告模板入口卡 ===== */
+	.announcement-page__template-entry {
+		margin-top: 64rpx;
+		padding: 32rpx 48rpx;
+		box-sizing: border-box;
+		min-height: 192rpx;
+		border-radius: $bai-rounded-xl;
+		background-color: $bai-canvas;
+		border: 1px solid $bai-pale;
+		flex-direction: column;
+		justify-content: center;
+		align-items: flex-start;
+	}
+
+	.announcement-page__template-entry-title {
+		color: $bai-ink;
+		font-size: 32rpx;
+		line-height: 48rpx;
+		font-weight: 500;
+	}
+
+	.announcement-page__template-entry-subtitle {
+		margin-top: 8rpx;
+		color: $bai-body;
+		font-size: 28rpx;
+		line-height: 40rpx;
+		lines: 1;
+		text-overflow: ellipsis;
+		overflow: hidden;
+	}
+
+	/* ===== 发布公告入口卡 ===== */
+	.announcement-page__new-entry {
+		margin-top: 32rpx;
+		height: 192rpx;
+		box-sizing: border-box;
+		border-radius: $bai-rounded-xl;
+		background-color: $bai-canvas;
+		border: 1px solid $bai-pale;
+		flex-direction: row;
+		justify-content: center;
+		align-items: center;
+	}
+
+	.announcement-page__new-entry-icon {
+		width: 28rpx;
+		height: 28rpx;
+	}
+
+	.announcement-page__new-entry-text {
+		margin-left: 16rpx;
+		color: $bai-ink;
+		font-size: 32rpx;
+		line-height: 48rpx;
+		font-weight: 500;
+	}
+
+	/* ===== 发布 / 模板编辑表单 ===== */
+	.announcement-page__form {
+		margin-top: 64rpx;
+		padding: 32rpx;
+		box-sizing: border-box;
+		border-radius: $bai-rounded-xl;
+		background-color: $bai-canvas;
+		border: 1px solid $bai-pale;
+		flex-direction: column;
+	}
+
+	.announcement-page__form-heading {
+		color: $bai-ink;
+		font-size: 36rpx;
+		line-height: 48rpx;
+		font-weight: 600;
+		padding-bottom: 16rpx;
+	}
+
+	.announcement-page__field {
+		margin-top: 16rpx;
+		flex-direction: column;
+	}
+
+	.announcement-page__label {
+		margin-bottom: 8rpx;
+		color: $bai-body;
+		font-size: 28rpx;
+		line-height: 40rpx;
+		font-weight: 400;
+	}
+
+	.announcement-page__input {
+		height: 82rpx;
+		padding: 0 24rpx;
+		box-sizing: border-box;
+		background-color: $bai-canvas-soft;
+		border-radius: $bai-rounded-sm;
+		border: 1px solid $bai-pale;
+		color: $bai-ink;
+		font-size: 32rpx;
+		line-height: 82rpx;
+	}
+
+	.announcement-page__textarea {
+		width: 100%;
+		/* 高度 = 5 行 × 48rpx 行高 + 上下 padding */
+		height: 264rpx;
+		padding: 16rpx 24rpx;
+		box-sizing: border-box;
+		background-color: $bai-canvas-soft;
+		border-radius: $bai-rounded-sm;
+		border: 1px solid $bai-pale;
+		color: $bai-ink;
+		font-size: 32rpx;
+		line-height: 48rpx;
+	}
+
+	/* ===== 取消 / 提交按钮 ===== */
+	.announcement-page__actions {
+		margin-top: 32rpx;
+		flex-direction: row;
+	}
+
+	.announcement-page__cancel {
+		flex: 1;
+		height: 96rpx;
+		padding: 24rpx 0;
+		box-sizing: border-box;
+		border-radius: 9999px;
+		background-color: $bai-canvas;
+		border: 1px solid $bai-pale;
+		flex-direction: row;
+		justify-content: center;
+		align-items: center;
+	}
+
+	.announcement-page__cancel-text {
+		color: $bai-body;
+		font-size: 32rpx;
+		line-height: 48rpx;
+		font-weight: 500;
+	}
+
+	.announcement-page__save {
+		flex: 1;
+		margin-left: 16rpx;
+		height: 96rpx;
+		padding: 24rpx 0;
+		box-sizing: border-box;
+		border-radius: 9999px;
+		background-color: $bai-ink;
+		flex-direction: row;
+		justify-content: center;
+		align-items: center;
+	}
+
+	.announcement-page__save-text {
+		color: $bai-on-primary;
+		font-size: 32rpx;
+		line-height: 48rpx;
+		font-weight: 500;
+	}
+</style>

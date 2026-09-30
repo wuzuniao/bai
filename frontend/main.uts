@@ -1,9 +1,13 @@
 import App from './App.uvue'
-
+import * as Pinia from 'pinia'
 import { createSSRApp } from 'vue'
+
 export function createApp() {
 	const app = createSSRApp(App)
+	// 状态管理：Pinia（stores/ 下按业务域拆分）
+	app.use(Pinia.createPinia())
 	return {
-		app
+		app,
+		Pinia
 	}
 }

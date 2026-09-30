@@ -1,0 +1,619 @@
+<template>
+	<view class="login-page">
+		<!-- 顶部返回按钮（次级页面统一返回组件） -->
+		<BackButton />
+
+		<scroll-view class="login-page__scroll" direction="vertical" :show-scrollbar="false">
+			<view class="login-page__canvas" :style="'padding-top:' + mainTop + 'px'">
+				<!-- 微信一键登录卡片（仅微信小程序端展示） -->
+				<!-- #ifdef MP-WEIXIN -->
+				<view v-if="loginMode === 'wechat'" class="login-page__card">
+					<text class="login-page__title">一键登录</text>
+					<view class="login-page__wechat-btn" @click="handleWechatLogin">
+						<image class="login-page__wechat-icon" src="/static/icons/wechat-login.png" mode="aspectFit" />
+					</view>
+					<!-- 微信登录隐私勾选（独立于账号密码登录的隐私勾选） -->
+					<view class="login-page__remember login-page__remember--center" @click="toggleWechatAgree">
+						<view :class="wechatAgree ? 'login-page__checkbox login-page__checkbox--checked' : 'login-page__checkbox'">
+							<view v-if="wechatAgree" class="login-page__checkmark"></view>
+						</view>
+						<text class="login-page__remember-text">查看并同意</text>
+						<text class="login-page__remember-text" @click.stop="goAgreement">《服务协议》</text>
+						<text class="login-page__remember-text">和</text>
+						<text class="login-page__remember-text" @click.stop="goPrivacy">《隐私政策》</text>
+					</view>
+					<!-- 切换到账号密码登录引导 -->
+					<view class="login-page__switch" @click="switchMode('normal')">
+						<text class="login-page__switch-text">账号密码登录</text>
+					</view>
+				</view>
+				<!-- #endif -->
+
+				<!-- 主登录卡片（账号密码登录；微信端切换或注册页跳转时展示） -->
+				<view v-if="loginMode === 'normal'" class="login-page__card">
+					<text class="login-page__title">欢迎回来</text>
+
+					<view class="login-page__form">
+						<!-- 用户名或邮箱 -->
+						<view class="login-page__field">
+							<text class="login-page__label">用户名或邮箱</text>
+							<input
+								class="login-page__input"
+								:class="usernameError.length > 0 ? 'login-page__input--error' : ''"
+								v-model="usernameValue"
+								placeholder="请输入用户名或邮箱"
+								:placeholder-style="PLACEHOLDER_STYLE"
+								:maxlength="254"
+								@blur="onUsernameBlur"
+							/>
+							<text v-if="usernameError.length > 0" class="login-page__error-text">{{ usernameError }}</text>
+						</view>
+
+						<!-- 密码 -->
+						<view class="login-page__field login-page__field--password">
+							<text class="login-page__label">密码</text>
+							<view
+								class="login-page__password-row"
+								:class="passwordError.length > 0 ? 'login-page__password-row--error' : ''"
+							>
+								<input
+									class="login-page__input login-page__input--password"
+									v-model="passwordValue"
+									:password="!showPassword"
+									:key="'login-pwd-' + showPassword"
+									placeholder="请输入密码"
+									:placeholder-style="PLACEHOLDER_STYLE"
+									:maxlength="20"
+									@blur="onPasswordBlur"
+								/>
+								<view class="login-page__eye" @click="togglePassword">
+									<PasswordEye :visible="showPassword" />
+								</view>
+							</view>
+							<text v-if="passwordError.length > 0" class="login-page__error-text">{{ passwordError }}</text>
+							<view class="login-page__forgot-row">
+								<text class="login-page__forgot" @click="handleForgot">忘记密码？</text>
+							</view>
+						</view>
+
+						<!-- 操作区 -->
+						<view class="login-page__actions">
+							<view class="login-page__remember" @click="toggleRemember">
+								<view :class="remember ? 'login-page__checkbox login-page__checkbox--checked' : 'login-page__checkbox'">
+									<view v-if="remember" class="login-page__checkmark"></view>
+								</view>
+								<text class="login-page__remember-text">查看并同意</text>
+								<text class="login-page__remember-text" @click.stop="goAgreement">《服务协议》</text>
+								<text class="login-page__remember-text">和</text>
+								<text class="login-page__remember-text" @click.stop="goPrivacy">《隐私政策》</text>
+							</view>
+							<view class="login-page__submit" @click="handleLogin">
+								<text class="login-page__submit-text">登录</text>
+							</view>
+						</view>
+					</view>
+
+					<!-- 切换到微信一键登录引导（仅微信小程序端展示） -->
+					<!-- #ifdef MP-WEIXIN -->
+					<view class="login-page__switch login-page__switch--card" @click="switchMode('wechat')">
+						<text class="login-page__switch-text">一键登录</text>
+					</view>
+					<!-- #endif -->
+				</view>
+
+				<!-- 底部注册链接 -->
+				<view v-if="loginMode === 'normal'" class="login-page__footer">
+					<text class="login-page__footer-text">还没有账号？</text>
+					<text class="login-page__footer-link" @click="goRegister">立即注册</text>
+				</view>
+			</view>
+		</scroll-view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import BackButton from '@/components/BackButton/BackButton.uvue'
+	import PasswordEye from '@/components/PasswordEye/PasswordEye.uvue'
+	import { PLACEHOLDER_STYLE } from '@/utils/theme.uts'
+	import { useUserStore } from '@/stores/user.uts'
+	import { ApiResponse } from '@/utils/request.uts'
+	import { AGREEMENT_URL, PRIVACY_URL } from '@/utils/config.uts'
+	import { openExternalLink } from '@/utils/link.uts'
+	import { loginUser } from '@/api/user.uts'
+
+	// #ifdef MP-WEIXIN
+	import { wechatLogin } from '@/api/user.uts'
+	// #endif
+
+	const userStore = useUserStore()
+
+	/** 顶部留白：返回按钮（状态栏高度 + 40px）之下再留 12px */
+	const mainTop = ref(96)
+	const win = uni.getWindowInfo()
+	if (win.statusBarHeight > 0) {
+		mainTop.value = win.statusBarHeight + 52
+	}
+
+	// 登录方式：微信小程序端默认微信一键登录，其他端默认账号密码登录；
+	// 注册页跳转时 URL 带 ?mode=normal，则初始展示账号密码卡片
+	let defaultLoginMode = 'normal'
+	// #ifdef MP-WEIXIN
+	defaultLoginMode = 'wechat'
+	// #endif
+	const loginMode = ref(defaultLoginMode)
+
+	onLoad((options) => {
+		if (options != null && options['mode'] == 'normal') {
+			loginMode.value = 'normal'
+		}
+	})
+
+	/** 切换登录方式（互斥显示对应卡片） */
+	function switchMode(mode: string) : void {
+		loginMode.value = mode
+	}
+
+	const usernameValue = ref('')
+	const passwordValue = ref('')
+	const usernameError = ref('')
+	const passwordError = ref('')
+	const showPassword = ref(false)
+	const remember = ref(false)
+	const submitting = ref(false)
+	// #ifdef MP-WEIXIN
+	const wechatAgree = ref(false)
+	// #endif
+
+	function validateUsername(v: string) : string {
+		if (v.length == 0) {
+			return '请输入用户名'
+		}
+		return ''
+	}
+
+	function validatePasswordValue(v: string) : string {
+		if (v.length == 0) {
+			return '请输入密码'
+		}
+		return ''
+	}
+
+	function onUsernameBlur() : void {
+		usernameError.value = validateUsername(usernameValue.value)
+	}
+
+	function onPasswordBlur() : void {
+		passwordError.value = passwordValue.value.length == 0 ? '请输入密码' : ''
+	}
+
+	function togglePassword() : void {
+		showPassword.value = !showPassword.value
+	}
+
+	function toggleRemember() : void {
+		remember.value = !remember.value
+	}
+
+	// #ifdef MP-WEIXIN
+	function toggleWechatAgree() : void {
+		wechatAgree.value = !wechatAgree.value
+	}
+	// #endif
+
+	/** 登录提交：前端校验 → 隐私协议确认 → 调用 auth 服务 → 写入状态 → 跳转 */
+	function handleLogin() : void {
+		if (submitting.value) {
+			return
+		}
+		usernameError.value = validateUsername(usernameValue.value)
+		passwordError.value = validatePasswordValue(passwordValue.value)
+		if (usernameError.value.length > 0) {
+			uni.showToast({ title: usernameError.value, icon: 'none' })
+			return
+		}
+		if (passwordError.value.length > 0) {
+			uni.showToast({ title: passwordError.value, icon: 'none' })
+			return
+		}
+		// 隐私协议勾选校验：未勾选时显示确认弹窗
+		if (!remember.value) {
+			uni.showModal({
+				title: '提示',
+				content: '查看并同意《服务协议》和《隐私政策》',
+				confirmText: '确定',
+				cancelText: '取消',
+				success: (res) => {
+					if (res.confirm) {
+						remember.value = true
+						handleLogin()
+					}
+				}
+			})
+			return
+		}
+		submitting.value = true
+		loginUser(usernameValue.value, passwordValue.value).then((res: ApiResponse) => {
+			const d = res.data
+			if (d != null) {
+				userStore.setUser(d)
+			}
+			uni.showToast({ title: '登录成功', icon: 'success' })
+			setTimeout(() => {
+				uni.redirectTo({ url: '/pages/user/settings' })
+			}, 1500)
+		}).catch((e) => {
+			const err = e as Error
+			uni.showToast({ title: err.message, icon: 'none' })
+		}).finally(() => {
+			submitting.value = false
+		})
+	}
+
+	function handleForgot() : void {
+		uni.navigateTo({
+			url: '/pages/user/forgot-password',
+			fail: () => {
+				uni.showToast({ title: '页面跳转失败', icon: 'none' })
+			}
+		})
+	}
+
+	// #ifdef MP-WEIXIN
+	/** 微信一键登录：uni.login 获取 code → auth 服务换取令牌 → 写入状态 → 跳转 */
+	function handleWechatLogin() : void {
+		if (submitting.value) {
+			return
+		}
+		if (!wechatAgree.value) {
+			uni.showModal({
+				title: '提示',
+				content: '查看并同意《服务协议》和《隐私政策》',
+				confirmText: '确定',
+				cancelText: '取消',
+				success: (res) => {
+					if (res.confirm) {
+						wechatAgree.value = true
+						handleWechatLogin()
+					}
+				}
+			})
+			return
+		}
+		submitting.value = true
+		uni.showLoading({ title: '微信登录中...', mask: true })
+		// 超时安全网：覆盖 uni.login + 后端请求整个流程
+		const timeoutId = setTimeout(() => {
+			submitting.value = false
+			uni.hideLoading()
+			setTimeout(() => {
+				uni.showToast({ title: '登录超时，请检查网络或认证服务', icon: 'none' })
+			}, 200)
+		}, 15000)
+		uni.login({
+			success: (loginRes) => {
+				const code = loginRes.code
+				if (code.length == 0) {
+					clearTimeout(timeoutId)
+					uni.hideLoading()
+					submitting.value = false
+					setTimeout(() => {
+						uni.showToast({ title: '获取微信登录凭证失败', icon: 'none' })
+					}, 200)
+					return
+				}
+				wechatLogin(code).then((res: ApiResponse) => {
+					clearTimeout(timeoutId)
+					uni.hideLoading()
+					const d = res.data
+					if (d != null) {
+						userStore.setUser(d)
+					}
+					uni.showToast({ title: '登录成功', icon: 'success' })
+					setTimeout(() => {
+						uni.redirectTo({ url: '/pages/user/settings' })
+					}, 1500)
+				}).catch((e) => {
+					clearTimeout(timeoutId)
+					uni.hideLoading()
+					const err = e as Error
+					setTimeout(() => {
+						uni.showToast({ title: err.message.length > 0 ? err.message : '微信登录失败', icon: 'none' })
+					}, 200)
+				}).finally(() => {
+					submitting.value = false
+				})
+			},
+			fail: (err) => {
+				clearTimeout(timeoutId)
+				uni.hideLoading()
+				setTimeout(() => {
+					const msg = err.errMsg
+					if (msg.includes('cancel') || msg.includes('auth deny')) {
+						uni.showToast({ title: '已取消微信登录', icon: 'none' })
+					} else {
+						uni.showToast({ title: '微信登录失败', icon: 'none' })
+					}
+				}, 200)
+				submitting.value = false
+			}
+		})
+	}
+	// #endif
+
+	function goRegister() : void {
+		uni.navigateTo({
+			url: '/pages/user/register',
+			fail: () => {
+				uni.showToast({ title: '页面跳转失败', icon: 'none' })
+			}
+		})
+	}
+
+	/** 服务协议 / 隐私政策：外部链接，复制后浏览器打开 */
+	function goAgreement() : void {
+		openExternalLink(AGREEMENT_URL)
+	}
+
+	function goPrivacy() : void {
+		openExternalLink(PRIVACY_URL)
+	}
+</script>
+
+<style lang="scss">
+	.login-page {
+		flex: 1;
+		position: relative;
+		background-color: $bai-canvas-soft;
+	}
+
+	.login-page__scroll {
+		flex: 1;
+	}
+
+	.login-page__canvas {
+		padding-left: 48rpx;
+		padding-right: 48rpx;
+		padding-bottom: 67rpx;
+		box-sizing: border-box;
+		flex-direction: column;
+	}
+
+	/* ===== 登录卡片 ===== */
+	.login-page__card {
+		position: relative;
+		z-index: 1;
+		width: 100%;
+		margin-top: 64rpx;
+		padding: 48rpx;
+		box-sizing: border-box;
+		background-color: $bai-canvas;
+		border-radius: 48rpx;
+		flex-direction: column;
+	}
+
+	.login-page__title {
+		color: $bai-ink;
+		font-size: 64rpx;
+		line-height: 72rpx;
+		font-weight: 600;
+		text-align: center;
+	}
+
+	/* ===== 表单 ===== */
+	.login-page__form {
+		margin-top: 16rpx;
+		flex-direction: column;
+	}
+
+	.login-page__field {
+		flex-direction: column;
+	}
+
+	.login-page__field--password {
+		margin-top: 32rpx;
+	}
+
+	.login-page__label {
+		color: $bai-ink;
+		font-size: 28rpx;
+		line-height: 40rpx;
+		font-weight: 400;
+	}
+
+	.login-page__input {
+		margin-top: 8rpx;
+		height: 98rpx;
+		padding: 28rpx 24rpx 24rpx;
+		box-sizing: border-box;
+		background-color: $bai-canvas;
+		border-radius: $bai-rounded-md;
+		border: 1px solid $bai-ink;
+		color: $bai-ink;
+		font-size: 32rpx;
+		line-height: 42rpx;
+	}
+
+	.login-page__input--error {
+		border-color: $bai-negative;
+	}
+
+	.login-page__error-text {
+		margin-top: 8rpx;
+		color: $bai-negative;
+		font-size: 24rpx;
+		line-height: 32rpx;
+	}
+
+	/* 密码行：统一边框容器，内含输入框与眼睛图标 */
+	.login-page__password-row {
+		position: relative;
+		margin-top: 8rpx;
+		flex-direction: row;
+		align-items: stretch;
+		border: 1px solid $bai-ink;
+		border-radius: $bai-rounded-md;
+		background-color: $bai-canvas;
+	}
+
+	.login-page__password-row--error {
+		border-color: $bai-negative;
+	}
+
+	.login-page__input--password {
+		flex: 1;
+		border: none;
+		background-color: transparent;
+		border-radius: $bai-rounded-md 0 0 $bai-rounded-md;
+		padding-right: 24rpx;
+		margin-top: 0;
+	}
+
+	.login-page__eye {
+		flex-shrink: 0;
+		position: relative;
+		z-index: 2;
+		padding: 0 24rpx;
+		border-radius: 0 $bai-rounded-md $bai-rounded-md 0;
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+	}
+
+	/* 忘记密码链接行 */
+	.login-page__forgot-row {
+		margin-top: 8rpx;
+		flex-direction: row;
+		justify-content: flex-end;
+	}
+
+	.login-page__forgot {
+		color: $bai-body;
+		font-size: 24rpx;
+		line-height: 32rpx;
+	}
+
+	/* ===== 操作区 ===== */
+	.login-page__actions {
+		margin-top: 32rpx;
+		flex-direction: column;
+	}
+
+	.login-page__remember {
+		height: 32rpx;
+		flex-direction: row;
+		align-items: center;
+	}
+
+	.login-page__remember--center {
+		justify-content: center;
+		margin-top: 8rpx;
+	}
+
+	.login-page__checkbox {
+		width: 32rpx;
+		height: 32rpx;
+		border-radius: $bai-rounded-sm;
+		background-color: $bai-canvas;
+		border: 1px solid $bai-neutral;
+		box-sizing: border-box;
+		flex-direction: row;
+		justify-content: center;
+		align-items: center;
+	}
+
+	.login-page__checkbox--checked {
+		background-color: $bai-ink;
+		border-color: $bai-ink;
+	}
+
+	/* 选中态对勾（CSS 绘制） */
+	.login-page__checkmark {
+		width: 10rpx;
+		height: 16rpx;
+		border-right: 1.5px solid $bai-on-primary;
+		border-bottom: 1.5px solid $bai-on-primary;
+		transform: rotate(45deg) translate(-1px, -1px);
+	}
+
+	.login-page__remember-text {
+		margin-left: 16rpx;
+		color: $bai-body;
+		font-size: 24rpx;
+		line-height: 32rpx;
+	}
+
+	.login-page__submit {
+		margin-top: 24rpx;
+		height: 96rpx;
+		padding: 24rpx 0;
+		box-sizing: border-box;
+		background-color: $bai-ink;
+		border-radius: $bai-rounded-xl;
+		flex-direction: row;
+		justify-content: center;
+		align-items: center;
+	}
+
+	.login-page__submit-text {
+		color: $bai-on-primary;
+		font-size: 32rpx;
+		line-height: 48rpx;
+		font-weight: 500;
+	}
+
+	/* ===== 底部注册链接 ===== */
+	.login-page__footer {
+		margin-top: 48rpx;
+		flex-direction: row;
+		justify-content: center;
+	}
+
+	.login-page__footer-text {
+		color: $bai-body;
+		font-size: 32rpx;
+		line-height: 48rpx;
+		font-weight: 400;
+	}
+
+	.login-page__footer-link {
+		color: $bai-ink;
+		font-size: 32rpx;
+		line-height: 48rpx;
+		font-weight: 600;
+	}
+
+	/* ===== 登录方式切换引导 ===== */
+	.login-page__switch {
+		margin-top: 24rpx;
+		flex-direction: row;
+		justify-content: center;
+	}
+
+	.login-page__switch--card {
+		margin-top: 48rpx;
+	}
+
+	.login-page__switch-text {
+		color: $bai-ink;
+		font-size: 36rpx;
+		line-height: 52rpx;
+		font-weight: 600;
+	}
+
+	/* ===== 微信一键登录区 ===== */
+	.login-page__wechat-btn {
+		width: 96rpx;
+		height: 96rpx;
+		margin-top: 24rpx;
+		border-radius: 9999px;
+		flex-direction: row;
+		justify-content: center;
+		align-items: center;
+		align-self: center;
+	}
+
+	.login-page__wechat-icon {
+		width: 96rpx;
+		height: 96rpx;
+	}
+</style>

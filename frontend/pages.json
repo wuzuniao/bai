@@ -29,6 +29,97 @@
 			}
 		}
 	],
+	"subPackages": [
+		{
+			"root": "pages/user",
+			"pages": [
+				{
+					"path": "settings",
+					"style": {
+						"navigationStyle": "custom",
+						"navigationBarTitleText": "我的"
+					}
+				},
+				{
+					"path": "profile",
+					"style": {
+						"navigationStyle": "custom",
+						"navigationBarTitleText": "个人信息"
+					}
+				},
+				{
+					"path": "login",
+					"style": {
+						"navigationStyle": "custom",
+						"navigationBarTitleText": "登录"
+					}
+				},
+				{
+					"path": "register",
+					"style": {
+						"navigationStyle": "custom",
+						"navigationBarTitleText": "注册"
+					}
+				},
+				{
+					"path": "forgot-password",
+					"style": {
+						"navigationStyle": "custom",
+						"navigationBarTitleText": "找回密码"
+					}
+				},
+				{
+					"path": "help",
+					"style": {
+						"navigationStyle": "custom",
+						"navigationBarTitleText": "帮助中心"
+					}
+				},
+				{
+					"path": "contact",
+					"style": {
+						"navigationStyle": "custom",
+						"navigationBarTitleText": "联系我们"
+					}
+				},
+				{
+					"path": "messages",
+					"style": {
+						"navigationStyle": "custom",
+						"navigationBarTitleText": "站内信"
+					}
+				},
+				{
+					"path": "announcement",
+					"style": {
+						"navigationStyle": "custom",
+						"navigationBarTitleText": "公告管理"
+					}
+				},
+				{
+					"path": "delete-account",
+					"style": {
+						"navigationStyle": "custom",
+						"navigationBarTitleText": "账号删除与数据说明"
+					}
+				},
+				{
+					"path": "member-pay",
+					"style": {
+						"navigationStyle": "custom",
+						"navigationBarTextStyle": "white",
+						"navigationBarTitleText": "会员支付"
+					}
+				}
+			]
+		}
+	],
+	"preloadRule": {
+		"pages/index/index": {
+			"network": "all",
+			"packages": ["pages/user"]
+		}
+	},
 	"globalStyle": {
 		"navigationBarTextStyle": "black",
 		"navigationBarTitleText": "uni-app x",

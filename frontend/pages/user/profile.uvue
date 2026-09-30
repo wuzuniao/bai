@@ -1,0 +1,1248 @@
+<template>
+	<view class="profile-page">
+		<!-- 顶部返回按钮（次级页面统一返回组件） -->
+		<BackButton />
+
+		<scroll-view class="profile-page__scroll" direction="vertical" :show-scrollbar="false">
+			<view class="profile-page__main" :style="'padding-top:' + mainTop + 'px'">
+				<PageHeader title="个人信息" desc="管理您的账户资料与安全设置，随时修改个人信息。" />
+
+				<!-- 分组 1：资料修改（账号待删除状态整体置灰并禁用交互） -->
+				<view :class="isDeletionScheduled ? 'profile-page__group profile-page__group--disabled' : 'profile-page__group'">
+					<!-- 修改用户名 -->
+					<view class="profile-page__group-item profile-page__group-item--bordered" @click="toggleUsername">
+						<text class="profile-page__group-text">修改用户名</text>
+						<view class="u-arrow-right"></view>
+					</view>
+					<view v-if="expandUsername" class="profile-page__form-section">
+						<view class="profile-page__form-field">
+							<text class="profile-page__form-label">新用户名</text>
+							<input
+								class="profile-page__input"
+								:class="usernameError.length > 0 ? 'profile-page__input--error' : ''"
+								v-model="usernameValue"
+								placeholder="请输入新用户名（2-15 个字符）"
+								:placeholder-style="PLACEHOLDER_STYLE"
+								:maxlength="15"
+								@blur="onUsernameBlur"
+							/>
+							<text v-if="usernameError.length > 0" class="profile-page__error-text">{{ usernameError }}</text>
+						</view>
+						<view class="profile-page__form-actions">
+							<view class="profile-page__btn profile-page__btn--cancel" @click="toggleUsername">
+								<text class="profile-page__btn-text">取消</text>
+							</view>
+							<view class="profile-page__btn profile-page__btn--submit" @click="handleUpdateUsername">
+								<text class="profile-page__btn-text profile-page__btn-text--primary">提交</text>
+							</view>
+						</view>
+					</view>
+
+					<!-- 修改头像 -->
+					<view class="profile-page__group-item profile-page__group-item--bordered" @click="toggleAvatar">
+						<text class="profile-page__group-text">修改头像</text>
+						<view class="u-arrow-right"></view>
+					</view>
+					<view v-if="expandAvatar" class="profile-page__form-section">
+						<view class="profile-page__avatar-list">
+							<view
+								v-for="item in avatarOptions"
+								:key="item.key"
+								class="profile-page__avatar-option"
+								:class="selectedAvatar === item.key ? 'profile-page__avatar-option--selected' : ''"
+								@click="onSelectAvatar(item.key)"
+							>
+								<image class="profile-page__avatar-image" :src="item.src" mode="aspectFit" />
+							</view>
+						</view>
+						<view class="profile-page__form-actions">
+							<view class="profile-page__btn profile-page__btn--cancel" @click="toggleAvatar">
+								<text class="profile-page__btn-text">取消</text>
+							</view>
+							<view class="profile-page__btn profile-page__btn--submit" @click="handleUpdateAvatar">
+								<text class="profile-page__btn-text profile-page__btn-text--primary">提交</text>
+							</view>
+						</view>
+					</view>
+
+					<!-- 修改签名 -->
+					<view class="profile-page__group-item profile-page__group-item--bordered" @click="toggleSignature">
+						<text class="profile-page__group-text">修改签名</text>
+						<view class="u-arrow-right"></view>
+					</view>
+					<view v-if="expandSignature" class="profile-page__form-section">
+						<input
+							class="profile-page__input"
+							:class="signatureError.length > 0 ? 'profile-page__input--error' : ''"
+							v-model="signatureValue"
+							placeholder="请输入签名（最多 70 个字符）"
+							:placeholder-style="PLACEHOLDER_STYLE"
+							:maxlength="70"
+						/>
+						<text v-if="signatureError.length > 0" class="profile-page__error-text">{{ signatureError }}</text>
+						<view class="profile-page__form-actions">
+							<view class="profile-page__btn profile-page__btn--cancel" @click="toggleSignature">
+								<text class="profile-page__btn-text">取消</text>
+							</view>
+							<view class="profile-page__btn profile-page__btn--submit" @click="handleUpdateSignature">
+								<text class="profile-page__btn-text profile-page__btn-text--primary">提交</text>
+							</view>
+						</view>
+					</view>
+
+					<!-- 修改密码 / 设置密码（无密码用户显示「设置密码」） -->
+					<view class="profile-page__group-item profile-page__group-item--bordered" @click="togglePassword">
+						<text class="profile-page__group-text">{{ hasPassword ? '修改密码' : '设置密码' }}</text>
+						<view class="u-arrow-right"></view>
+					</view>
+					<view v-if="expandPassword" class="profile-page__form-section">
+						<view v-if="hasPassword" class="profile-page__form-field">
+							<text class="profile-page__form-label">旧密码</text>
+							<view
+								class="profile-page__password-row"
+								:class="oldPasswordError.length > 0 ? 'profile-page__password-row--error' : ''"
+							>
+								<input
+									class="profile-page__input profile-page__input--password"
+									v-model="oldPasswordValue"
+									:password="!showOldPassword"
+									:key="'pro-old-' + showOldPassword"
+									placeholder="请输入旧密码"
+									:placeholder-style="PLACEHOLDER_STYLE"
+									:maxlength="20"
+									@blur="onOldPasswordBlur"
+								/>
+								<view class="profile-page__eye" @click="toggleOldPassword">
+									<PasswordEye :visible="showOldPassword" />
+								</view>
+							</view>
+							<text v-if="oldPasswordError.length > 0" class="profile-page__error-text">{{ oldPasswordError }}</text>
+						</view>
+						<view class="profile-page__form-field">
+							<text class="profile-page__form-label">新密码</text>
+							<view
+								class="profile-page__password-row"
+								:class="newPasswordError.length > 0 ? 'profile-page__password-row--error' : ''"
+							>
+								<input
+									class="profile-page__input profile-page__input--password"
+									v-model="newPasswordValue"
+									:password="!showNewPassword"
+									:key="'pro-new-' + showNewPassword"
+									placeholder="请设置强密码"
+									:placeholder-style="PLACEHOLDER_STYLE"
+									:maxlength="20"
+									@blur="onNewPasswordBlur"
+								/>
+								<view class="profile-page__eye" @click="toggleNewPassword">
+									<PasswordEye :visible="showNewPassword" />
+								</view>
+							</view>
+							<text v-if="newPasswordError.length > 0" class="profile-page__error-text">{{ newPasswordError }}</text>
+						</view>
+						<view class="profile-page__form-field">
+							<text class="profile-page__form-label">确认密码</text>
+							<view
+								class="profile-page__password-row"
+								:class="confirmPasswordError.length > 0 ? 'profile-page__password-row--error' : ''"
+							>
+								<input
+									class="profile-page__input profile-page__input--password"
+									v-model="confirmPasswordValue"
+									:password="!showConfirmPassword"
+									:key="'pro-cpwd-' + showConfirmPassword"
+									placeholder="请再次输入密码"
+									:placeholder-style="PLACEHOLDER_STYLE"
+									:maxlength="20"
+									@blur="onConfirmPasswordBlur"
+								/>
+								<view class="profile-page__eye" @click="toggleConfirmPassword">
+									<PasswordEye :visible="showConfirmPassword" />
+								</view>
+							</view>
+							<text v-if="confirmPasswordError.length > 0" class="profile-page__error-text">{{ confirmPasswordError }}</text>
+						</view>
+						<view class="profile-page__form-actions">
+							<view class="profile-page__btn profile-page__btn--cancel" @click="togglePassword">
+								<text class="profile-page__btn-text">取消</text>
+							</view>
+							<view class="profile-page__btn profile-page__btn--submit" @click="handleChangePassword">
+								<text class="profile-page__btn-text profile-page__btn-text--primary">提交</text>
+							</view>
+						</view>
+					</view>
+
+					<!-- 修改邮箱 / 绑定邮箱（无邮箱用户显示「绑定邮箱」），分组最后一项无下边框 -->
+					<view class="profile-page__group-item" @click="toggleEmail">
+						<text class="profile-page__group-text">{{ hasEmail ? '修改邮箱' : '绑定邮箱' }}</text>
+						<view class="u-arrow-right"></view>
+					</view>
+					<view v-if="expandEmail" class="profile-page__form-section">
+						<!-- 步骤1：旧邮箱验证（仅已有邮箱的用户需要） -->
+						<view v-if="hasEmail && emailStep === 1">
+							<view class="profile-page__form-field">
+								<text class="profile-page__form-label">旧邮箱验证码</text>
+								<view class="profile-page__code-row">
+									<input
+										class="profile-page__input profile-page__input--code"
+										:class="oldCodeError.length > 0 ? 'profile-page__input--error' : ''"
+										v-model="oldCodeValue"
+										placeholder="请输入验证码"
+										:placeholder-style="PLACEHOLDER_STYLE"
+										:maxlength="6"
+									/>
+									<view
+										class="profile-page__code-btn"
+										:class="oldCodeCounting || oldCodeSending ? 'profile-page__code-btn--disabled' : ''"
+										@click="handleGetOldEmailCode"
+									>
+										<text class="profile-page__code-btn-text">{{ oldCodeText }}</text>
+									</view>
+								</view>
+								<text v-if="oldCodeError.length > 0" class="profile-page__error-text">{{ oldCodeError }}</text>
+							</view>
+							<view class="profile-page__form-actions">
+								<view class="profile-page__btn profile-page__btn--cancel" @click="toggleEmail">
+									<text class="profile-page__btn-text">取消</text>
+								</view>
+								<view class="profile-page__btn profile-page__btn--submit" @click="handleVerifyOldEmail">
+									<text class="profile-page__btn-text profile-page__btn-text--primary">验证</text>
+								</view>
+							</view>
+						</view>
+						<!-- 步骤2：新邮箱验证 / 绑定邮箱（无邮箱用户直接显示此步骤） -->
+						<view v-else>
+							<view class="profile-page__form-field">
+								<text class="profile-page__form-label">新邮箱地址</text>
+								<input
+									class="profile-page__input"
+									:class="newEmailError.length > 0 ? 'profile-page__input--error' : ''"
+									v-model="newEmailValue"
+									placeholder="请输入新邮箱地址"
+									:placeholder-style="PLACEHOLDER_STYLE"
+									:maxlength="254"
+									@blur="onNewEmailBlur"
+								/>
+								<text v-if="newEmailError.length > 0" class="profile-page__error-text">{{ newEmailError }}</text>
+							</view>
+							<view class="profile-page__form-field">
+								<text class="profile-page__form-label">新邮箱验证码</text>
+								<view class="profile-page__code-row">
+									<input
+										class="profile-page__input profile-page__input--code"
+										:class="newCodeError.length > 0 ? 'profile-page__input--error' : ''"
+										v-model="newCodeValue"
+										placeholder="请输入验证码"
+										:placeholder-style="PLACEHOLDER_STYLE"
+										:maxlength="6"
+									/>
+									<view
+										class="profile-page__code-btn"
+										:class="newCodeCounting || newCodeSending ? 'profile-page__code-btn--disabled' : ''"
+										@click="handleGetNewEmailCode"
+									>
+										<text class="profile-page__code-btn-text">{{ newCodeText }}</text>
+									</view>
+								</view>
+								<text v-if="newCodeError.length > 0" class="profile-page__error-text">{{ newCodeError }}</text>
+							</view>
+							<view class="profile-page__form-actions">
+								<view class="profile-page__btn profile-page__btn--cancel" @click="onEmailStepBack">
+									<text class="profile-page__btn-text">{{ hasEmail ? '返回' : '取消' }}</text>
+								</view>
+								<view class="profile-page__btn profile-page__btn--submit" @click="handleChangeEmail">
+									<text class="profile-page__btn-text profile-page__btn-text--primary">{{ hasEmail ? '修改' : '绑定' }}</text>
+								</view>
+							</view>
+						</view>
+					</view>
+				</view>
+
+				<!-- 分组 1.5：偏好设置（语言，界面仅还原，翻译功能后续实现） -->
+				<view class="profile-page__group">
+					<view class="profile-page__group-item">
+						<text class="profile-page__group-text">语言</text>
+						<view class="profile-page__lang-switch" @click="toggleLanguage">
+							<view class="profile-page__lang-knob"></view>
+							<text class="profile-page__lang-text">简体中文</text>
+						</view>
+					</view>
+				</view>
+
+				<!-- 分组 2：退出登录 + 删除账号（危险操作红色提示） -->
+				<view class="profile-page__group">
+					<view class="profile-page__group-item profile-page__group-item--bordered" @click="handleLogout">
+						<text class="profile-page__group-text profile-page__group-text--danger">退出登录</text>
+						<view class="u-arrow-right"></view>
+					</view>
+					<view class="profile-page__group-item" @click="handleDeletion">
+						<text class="profile-page__group-text profile-page__group-text--danger">
+							{{ isDeletionScheduled ? '取消删除' : '删除账号' }}
+						</text>
+						<view class="u-arrow-right"></view>
+					</view>
+					<view class="profile-page__group-item profile-page__group-item--hint" @click="goDeleteAccountHelp">
+						<text class="profile-page__group-text profile-page__group-text--hint">了解账号删除与数据说明</text>
+						<view class="u-arrow-right"></view>
+					</view>
+				</view>
+			</view>
+		</scroll-view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import BackButton from '@/components/BackButton/BackButton.uvue'
+	import PageHeader from '@/components/PageHeader/PageHeader.uvue'
+	import PasswordEye from '@/components/PasswordEye/PasswordEye.uvue'
+	import { PLACEHOLDER_STYLE } from '@/utils/theme.uts'
+	import { useUserStore } from '@/stores/user.uts'
+	import { ApiResponse } from '@/utils/request.uts'
+	import {
+		updateSignature,
+		changePassword,
+		sendChangeEmailOldCode,
+		sendChangeEmailNewCode,
+		changeEmail,
+		updateAvatar,
+		scheduleDeletion,
+		cancelDeletion,
+		updateUsername,
+		setPassword,
+		bindEmail,
+		getUserInfo,
+		logout
+	} from '@/api/user.uts'
+
+	const userStore = useUserStore()
+
+	/** 顶部留白：返回按钮（状态栏高度 + 40px）之下再留 12px */
+	const mainTop = ref(96)
+	const win = uni.getWindowInfo()
+	if (win.statusBarHeight > 0) {
+		mainTop.value = win.statusBarHeight + 52
+	}
+
+	// 账号是否处于待删除状态（status=0：24 小时冷静期）
+	const isDeletionScheduled = computed((): boolean => {
+		const info = userStore.userInfo
+		return info != null && info.status === 0
+	})
+
+	// 当前用户是否已设置密码（微信登录用户可能无密码）
+	const hasPassword = computed((): boolean => {
+		const info = userStore.userInfo
+		return info != null && info.has_password
+	})
+
+	// 当前用户是否已绑定邮箱
+	const hasEmail = computed((): boolean => {
+		const info = userStore.userInfo
+		return info != null && info.email.length > 0
+	})
+
+	// ===== 分区展开状态 =====
+	const expandUsername = ref(false)
+	const expandAvatar = ref(false)
+	const expandSignature = ref(false)
+	const expandPassword = ref(false)
+	const expandEmail = ref(false)
+
+	function collapseAll() : void {
+		expandUsername.value = false
+		expandAvatar.value = false
+		expandSignature.value = false
+		expandPassword.value = false
+		expandEmail.value = false
+		resetUsernameForm()
+		resetSignatureForm()
+		resetPasswordForm()
+		resetEmailForm()
+	}
+
+	function toggleUsername() : void {
+		if (isDeletionScheduled.value) {
+			return
+		}
+		const next = !expandUsername.value
+		collapseAll()
+		expandUsername.value = next
+	}
+
+	function toggleAvatar() : void {
+		if (isDeletionScheduled.value) {
+			return
+		}
+		const next = !expandAvatar.value
+		collapseAll()
+		if (next) {
+			selectedAvatar.value = currentAvatarKey()
+		}
+		expandAvatar.value = next
+	}
+
+	function toggleSignature() : void {
+		if (isDeletionScheduled.value) {
+			return
+		}
+		const next = !expandSignature.value
+		collapseAll()
+		expandSignature.value = next
+	}
+
+	function togglePassword() : void {
+		if (isDeletionScheduled.value) {
+			return
+		}
+		const next = !expandPassword.value
+		collapseAll()
+		expandPassword.value = next
+	}
+
+	function toggleEmail() : void {
+		if (isDeletionScheduled.value) {
+			return
+		}
+		const next = !expandEmail.value
+		collapseAll()
+		expandEmail.value = next
+	}
+
+	// ===== 修改用户名 =====
+	const usernameValue = ref('')
+	const usernameError = ref('')
+
+	function resetUsernameForm() : void {
+		usernameValue.value = ''
+		usernameError.value = ''
+	}
+
+	function validateUsername(v: string) : string {
+		if (v.length == 0) {
+			return '请输入用户名'
+		}
+		if (v.length < 2 || v.length > 15) {
+			return '用户名长度需为 2-15 个字符'
+		}
+		if (!/^[\u4e00-\u9fa5a-zA-Z0-9]+$/.test(v)) {
+			return '用户名仅允许中文、英文及数字字符'
+		}
+		return ''
+	}
+
+	function onUsernameBlur() : void {
+		usernameError.value = usernameValue.value.length == 0 ? '' : validateUsername(usernameValue.value)
+	}
+
+	function handleUpdateUsername() : void {
+		const v = usernameValue.value.trim()
+		const err = validateUsername(v)
+		if (err.length > 0) {
+			usernameError.value = err
+			uni.showToast({ title: err, icon: 'none' })
+			return
+		}
+		updateUsername(v).then((_res: ApiResponse) => {
+			userStore.patchUser('username', v)
+			uni.showToast({ title: '用户名修改成功', icon: 'success' })
+			collapseAll()
+		}).catch((e) => {
+			const err = e as Error
+			uni.showToast({ title: err.message, icon: 'none' })
+		})
+	}
+
+	// ===== 修改头像 =====
+	type AvatarOption = {
+		key: string
+		src: string
+	}
+
+	const avatarOptions = ref<AvatarOption[]>([
+		{ key: 'hei', src: '/static/touxiang/hei.png' } as AvatarOption,
+		{ key: 'hong', src: '/static/touxiang/hong.png' } as AvatarOption,
+		{ key: 'lan', src: '/static/touxiang/lan.png' } as AvatarOption
+	])
+
+	const selectedAvatar = ref('hong')
+
+	/** 数据库存值反查头像 key（默认 hong） */
+	function currentAvatarKey() : string {
+		const info = userStore.userInfo
+		if (info == null) {
+			return 'hong'
+		}
+		const url = info.avatar_url
+		if (url == 'hei' || url.includes('hei')) {
+			return 'hei'
+		}
+		if (url == 'lan' || url.includes('lan')) {
+			return 'lan'
+		}
+		return 'hong'
+	}
+
+	function onSelectAvatar(key: string) : void {
+		selectedAvatar.value = key
+	}
+
+	function handleUpdateAvatar() : void {
+		updateAvatar(selectedAvatar.value).then((_res: ApiResponse) => {
+			userStore.patchUser('avatar_url', selectedAvatar.value)
+			uni.showToast({ title: '头像更新成功', icon: 'success' })
+			collapseAll()
+		}).catch((e) => {
+			const err = e as Error
+			uni.showToast({ title: err.message, icon: 'none' })
+		})
+	}
+
+	// ===== 修改签名 =====
+	const signatureValue = ref('')
+	const signatureError = ref('')
+
+	function resetSignatureForm() : void {
+		signatureValue.value = ''
+		signatureError.value = ''
+	}
+
+	function handleUpdateSignature() : void {
+		const v = signatureValue.value.trim()
+		if (v.length == 0) {
+			signatureError.value = '请输入签名'
+			return
+		}
+		if (v.length > 70) {
+			signatureError.value = '签名长度不能超过 70 个字符'
+			return
+		}
+		updateSignature(v).then((_res: ApiResponse) => {
+			userStore.patchUser('signature', v)
+			uni.showToast({ title: '签名更新成功', icon: 'success' })
+			collapseAll()
+		}).catch((e) => {
+			const err = e as Error
+			uni.showToast({ title: err.message, icon: 'none' })
+		})
+	}
+
+	// ===== 修改 / 设置密码 =====
+	const oldPasswordValue = ref('')
+	const newPasswordValue = ref('')
+	const confirmPasswordValue = ref('')
+	const oldPasswordError = ref('')
+	const newPasswordError = ref('')
+	const confirmPasswordError = ref('')
+	const showOldPassword = ref(false)
+	const showNewPassword = ref(false)
+	const showConfirmPassword = ref(false)
+
+	function resetPasswordForm() : void {
+		oldPasswordValue.value = ''
+		newPasswordValue.value = ''
+		confirmPasswordValue.value = ''
+		oldPasswordError.value = ''
+		newPasswordError.value = ''
+		confirmPasswordError.value = ''
+		showOldPassword.value = false
+		showNewPassword.value = false
+		showConfirmPassword.value = false
+	}
+
+	function toggleOldPassword() : void {
+		showOldPassword.value = !showOldPassword.value
+	}
+
+	function toggleNewPassword() : void {
+		showNewPassword.value = !showNewPassword.value
+	}
+
+	function toggleConfirmPassword() : void {
+		showConfirmPassword.value = !showConfirmPassword.value
+	}
+
+	function validatePassword(v: string) : string {
+		if (v.length == 0) {
+			return '请输入密码'
+		}
+		if (v.length < 8 || v.length > 20) {
+			return '密码长度需为 8-20 位'
+		}
+		let categories = 0
+		if (/[a-z]/.test(v)) {
+			categories++
+		}
+		if (/[A-Z]/.test(v)) {
+			categories++
+		}
+		if (/[0-9]/.test(v)) {
+			categories++
+		}
+		if (/[^a-zA-Z0-9]/.test(v)) {
+			categories++
+		}
+		if (categories < 3) {
+			return '密码需包含大小写字母、数字、特殊符号中的至少三种'
+		}
+		return ''
+	}
+
+	function onOldPasswordBlur() : void {
+		oldPasswordError.value = oldPasswordValue.value.length == 0 ? '请输入旧密码' : ''
+	}
+
+	function onNewPasswordBlur() : void {
+		newPasswordError.value = newPasswordValue.value.length == 0 ? '' : validatePassword(newPasswordValue.value)
+	}
+
+	function onConfirmPasswordBlur() : void {
+		if (confirmPasswordValue.value.length == 0) {
+			confirmPasswordError.value = ''
+			return
+		}
+		confirmPasswordError.value = confirmPasswordValue.value !== newPasswordValue.value ? '两次密码不一致' : ''
+	}
+
+	function handleChangePassword() : void {
+		newPasswordError.value = validatePassword(newPasswordValue.value)
+		if (newPasswordValue.value.length > 0 && confirmPasswordValue.value !== newPasswordValue.value) {
+			confirmPasswordError.value = '两次密码不一致'
+		} else if (confirmPasswordValue.value.length == 0) {
+			confirmPasswordError.value = '请再次输入密码'
+		} else {
+			confirmPasswordError.value = ''
+		}
+		if (hasPassword.value) {
+			oldPasswordError.value = oldPasswordValue.value.length == 0 ? '请输入旧密码' : ''
+		} else {
+			oldPasswordError.value = ''
+		}
+		if (oldPasswordError.value.length > 0) {
+			uni.showToast({ title: oldPasswordError.value, icon: 'none' })
+			return
+		}
+		if (newPasswordError.value.length > 0) {
+			uni.showToast({ title: newPasswordError.value, icon: 'none' })
+			return
+		}
+		if (confirmPasswordError.value.length > 0) {
+			uni.showToast({ title: confirmPasswordError.value, icon: 'none' })
+			return
+		}
+		if (hasPassword.value) {
+			// 修改密码：验证旧密码后更新
+			changePassword(oldPasswordValue.value, newPasswordValue.value).then((_res: ApiResponse) => {
+				uni.showToast({ title: '密码修改成功', icon: 'success' })
+				collapseAll()
+			}).catch((e) => {
+				const err = e as Error
+				uni.showToast({ title: err.message, icon: 'none' })
+			})
+		} else {
+			// 设置密码：无密码用户首次设置
+			setPassword(newPasswordValue.value).then((_res: ApiResponse) => {
+				userStore.patchUser('has_password', true)
+				uni.showToast({ title: '密码设置成功', icon: 'success' })
+				collapseAll()
+			}).catch((e) => {
+				const err = e as Error
+				uni.showToast({ title: err.message, icon: 'none' })
+			})
+		}
+	}
+
+	// ===== 修改 / 绑定邮箱 =====
+	const emailStep = ref(1)
+	const oldCodeValue = ref('')
+	const newEmailValue = ref('')
+	const newCodeValue = ref('')
+	const oldCodeError = ref('')
+	const newEmailError = ref('')
+	const newCodeError = ref('')
+	const oldCodeCounting = ref(false)
+	const oldCodeSending = ref(false)
+	const oldCodeText = ref('获取验证码')
+	const newCodeCounting = ref(false)
+	const newCodeSending = ref(false)
+	const newCodeText = ref('获取验证码')
+	let oldCodeTimer = 0
+	let newCodeTimer = 0
+
+	function resetEmailForm() : void {
+		emailStep.value = 1
+		oldCodeValue.value = ''
+		newEmailValue.value = ''
+		newCodeValue.value = ''
+		oldCodeError.value = ''
+		newEmailError.value = ''
+		newCodeError.value = ''
+		oldCodeCounting.value = false
+		oldCodeText.value = '获取验证码'
+		newCodeCounting.value = false
+		newCodeText.value = '获取验证码'
+	}
+
+	function validateEmail(v: string) : string {
+		if (v.length == 0) {
+			return '请输入邮箱地址'
+		}
+		if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) {
+			return '邮箱格式不正确'
+		}
+		return ''
+	}
+
+	function validateCode(v: string) : string {
+		if (v.length == 0) {
+			return '请输入验证码'
+		}
+		if (!/^\d{6}$/.test(v)) {
+			return '验证码为 6 位数字'
+		}
+		return ''
+	}
+
+	function onNewEmailBlur() : void {
+		newEmailError.value = newEmailValue.value.length == 0 ? '' : validateEmail(newEmailValue.value)
+	}
+
+	function handleGetOldEmailCode() : void {
+		if (oldCodeCounting.value || oldCodeSending.value) {
+			return
+		}
+		oldCodeSending.value = true
+		oldCodeText.value = '发送中...'
+		sendChangeEmailOldCode().then((_res: ApiResponse) => {
+			uni.showToast({ title: '验证码已发送', icon: 'none' })
+			startOldCountdown()
+		}).catch((e) => {
+			const err = e as Error
+			oldCodeText.value = '获取验证码'
+			uni.showToast({ title: err.message, icon: 'none' })
+		}).finally(() => {
+			oldCodeSending.value = false
+		})
+	}
+
+	function startOldCountdown() : void {
+		let sec = 60
+		oldCodeCounting.value = true
+		oldCodeText.value = `${sec}s`
+		oldCodeTimer = setInterval(() => {
+			sec--
+			if (sec <= 0) {
+				clearInterval(oldCodeTimer)
+				oldCodeCounting.value = false
+				oldCodeText.value = '获取验证码'
+			} else {
+				oldCodeText.value = `${sec}s`
+			}
+		}, 1000)
+	}
+
+	function handleVerifyOldEmail() : void {
+		oldCodeError.value = validateCode(oldCodeValue.value)
+		if (oldCodeError.value.length > 0) {
+			uni.showToast({ title: oldCodeError.value, icon: 'none' })
+			return
+		}
+		emailStep.value = 2
+	}
+
+	function onEmailStepBack() : void {
+		if (hasEmail.value) {
+			// 修改邮箱：返回上一步重新验证旧邮箱
+			emailStep.value = 1
+			newEmailValue.value = ''
+			newCodeValue.value = ''
+			newEmailError.value = ''
+			newCodeError.value = ''
+			newCodeCounting.value = false
+			newCodeText.value = '获取验证码'
+		} else {
+			collapseAll()
+		}
+	}
+
+	function handleGetNewEmailCode() : void {
+		if (newCodeCounting.value || newCodeSending.value) {
+			return
+		}
+		const emailErr = validateEmail(newEmailValue.value)
+		if (emailErr.length > 0) {
+			newEmailError.value = emailErr
+			uni.showToast({ title: emailErr, icon: 'none' })
+			return
+		}
+		newCodeSending.value = true
+		newCodeText.value = '发送中...'
+		// 绑定邮箱场景（无邮箱用户）允许邮箱已存在以触发账号合并提示；修改邮箱场景禁止已存在
+		sendChangeEmailNewCode(newEmailValue.value, !hasEmail.value).then((_res: ApiResponse) => {
+			uni.showToast({ title: '验证码已发送', icon: 'none' })
+			startNewCountdown()
+		}).catch((e) => {
+			const err = e as Error
+			newCodeText.value = '获取验证码'
+			uni.showToast({ title: err.message, icon: 'none' })
+		}).finally(() => {
+			newCodeSending.value = false
+		})
+	}
+
+	function startNewCountdown() : void {
+		let sec = 60
+		newCodeCounting.value = true
+		newCodeText.value = `${sec}s`
+		newCodeTimer = setInterval(() => {
+			sec--
+			if (sec <= 0) {
+				clearInterval(newCodeTimer)
+				newCodeCounting.value = false
+				newCodeText.value = '获取验证码'
+			} else {
+				newCodeText.value = `${sec}s`
+			}
+		}, 1000)
+	}
+
+	function handleChangeEmail() : void {
+		newEmailError.value = validateEmail(newEmailValue.value)
+		newCodeError.value = validateCode(newCodeValue.value)
+		if (newEmailError.value.length > 0) {
+			uni.showToast({ title: newEmailError.value, icon: 'none' })
+			return
+		}
+		if (newCodeError.value.length > 0) {
+			uni.showToast({ title: newCodeError.value, icon: 'none' })
+			return
+		}
+		if (hasEmail.value) {
+			// 修改邮箱：需旧邮箱验证码 + 新邮箱验证码
+			changeEmail(oldCodeValue.value, newEmailValue.value, newCodeValue.value).then((_res: ApiResponse) => {
+				userStore.patchUser('email', newEmailValue.value)
+				uni.showToast({ title: '邮箱修改成功', icon: 'success' })
+				collapseAll()
+			}).catch((e) => {
+				const err = e as Error
+				const msg = err.message.includes('验证码') ? '请输入正确验证码' : err.message
+				uni.showToast({ title: msg, icon: 'none' })
+			})
+		} else {
+			// 绑定邮箱：无邮箱用户首次绑定（邮箱已存在时 auth 返回 need_merge，合并依赖本项目后端，暂未开放）
+			bindEmail(newEmailValue.value, newCodeValue.value).then((res: ApiResponse) => {
+				const d = res.data
+				const needMerge = d != null && d.getBoolean('need_merge') == true
+				if (needMerge) {
+					uni.showModal({
+						title: '提示',
+						content: '该邮箱已注册账号，账号合并功能暂未开放，请直接使用该账号登录',
+						showCancel: false,
+						confirmText: '确定'
+					})
+					return
+				}
+				userStore.patchUser('email', newEmailValue.value)
+				uni.showToast({ title: '邮箱绑定成功', icon: 'success' })
+				collapseAll()
+			}).catch((e) => {
+				const err = e as Error
+				const msg = err.message.includes('验证码') ? '请输入正确验证码' : err.message
+				uni.showToast({ title: msg, icon: 'none' })
+			})
+		}
+	}
+
+	// ===== 语言切换（界面仅还原，翻译功能后续实现） =====
+	function toggleLanguage() : void {
+		uni.showToast({ title: '英文版即将上线，敬请期待', icon: 'none' })
+	}
+
+	// ===== 页面加载：刷新最新用户信息（含 status/role） =====
+	onLoad(() => {
+		const info = userStore.userInfo
+		if (info != null && info.id > 0) {
+			getUserInfo().then((res: ApiResponse) => {
+				const d = res.data
+				if (res.code == 0 && d != null) {
+					const un = d.getString('username')
+					if (un != null) {
+						userStore.patchUser('username', un)
+					}
+					const sg = d.getString('signature')
+					if (sg != null) {
+						userStore.patchUser('signature', sg)
+					}
+					const av = d.getString('avatar_url')
+					if (av != null && av.length > 0) {
+						userStore.patchUser('avatar_url', av)
+					}
+					const em = d.getString('email')
+					if (em != null) {
+						userStore.patchUser('email', em)
+					}
+					const hp = d.getBoolean('has_password')
+					if (hp != null) {
+						userStore.patchUser('has_password', hp)
+					}
+					const st = d.getNumber('status')
+					if (st != null) {
+						userStore.patchUser('status', st)
+					}
+					const rl = d.getNumber('role')
+					if (rl != null) {
+						userStore.patchUser('role', rl)
+					}
+				}
+			}).catch((_e) => {
+				// 刷新失败静默，使用本地缓存信息
+			})
+		}
+	})
+
+	// ===== 删除账号 / 取消删除 =====
+	function handleDeletion() : void {
+		if (isDeletionScheduled.value) {
+			// 处于冷静期，执行取消删除
+			uni.showModal({
+				title: '提示',
+				content: '确定要取消账号删除吗？',
+				success: (res) => {
+					if (res.confirm) {
+						cancelDeletion().then((_res: ApiResponse) => {
+							userStore.patchUser('status', 1)
+							uni.showToast({ title: '账号删除已取消', icon: 'success' })
+						}).catch((e) => {
+							const err = e as Error
+							uni.showToast({ title: err.message, icon: 'none' })
+						})
+					}
+				}
+			})
+		} else {
+			// 未处于冷静期，执行删除
+			uni.showModal({
+				title: '删除账号',
+				content: '账号将在24小时后自动删除，业务数据将无法恢复；删除后仍可通过「忘记密码」找回账号',
+				confirmText: '确认删除',
+				cancelText: '取消',
+				success: (res) => {
+					if (res.confirm) {
+						scheduleDeletion().then((result: ApiResponse) => {
+							const d = result.data
+							const status = d != null ? (d.getNumber('status') ?? 0) : 0
+							userStore.patchUser('status', status)
+							uni.showToast({ title: '已计划删除，24小时后自动删除', icon: 'none' })
+						}).catch((e) => {
+							const err = e as Error
+							uni.showToast({ title: err.message, icon: 'none' })
+						})
+					}
+				}
+			})
+		}
+	}
+
+	// ===== 跳转免登录账号删除说明页 =====
+	function goDeleteAccountHelp() : void {
+		uni.navigateTo({ url: '/pages/user/delete-account' })
+	}
+
+	// ===== 退出登录 =====
+	function handleLogout() : void {
+		uni.showModal({
+			title: '提示',
+			content: '确定要退出登录吗？',
+			success: (res) => {
+				if (res.confirm) {
+					// 先通知 auth 撤销全部令牌；失败不阻断本地退出
+					logout().catch((_e) => {
+						// 服务端退出失败已忽略，本地态照常清理
+					}).finally(() => {
+						userStore.clearUser()
+						uni.showToast({ title: '已退出登录', icon: 'none' })
+						setTimeout(() => {
+							uni.redirectTo({ url: '/pages/user/settings' })
+						}, 1500)
+					})
+				}
+			}
+		})
+	}
+</script>
+
+<style lang="scss">
+	.profile-page {
+		flex: 1;
+		position: relative;
+		background-color: $bai-canvas-soft;
+	}
+
+	.profile-page__scroll {
+		flex: 1;
+	}
+
+	.profile-page__main {
+		padding-left: 48rpx;
+		padding-right: 48rpx;
+		padding-bottom: 64rpx;
+		flex-direction: column;
+	}
+
+	/* ===== 分组卡片 ===== */
+	.profile-page__group {
+		margin-top: 64rpx;
+		border-radius: 48rpx;
+		background-color: $bai-canvas;
+		overflow: hidden;
+	}
+
+	/* 账号待删除状态下：资料分组整体置灰 */
+	.profile-page__group--disabled {
+		opacity: 0.5;
+	}
+
+	.profile-page__group-item {
+		flex-direction: row;
+		justify-content: space-between;
+		align-items: center;
+		padding: 24rpx 32rpx;
+		box-sizing: border-box;
+		height: 98rpx;
+	}
+
+	.profile-page__group-item--bordered {
+		border-bottom: 1px solid $bai-pale;
+	}
+
+	.profile-page__group-text {
+		color: $bai-ink;
+		font-size: 32rpx;
+		line-height: 48rpx;
+		font-weight: 500;
+	}
+
+	.profile-page__group-text--danger {
+		color: $bai-negative;
+	}
+
+	/* 免登录账号删除说明入口（弱提示样式） */
+	.profile-page__group-item--hint {
+		border-top: 1px solid $bai-pale;
+	}
+
+	.profile-page__group-text--hint {
+		color: $bai-mute;
+		font-weight: 400;
+	}
+
+	/* 语言切换开关：纯 CSS 手写开关（当前仅简体中文，翻译功能后续实现） */
+	.profile-page__lang-switch {
+		position: relative;
+		width: 176rpx;
+		height: 56rpx;
+		border-radius: 9999px;
+		background-color: $bai-ink;
+		flex-shrink: 0;
+		overflow: hidden;
+	}
+
+	.profile-page__lang-knob {
+		position: absolute;
+		top: 4rpx;
+		left: 4rpx;
+		width: 48rpx;
+		height: 48rpx;
+		border-radius: 50%;
+		background-color: $bai-on-primary;
+	}
+
+	.profile-page__lang-text {
+		position: absolute;
+		left: 0;
+		right: 0;
+		top: 0;
+		bottom: 0;
+		text-align: right;
+		padding-right: 16rpx;
+		line-height: 56rpx;
+		font-size: 24rpx;
+		font-weight: 500;
+		color: $bai-on-primary;
+	}
+
+	/* ===== 动态表单区域 ===== */
+	.profile-page__form-section {
+		padding: 24rpx 32rpx;
+		box-sizing: border-box;
+		background-color: $bai-canvas-soft;
+	}
+
+	.profile-page__form-field {
+		margin-bottom: 24rpx;
+		flex-direction: column;
+	}
+
+	.profile-page__form-label {
+		margin-bottom: 8rpx;
+		color: $bai-ink;
+		font-size: 28rpx;
+		line-height: 40rpx;
+		font-weight: 400;
+	}
+
+	.profile-page__input {
+		height: 88rpx;
+		padding: 0 24rpx;
+		box-sizing: border-box;
+		background-color: $bai-canvas;
+		border-radius: $bai-rounded-md;
+		border: 1px solid $bai-ink;
+		color: $bai-ink;
+		font-size: 32rpx;
+		line-height: 42rpx;
+	}
+
+	.profile-page__input--error {
+		border-color: $bai-negative;
+	}
+
+	/* 密码行：统一边框容器，内含输入框与眼睛图标 */
+	.profile-page__password-row {
+		position: relative;
+		flex-direction: row;
+		align-items: stretch;
+		border: 1px solid $bai-ink;
+		border-radius: $bai-rounded-md;
+		background-color: $bai-canvas;
+	}
+
+	.profile-page__password-row--error {
+		border-color: $bai-negative;
+	}
+
+	.profile-page__input--password {
+		flex: 1;
+		border: none;
+		background-color: transparent;
+		border-radius: $bai-rounded-md 0 0 $bai-rounded-md;
+		padding-right: 24rpx;
+	}
+
+	.profile-page__eye {
+		flex-shrink: 0;
+		position: relative;
+		z-index: 2;
+		padding: 0 24rpx;
+		border-radius: 0 $bai-rounded-md $bai-rounded-md 0;
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.profile-page__input--code {
+		flex: 1;
+	}
+
+	.profile-page__error-text {
+		margin-top: 8rpx;
+		color: $bai-negative;
+		font-size: 24rpx;
+		line-height: 32rpx;
+	}
+
+	/* ===== 验证码行 ===== */
+	.profile-page__code-row {
+		flex-direction: row;
+	}
+
+	.profile-page__code-btn {
+		margin-left: 16rpx;
+		width: 192rpx;
+		height: 88rpx;
+		padding: 0 24rpx;
+		box-sizing: border-box;
+		border-radius: $bai-rounded-md;
+		border: 1px solid $bai-ink;
+		flex-direction: row;
+		justify-content: center;
+		align-items: center;
+		flex-shrink: 0;
+	}
+
+	.profile-page__code-btn--disabled {
+		opacity: 0.6;
+	}
+
+	.profile-page__code-btn-text {
+		color: $bai-ink;
+		font-size: 28rpx;
+		line-height: 40rpx;
+		font-weight: 400;
+	}
+
+	/* ===== 表单操作按钮 ===== */
+	.profile-page__form-actions {
+		margin-top: 32rpx;
+		flex-direction: row;
+		justify-content: flex-end;
+	}
+
+	.profile-page__btn {
+		margin-left: 24rpx;
+		height: 72rpx;
+		padding: 0 40rpx;
+		box-sizing: border-box;
+		border-radius: $bai-rounded-pill;
+		flex-direction: row;
+		justify-content: center;
+		align-items: center;
+	}
+
+	.profile-page__btn--cancel {
+		background-color: $bai-pale;
+	}
+
+	.profile-page__btn--submit {
+		background-color: $bai-ink;
+	}
+
+	.profile-page__btn-text {
+		font-size: 28rpx;
+		line-height: 40rpx;
+		font-weight: 400;
+		color: $bai-ink;
+	}
+
+	.profile-page__btn-text--primary {
+		color: $bai-on-primary;
+	}
+
+	/* ===== 头像选择列表 ===== */
+	.profile-page__avatar-list {
+		padding: 16rpx 0;
+		flex-direction: row;
+	}
+
+	.profile-page__avatar-option {
+		margin-right: 32rpx;
+		width: 144rpx;
+		height: 144rpx;
+		border-radius: $bai-rounded-xl;
+		border: 2px solid transparent;
+		box-sizing: border-box;
+		flex-direction: row;
+		justify-content: center;
+		align-items: center;
+		background-color: $bai-canvas;
+	}
+
+	.profile-page__avatar-option--selected {
+		border-color: $bai-ink;
+		background-color: $bai-canvas-soft;
+	}
+
+	.profile-page__avatar-image {
+		width: 112rpx;
+		height: 112rpx;
+	}
+</style>

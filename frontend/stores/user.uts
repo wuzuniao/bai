@@ -1,0 +1,157 @@
+/**
+ * 用户状态管理 Store（Pinia 组合式写法，规范见 项目规范.md 3.3）
+ * --------------------------------------------------------------------------
+ * - 管理用户登录态（access_token + refresh_token，由 auth 统一认证服务签发）和个人信息
+ * - token 与用户信息持久化到本地存储（userInfo 存 JSON 字符串，跨端读取稳定）
+ * - 用户信息包含：id、username、signature、avatar_url、email、has_password、status、role
+ * - status：1-正常，0-待删除（24 小时冷静期）；role：0-普通用户，7-管理员
+ * - 未登录时 userInfo 为 null，登录成功后经 setUser 写入
+ */
+import { defineStore } from 'pinia'
+import { ref } from 'vue'
+
+/** 用户信息结构 */
+export type UserInfo = {
+	id: number
+	username: string
+	signature: string
+	/** 头像标识（数据库存 key，前端映射到 static 头像图） */
+	avatar_url: string
+	email: string
+	/** 是否已设置密码（微信登录用户可能无密码） */
+	has_password: boolean
+	/** 1-正常，0-待删除 */
+	status: number
+	/** 0-普通用户，7-管理员 */
+	role: number
+}
+
+export const useUserStore = defineStore('user', () => {
+	// 用户信息（未登录为 null）
+	const userInfo = ref<UserInfo | null>(null)
+
+	// JWT 访问令牌（未登录为空字符串）
+	const accessToken = ref('')
+
+	// 刷新令牌（未登录为空字符串；auth 服务签发）
+	const refreshToken = ref('')
+
+	/** 从本地存储恢复用户信息与双 token（页面刷新/重启后恢复状态） */
+	const loadUserFromStorage = () : void => {
+		try {
+			const stored = uni.getStorageSync('userInfo')
+			if (stored instanceof string) {
+				const parsed = JSON.parse<UserInfo>(stored as string)
+				if (parsed != null && parsed.id > 0) {
+					userInfo.value = parsed
+				}
+			}
+			const token = uni.getStorageSync('accessToken')
+			if (token instanceof string) {
+				accessToken.value = token as string
+			}
+			const rToken = uni.getStorageSync('refreshToken')
+			if (rToken instanceof string) {
+				refreshToken.value = rToken as string
+			}
+		} catch (e) {
+			console.warn('读取本地用户信息失败', e)
+		}
+	}
+
+	/** 持久化当前用户信息到本地存储 */
+	const saveUserLocal = () : void => {
+		try {
+			uni.setStorageSync('userInfo', JSON.stringify(userInfo.value))
+		} catch (e) {
+			console.warn('保存用户信息到本地失败', e)
+		}
+	}
+
+	/**
+	 * 写入用户信息（登录/注册/绑定邮箱等接口成功后调用，
+	 * data 含用户字段与 access_token/refresh_token）
+	 */
+	const setUser = (data: UTSJSONObject) : void => {
+		userInfo.value = {
+			id: data.getNumber('id') ?? 0,
+			username: data.getString('username') ?? '',
+			signature: data.getString('signature') ?? '',
+			avatar_url: data.getString('avatar_url') ?? '',
+			email: data.getString('email') ?? '',
+			has_password: data.getBoolean('has_password') ?? false,
+			status: data.getNumber('status') ?? 1,
+			role: data.getNumber('role') ?? 0
+		} as UserInfo
+		const at = data.getString('access_token')
+		if (at != null && at.length > 0) {
+			accessToken.value = at
+			try {
+				uni.setStorageSync('accessToken', at)
+			} catch (e) {
+				console.warn('保存 token 到本地失败', e)
+			}
+		}
+		const rt = data.getString('refresh_token')
+		if (rt != null && rt.length > 0) {
+			refreshToken.value = rt
+			try {
+				uni.setStorageSync('refreshToken', rt)
+			} catch (e) {
+				console.warn('保存刷新令牌到本地失败', e)
+			}
+		}
+		saveUserLocal()
+	}
+
+	/** 更新单个用户字段（资料修改成功后同步本地展示与持久化） */
+	const patchUser = (key: string, value: string | boolean | number) : void => {
+		if (userInfo.value == null) {
+			return
+		}
+		if (key == 'username') {
+			userInfo.value.username = value as string
+		} else if (key == 'signature') {
+			userInfo.value.signature = value as string
+		} else if (key == 'avatar_url') {
+			userInfo.value.avatar_url = value as string
+		} else if (key == 'email') {
+			userInfo.value.email = value as string
+		} else if (key == 'has_password') {
+			userInfo.value.has_password = value as boolean
+		} else if (key == 'status') {
+			userInfo.value.status = value as number
+		} else if (key == 'role') {
+			userInfo.value.role = value as number
+		}
+		saveUserLocal()
+	}
+
+	/** 清除用户信息与双 token（退出登录/账号删除/401 失效时调用） */
+	const clearUser = () : void => {
+		userInfo.value = null
+		accessToken.value = ''
+		refreshToken.value = ''
+		try {
+			uni.removeStorageSync('userInfo')
+			uni.removeStorageSync('accessToken')
+			uni.removeStorageSync('refreshToken')
+		} catch (e) {
+			console.warn('清除本地用户信息失败', e)
+		}
+	}
+
+	// 初始化时恢复本地登录态
+	loadUserFromStorage()
+
+	return {
+		userInfo,
+		accessToken,
+		refreshToken,
+		loadUserFromStorage,
+		saveUserLocal,
+		setUser,
+		patchUser,
+		clearUser
+	}
+})

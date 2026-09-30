@@ -1,0 +1,279 @@
+<template>
+	<view class="pay-page">
+		<!-- 返回按钮：固定近黑背景使用 arrow-back-light（夜间白色变体），定位规则与 BackButton 一致 -->
+		<view class="pay-page__back" :style="'top:' + backTop + 'px'" @click="goBack">
+			<image class="pay-page__back-icon" src="/static/icons/arrow-back-light.svg" mode="aspectFit" />
+		</view>
+
+		<scroll-view class="pay-page__scroll" direction="vertical" :show-scrollbar="false">
+			<!-- 主内容：标题区 / 权益卡 / 价格区 -->
+			<view class="pay-page__main" :style="'padding-top:' + mainTop + 'px'">
+				<view class="pay-page__heading">
+					<text class="pay-page__title">Pro会员</text>
+					<text class="pay-page__subtitle">终极体验，即刻开启</text>
+				</view>
+
+				<view class="pay-page__perks">
+					<view class="pay-page__perk">
+						<text class="pay-page__perk-title">离线畅读</text>
+						<text class="pay-page__perk-text">海量书籍离线缓存，无网也能沉浸阅读</text>
+					</view>
+					<view class="pay-page__perk pay-page__perk--second">
+						<text class="pay-page__perk-title">极致纯净</text>
+						<text class="pay-page__perk-text">永久移除所有广告，享受无干扰的流畅体验</text>
+					</view>
+				</view>
+
+				<view class="pay-page__pricing">
+					<view class="pay-page__price-row">
+						<text class="pay-page__price">¥6</text>
+						<text class="pay-page__price-unit">/ 月</text>
+					</view>
+					<view class="pay-page__price-meta">
+						<text class="pay-page__price-origin">原价 ¥36</text>
+						<view class="pay-page__pill">
+							<text class="pay-page__pill-text">限时节省 83%</text>
+						</view>
+					</view>
+				</view>
+			</view>
+		</scroll-view>
+
+		<!-- 底部操作区；仅前端展示，未接入支付逻辑 -->
+		<view class="pay-page__action">
+			<view class="pay-page__btn" hover-class="pay-page__btn--hover" :hover-stay-time="70">
+				<text class="pay-page__btn-text">立即订阅</text>
+			</view>
+			<text class="pay-page__safe-tip">支付安全由应用商店提供极致保障</text>
+		</view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	/**
+	 * 会员支付页（member-pay.uvue）
+	 * --------------------------------------------------------------------------
+	 * - 纯前端静态展示：权益卡、价格与限时胶囊、订阅按钮（未接入任何支付后端逻辑）
+	 * - 入口：「我的」页会员卡片「立即抢购」按钮（仅 App 商店分发渠道显示）
+	 * - 固定深色皮肤：支付相关区块按约定保留原支付配色（不随 bai 主题令牌更换）
+	 */
+
+	/** 顶部定位：返回按钮取状态栏高度，内容再避让 */
+	const backTop = ref(44)
+	const mainTop = ref(180)
+	const win = uni.getWindowInfo()
+	if (win.statusBarHeight > 0) {
+		backTop.value = win.statusBarHeight
+		mainTop.value = win.statusBarHeight + 128
+	}
+
+	/** 返回上一页：页面栈为空（如分享直达）时回退首页 */
+	function goBack() : void {
+		const pages = getCurrentPages()
+		if (pages.length > 1) {
+			uni.navigateBack({ delta: 1 })
+		} else {
+			uni.reLaunch({ url: '/pages/index/index' })
+		}
+	}
+</script>
+
+<style lang="scss">
+	/* 支付相关区块：保留原支付固定配色（近黑底 + 亮绿强调），不使用 $bai 主题令牌 */
+	.pay-page {
+		flex: 1;
+		box-sizing: border-box;
+		background-color: #0e0f0c;
+		flex-direction: column;
+	}
+
+	.pay-page__scroll {
+		flex: 1;
+	}
+
+	/* ===== 返回按钮 ===== */
+	.pay-page__back {
+		position: absolute;
+		left: 48rpx;
+		z-index: 10;
+		width: 80rpx;
+		height: 80rpx;
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.pay-page__back-icon {
+		width: 80rpx;
+		height: 80rpx;
+	}
+
+	/* ===== 主内容 ===== */
+	.pay-page__main {
+		box-sizing: border-box;
+		padding-left: 48rpx;
+		padding-right: 48rpx;
+		padding-bottom: 48rpx;
+		flex-direction: column;
+		justify-content: center;
+	}
+
+	/* 标题区 */
+	.pay-page__heading {
+		flex-direction: column;
+		align-items: center;
+		padding-bottom: 48rpx;
+	}
+
+	.pay-page__title {
+		color: #e8ebe6;
+		font-size: 96rpx;
+		line-height: 104rpx;
+		font-weight: 700;
+		text-align: center;
+	}
+
+	.pay-page__subtitle {
+		margin-top: 24rpx;
+		color: #c4c7c3;
+		font-size: 40rpx;
+		line-height: 60rpx;
+		font-weight: 400;
+		text-align: center;
+	}
+
+	/* ===== 权益卡 ===== */
+	.pay-page__perks {
+		flex-direction: column;
+	}
+
+	.pay-page__perk {
+		box-sizing: border-box;
+		padding: 32rpx;
+		border-radius: $bai-rounded-xl;
+		background-color: #2f3131;
+		border: 1px solid #e2e2e2;
+		flex-direction: column;
+	}
+
+	.pay-page__perk--second {
+		margin-top: 24rpx;
+	}
+
+	.pay-page__perk-title {
+		color: #acf67c;
+		font-size: 40rpx;
+		line-height: 64rpx;
+		font-weight: 600;
+		padding-bottom: 8rpx;
+	}
+
+	.pay-page__perk-text {
+		color: #c4c7c3;
+		font-size: 32rpx;
+		line-height: 48rpx;
+		font-weight: 400;
+	}
+
+	/* ===== 价格区 ===== */
+	.pay-page__pricing {
+		padding: 32rpx 0;
+		flex-direction: column;
+	}
+
+	.pay-page__price-row {
+		flex-direction: row;
+		justify-content: center;
+		align-items: flex-end;
+	}
+
+	.pay-page__price {
+		color: #acf67c;
+		font-size: 128rpx;
+		line-height: 128rpx;
+		font-weight: 700;
+	}
+
+	.pay-page__price-unit {
+		margin-left: 16rpx;
+		color: #c4c7c3;
+		font-size: 48rpx;
+		line-height: 64rpx;
+		font-weight: 400;
+		padding-bottom: 4rpx;
+	}
+
+	/* 价格下行：原价（删除线）+ 限时胶囊 */
+	.pay-page__price-meta {
+		margin-top: 16rpx;
+		flex-direction: row;
+		justify-content: center;
+		align-items: center;
+	}
+
+	.pay-page__price-origin {
+		color: #868685;
+		font-size: 28rpx;
+		line-height: 28rpx;
+		font-weight: 400;
+		text-decoration: line-through;
+	}
+
+	.pay-page__pill {
+		margin-left: 16rpx;
+		height: 56rpx;
+		box-sizing: border-box;
+		padding: 0 24rpx;
+		border-radius: 9999px;
+		background-color: #2d3d23;
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.pay-page__pill-text {
+		color: #acf67c;
+		font-size: 26rpx;
+		line-height: 32rpx;
+		font-weight: 400;
+	}
+
+	/* ===== 底部操作区 ===== */
+	.pay-page__action {
+		padding: 32rpx 48rpx 64rpx;
+		box-sizing: border-box;
+		flex-direction: column;
+	}
+
+	.pay-page__btn {
+		height: 128rpx;
+		border-radius: $bai-rounded-xl;
+		background-color: #acf67c;
+		box-shadow: 0 0 40px -10px rgba(172, 246, 124, 0.4);
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+	}
+
+	/* 按压态：对应设计稿 hover opacity 0.8 / click scale 0.95 */
+	.pay-page__btn--hover {
+		opacity: 0.8;
+		transform: scale(0.95);
+	}
+
+	.pay-page__btn-text {
+		color: #092100;
+		font-size: 48rpx;
+		line-height: 64rpx;
+		font-weight: 400;
+	}
+
+	.pay-page__safe-tip {
+		margin-top: 32rpx;
+		color: #868685;
+		font-size: 24rpx;
+		line-height: 32rpx;
+		font-weight: 400;
+		text-align: center;
+	}
+</style>

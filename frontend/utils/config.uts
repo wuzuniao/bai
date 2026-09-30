@@ -1,0 +1,20 @@
+/**
+ * 环境配置常量（用户模块唯一取值处）
+ *
+ * 为什么不用 .env / import.meta.env：HBuilderX 内置编译器不加载 .env 文件，
+ * 与 yao 项目同源原因，改用常量模块 + 条件编译区分开发与生产环境。
+ * 本文件提交 Git，不得写入密码、密钥等敏感信息（域名与 client_id 属公开信息）。
+ */
+
+// auth 统一认证服务基础地址（登录/注册/资料等用户接口直连此域名，本项目后端不转发）。
+// 发行（production）走生产 HTTPS 域名；开发（运行）连本地认证服务。
+export const AUTH_BASE_URL: string = process.env.NODE_ENV === 'production'
+	? 'https://auth.wuzuniao.com'
+	: 'http://localhost:10000'
+
+// OIDC 接入方 client_id（本应用在 auth 服务 oauth_clients 表注册的公共 client）
+export const AUTH_CLIENT_ID: string = 'bai'
+
+// 服务协议 / 隐私政策（外部页面，以链接形式关联，应用内不建页）
+export const AGREEMENT_URL: string = 'https://auth.wuzuniao.com/pages/agreement.html'
+export const PRIVACY_URL: string = 'https://auth.wuzuniao.com/pages/privacy.html'

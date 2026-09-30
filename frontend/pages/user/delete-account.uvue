@@ -1,0 +1,170 @@
+<template>
+	<view class="delete-account-page">
+		<!-- 顶部返回按钮（次级页面统一返回组件） -->
+		<BackButton />
+
+		<scroll-view class="delete-account-page__scroll" direction="vertical" :show-scrollbar="false">
+			<view class="delete-account-page__canvas" :style="'padding-top:' + mainTop + 'px'">
+				<PageHeader
+					title="账号删除与数据说明"
+					desc="了解如何删除您的账号及与之相关的数据处理方式。本说明页无需登录即可访问。"
+				/>
+
+				<!-- 白色卡片：说明正文 -->
+				<view class="delete-account-page__card">
+					<view class="delete-account-page__list">
+						<!-- 1. 删除途径 -->
+						<view class="delete-account-page__item">
+							<text class="delete-account-page__item-title">一、如何删除账号</text>
+							<text class="delete-account-page__item-text">您可以在应用内自助申请注销账号并删除全部数据：</text>
+							<view class="delete-account-page__sub">
+								<text class="delete-account-page__sub-label">应用内：</text>
+								<text class="delete-account-page__sub-text">打开本产品，进入「我的 - 个人信息」页面，点击底部的「删除账号」。</text>
+							</view>
+							<view class="delete-account-page__btn" @click="goLogin">
+								<text class="delete-account-page__btn-text">前往登录后删除</text>
+							</view>
+						</view>
+
+						<!-- 2. 冷静期 -->
+						<view class="delete-account-page__item">
+							<text class="delete-account-page__item-title">二、24 小时冷静期</text>
+							<text class="delete-account-page__item-text">申请提交后，您的账号立即被冻结、全部登录令牌立即失效。系统提供 24 小时冷静期，期间您可以重新登录并撤销注销申请，撤销后账号恢复正常。冷静期届满后，您的业务数据将被删除且不可恢复，账号将被标记为「已删除」并无法登录；此后您仍可通过「忘记密码」找回账号本身。</text>
+						</view>
+
+						<!-- 3. 删除范围 -->
+						<view class="delete-account-page__item">
+							<text class="delete-account-page__item-title">三、将被删除的数据与账号找回</text>
+							<text class="delete-account-page__item-text">冷静期届满后，账号关联的全部业务数据将被删除且不可恢复。账号删除后仅保留账号主记录（用户名、邮箱、密码哈希、个性签名、头像标识）以支持账号找回——您可以通过「忘记密码」完成邮箱验证后恢复账号并重新登录，但已删除的业务数据不会恢复。我们不保留已删除业务数据的备份副本。</text>
+						</view>
+
+						<!-- 4. 依法保留 -->
+						<view class="delete-account-page__item">
+							<text class="delete-account-page__item-title">四、依法须保留的部分</text>
+							<text class="delete-account-page__item-text">如法律法规另有强制保存期限规定，超出前述删除范围的部分将在法定期限届满后再行删除，期间依法限制其使用。</text>
+						</view>
+
+						<!-- 5. 其他权利 -->
+						<view class="delete-account-page__item">
+							<text class="delete-account-page__item-title">五、其他个人信息权利</text>
+							<text class="delete-account-page__item-text">除删除账号外，您还享有查阅、复制、更正、补充个人信息以及撤回同意等权利。如需通过邮件行使上述权利，请发送邮件至 xpg@wuzuniao.com，我们将在核验身份后于十五个工作日内响应。更多说明详见《隐私政策》与《服务协议》。</text>
+						</view>
+					</view>
+				</view>
+			</view>
+		</scroll-view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import BackButton from '@/components/BackButton/BackButton.uvue'
+	import PageHeader from '@/components/PageHeader/PageHeader.uvue'
+
+	/** 顶部留白：返回按钮（状态栏高度 + 40px）之下再留 12px */
+	const mainTop = ref(96)
+	const win = uni.getWindowInfo()
+	if (win.statusBarHeight > 0) {
+		mainTop.value = win.statusBarHeight + 52
+	}
+
+	/** 跳转登录页（登录后在个人信息页删除账号） */
+	function goLogin() : void {
+		uni.navigateTo({ url: '/pages/user/login' })
+	}
+</script>
+
+<style lang="scss">
+	.delete-account-page {
+		flex: 1;
+		position: relative;
+		background-color: $bai-canvas-soft;
+	}
+
+	.delete-account-page__scroll {
+		flex: 1;
+	}
+
+	.delete-account-page__canvas {
+		padding-left: 48rpx;
+		padding-right: 48rpx;
+		padding-bottom: 64rpx;
+		box-sizing: border-box;
+		flex-direction: column;
+	}
+
+	/* ===== 白色卡片 ===== */
+	.delete-account-page__card {
+		margin-top: 64rpx;
+		padding: 48rpx;
+		box-sizing: border-box;
+		background-color: $bai-canvas;
+		border-radius: 48rpx;
+		flex-direction: column;
+		justify-content: center;
+	}
+
+	.delete-account-page__list {
+		flex-direction: column;
+	}
+
+	.delete-account-page__item {
+		margin-bottom: 48rpx;
+		flex-direction: column;
+	}
+
+	.delete-account-page__item-title {
+		margin-bottom: 16rpx;
+		color: $bai-ink;
+		font-size: 36rpx;
+		line-height: 52rpx;
+		font-weight: 600;
+	}
+
+	.delete-account-page__item-text {
+		color: $bai-body;
+		font-size: 32rpx;
+		line-height: 48rpx;
+		font-weight: 400;
+	}
+
+	.delete-account-page__sub {
+		margin-top: 8rpx;
+		padding-left: 8rpx;
+		flex-direction: column;
+	}
+
+	.delete-account-page__sub-label {
+		color: $bai-ink;
+		font-size: 32rpx;
+		line-height: 48rpx;
+		font-weight: 600;
+	}
+
+	.delete-account-page__sub-text {
+		color: $bai-body;
+		font-size: 32rpx;
+		line-height: 48rpx;
+		font-weight: 400;
+	}
+
+	/* 跳转登录按钮 */
+	.delete-account-page__btn {
+		margin-top: 8rpx;
+		align-self: flex-start;
+		height: 80rpx;
+		padding: 0 40rpx;
+		box-sizing: border-box;
+		border-radius: $bai-rounded-pill;
+		background-color: $bai-ink;
+		flex-direction: row;
+		justify-content: center;
+		align-items: center;
+	}
+
+	.delete-account-page__btn-text {
+		color: $bai-on-primary;
+		font-size: 28rpx;
+		line-height: 40rpx;
+		font-weight: 500;
+	}
+</style>

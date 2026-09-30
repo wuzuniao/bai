@@ -1,0 +1,43 @@
+<template>
+	<view class="page-header">
+		<text class="page-header__title">{{ title }}</text>
+		<text v-if="desc.length > 0" class="page-header__desc">{{ desc }}</text>
+	</view>
+</template>
+
+<script setup lang="uts">
+	/**
+	 * PageHeader —— 页面标题区复用组件
+	 * 标题 + 副标题/描述，个人中心子页面（帮助中心/联系我们/站内信等）共用。
+	 */
+	const props = defineProps<{
+		/** 页面主标题 */
+		title: string
+		/** 页面副标题/描述（可空） */
+		desc: string
+	}>()
+</script>
+
+<style lang="scss">
+	/* 标题区容器：左缘与页面卡片对齐 */
+	.page-header {
+		padding-left: 16rpx;
+		padding-right: 16rpx;
+		flex-direction: column;
+	}
+
+	.page-header__title {
+		color: $bai-ink;
+		font-size: 64rpx;
+		line-height: 72rpx;
+		font-weight: 600;
+	}
+
+	.page-header__desc {
+		margin-top: 16rpx;
+		color: $bai-body;
+		font-size: 32rpx;
+		line-height: 48rpx;
+		font-weight: 400;
+	}
+</style>

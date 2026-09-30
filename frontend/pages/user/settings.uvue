@@ -1,0 +1,630 @@
+<template>
+	<view class="settings-page">
+		<!-- 站内信入口（左上角，绝对定位避让状态栏，不随内容滚动） -->
+		<view class="settings-page__notice" :style="'top:' + noticeTop + 'px'" @click="goMessages">
+			<image class="settings-page__notice-icon" src="/static/icons/notice.png" mode="aspectFit" />
+		</view>
+
+		<scroll-view class="settings-page__scroll" direction="vertical" :show-scrollbar="false">
+			<view class="settings-page__main" :style="'padding-top:' + mainTop + 'px'">
+				<!-- 用户资料卡片（普通版式：未登录或角色等级 0） -->
+				<view v-if="!isAdminProfile" class="settings-page__profile-card" @click="goProfileOrLogin">
+					<!-- 左缘品牌色装饰竖条 -->
+					<view class="settings-page__profile-accent"></view>
+					<view class="settings-page__profile-info">
+						<text class="settings-page__profile-name">{{ displayName }}</text>
+						<text class="settings-page__profile-slogan">{{ displaySlogan }}</text>
+					</view>
+					<view class="settings-page__profile-avatar-wrap">
+						<image v-if="avatarUrl.length > 0" class="settings-page__profile-avatar" :src="avatarUrl" mode="aspectFit" />
+					</view>
+					<!-- 右上角 45° 斜切角（页面背景色三角覆盖形成） -->
+					<view class="settings-page__profile-notch"></view>
+				</view>
+
+				<!-- 用户资料卡片（管理员版式：已登录且角色等级 ≥1；
+				     白色横幅 + 墨色信息板错位叠放，对应 bai 双表层设计语言） -->
+				<view v-else class="settings-page__kinetic-card" @click="goProfileOrLogin">
+					<view class="settings-page__kinetic-hero">
+						<view class="settings-page__kinetic-pro-wrap">
+							<text class="settings-page__kinetic-pro">{{ proBadge }}</text>
+						</view>
+						<image v-if="avatarUrl.length > 0" class="settings-page__kinetic-avatar" :src="avatarUrl" mode="widthFix" />
+					</view>
+					<view class="settings-page__kinetic-panel">
+						<text class="settings-page__kinetic-name">{{ displayName }}</text>
+						<view v-if="displaySlogan.length > 0" class="settings-page__kinetic-slogan-box">
+							<text class="settings-page__kinetic-slogan">{{ displaySlogan }}</text>
+						</view>
+					</view>
+				</view>
+
+				<!-- 会员卡片（仅 App 商店分发渠道且登录的普通用户 role=0 可见；
+				     深色权益卡，样式与内容为纯前端静态展示，支付相关保留原配色） -->
+				<view v-if="showMemberCard" class="settings-page__member-card">
+					<view class="settings-page__member-glow"></view>
+					<view class="settings-page__member-info">
+						<view class="settings-page__member-badge">
+							<image class="settings-page__member-badge-icon" src="/static/icons/huiyuan.png" mode="aspectFit" />
+							<text class="settings-page__member-badge-text">会员专享权益</text>
+						</view>
+						<text class="settings-page__member-title">解锁离线畅读与纯净阅读体验</text>
+					</view>
+					<view class="settings-page__member-price-row">
+						<text class="settings-page__member-price">¥6</text>
+						<view class="settings-page__member-price-meta">
+							<text class="settings-page__member-price-original">原价 ¥36</text>
+							<text class="settings-page__member-price-unit">/ 每月</text>
+						</view>
+					</view>
+					<view class="settings-page__member-btn" hover-class="settings-page__member-btn--hover" :hover-stay-time="70" @click="goMemberPay">
+						<text class="settings-page__member-btn-text">立即抢购</text>
+					</view>
+				</view>
+
+				<!-- 公共管理（仅管理员可见） -->
+				<view v-if="isAdmin" class="settings-page__admin-row">
+					<view class="settings-page__admin-card" @click="goAnnouncement">
+						<text class="settings-page__admin-title">公告管理</text>
+					</view>
+				</view>
+
+				<!-- 帮助入口分组：帮助中心 + 联系我们 -->
+				<view class="settings-page__group2">
+					<view class="settings-page__group2-item settings-page__group2-item--bordered" @click="goHelp">
+						<text class="settings-page__group2-text">帮助中心</text>
+						<view class="u-arrow-right"></view>
+					</view>
+					<view class="settings-page__group2-item" @click="goContact">
+						<text class="settings-page__group2-text">联系我们</text>
+						<view class="u-arrow-right"></view>
+					</view>
+				</view>
+			</view>
+		</scroll-view>
+
+		<BottomNavBar :items="navItems" :model-value="navActive" @change="onNavChange" />
+	</view>
+</template>
+
+<script setup lang="uts">
+	import BottomNavBar from '@/components/BottomNavBar/BottomNavBar.uvue'
+	import { BottomNavItem } from '@/components/BottomNavBar/navItem.uts'
+	import { useUserStore } from '@/stores/user.uts'
+
+	const userStore = useUserStore()
+
+	/** 悬浮导航项（与首页/书架一致，当前页为「我的」） */
+	const navItems = ref<BottomNavItem[]>([
+		{
+			key: 'home',
+			text: '首页',
+			icon: '/static/icons/home.svg',
+			iconActive: '/static/icons/home-active.svg',
+			iconWidth: 31,
+			iconHeight: 31
+		} as BottomNavItem,
+		{
+			key: 'bookshelf',
+			text: '书架',
+			icon: '/static/icons/bookshelf.svg',
+			iconActive: '/static/icons/bookshelf-active.svg',
+			iconWidth: 38,
+			iconHeight: 38
+		} as BottomNavItem,
+		{
+			key: 'mine',
+			text: '我的',
+			icon: '/static/icons/mine.svg',
+			iconActive: '/static/icons/mine-active.svg',
+			iconWidth: 31,
+			iconHeight: 31
+		} as BottomNavItem
+	])
+
+	const navActive = ref(2)
+
+	/** 顶部留白：站内信入口与内容区均避让状态栏（小程序端胶囊在右侧，不冲突） */
+	const noticeTop = ref(44)
+	const mainTop = ref(96)
+	const win = uni.getWindowInfo()
+	if (win.statusBarHeight > 0) {
+		noticeTop.value = win.statusBarHeight
+		mainTop.value = win.statusBarHeight + 52
+	}
+
+	// 会员卡片渠道可见性：仅 App 商店分发渠道可见（小程序/H5 无此入口）。
+	// 渠道包细分（google 等）待后续上架时再接入。
+	let memberChannelVisible = false
+	// #ifdef APP-ANDROID || APP-HARMONY
+	memberChannelVisible = true
+	// #endif
+
+	// 用户角色等级（未登录为 0），驱动 PRO 徽标数字与管理员版式判断
+	const memberLevel = computed((): number => {
+		const info = userStore.userInfo
+		return info == null ? 0 : info.role
+	})
+
+	// 是否为管理员（role=7）
+	const isAdmin = computed((): boolean => memberLevel.value === 7)
+
+	// 是否使用管理员版式资料卡：已登录且角色等级 ≥1
+	const isAdminProfile = computed((): boolean => memberLevel.value >= 1)
+
+	// 是否显示会员卡片：允许的分发渠道 + 已登录 + 普通用户（role=0）
+	const showMemberCard = computed((): boolean => {
+		return memberChannelVisible && userStore.userInfo != null && memberLevel.value === 0
+	})
+
+	// PRO 徽标文案（角色等级动态）
+	const proBadge = computed((): string => 'PRO ' + memberLevel.value)
+
+	// 用户名显示：已登录显示 username（可能为空），未登录显示「请登录」
+	const displayName = computed((): string => {
+		const info = userStore.userInfo
+		if (info == null) {
+			return '请登录'
+		}
+		return info.username
+	})
+
+	// 个性签名显示：未登录显示默认文案，已登录显示 signature（可能为空）
+	const displaySlogan = computed((): string => {
+		const info = userStore.userInfo
+		if (info == null) {
+			return '“保持热爱，奔赴山海，每一天都要好好生活。”'
+		}
+		return info.signature
+	})
+
+	/** 头像 key 与静态资源路径映射（数据库存 key） */
+	function avatarPathOf(key: string) : string {
+		if (key == 'hei') {
+			return '/static/touxiang/hei.png'
+		}
+		if (key == 'lan') {
+			return '/static/touxiang/lan.png'
+		}
+		return '/static/touxiang/hong.png'
+	}
+
+	// 头像：未登录使用默认头像 hong；已登录从用户信息取，字段为空则不显示
+	const avatarUrl = computed((): string => {
+		const info = userStore.userInfo
+		if (info == null) {
+			return '/static/touxiang/hong.png'
+		}
+		if (info.avatar_url.length == 0) {
+			return ''
+		}
+		return avatarPathOf(info.avatar_url)
+	})
+
+	/** 资料卡点击：已登录跳个人信息页，未登录跳登录页 */
+	function goProfileOrLogin() : void {
+		const url = userStore.userInfo != null ? '/pages/user/profile' : '/pages/user/login'
+		uni.navigateTo({
+			url,
+			fail: () => {
+				uni.showToast({ title: '页面跳转失败', icon: 'none' })
+			}
+		})
+	}
+
+	function goMemberPay() : void {
+		uni.navigateTo({ url: '/pages/user/member-pay' })
+	}
+
+	function goAnnouncement() : void {
+		uni.navigateTo({ url: '/pages/user/announcement' })
+	}
+
+	function goHelp() : void {
+		uni.navigateTo({ url: '/pages/user/help' })
+	}
+
+	function goContact() : void {
+		uni.navigateTo({ url: '/pages/user/contact' })
+	}
+
+	function goMessages() : void {
+		uni.navigateTo({ url: '/pages/user/messages' })
+	}
+
+	/** 底部导航切换：首页返回上一页，书架替换当前页，我的为本页 */
+	function onNavChange(index: number) : void {
+		if (index === 0) {
+			const pages = getCurrentPages()
+			if (pages.length > 1) {
+				uni.navigateBack()
+			} else {
+				uni.reLaunch({ url: '/pages/index/index' })
+			}
+			return
+		}
+		if (index === 1) {
+			uni.redirectTo({ url: '/pages/reading/bookshelf' })
+			return
+		}
+		navActive.value = index
+	}
+</script>
+
+<style lang="scss">
+	/* 响应式单位：沿用原设置页 375 设计稿基准，1px = 2rpx；
+	 * 颜色一律取 uni.scss 的 $bai-* 令牌（真源 DESIGN_bai.md），
+	 * 会员卡为支付相关区块，按约定保留原绿色配色。 */
+	.settings-page {
+		flex: 1;
+		position: relative;
+		background-color: $bai-canvas-soft;
+	}
+
+	.settings-page__scroll {
+		flex: 1;
+	}
+
+	.settings-page__main {
+		/* 底部留白：悬浮导航高度 + 余量 */
+		padding-left: 48rpx;
+		padding-right: 48rpx;
+		padding-bottom: 240rpx;
+		flex-direction: column;
+	}
+
+	/* ===== 站内信入口 ===== */
+	.settings-page__notice {
+		position: absolute;
+		left: 48rpx;
+		z-index: 10;
+		width: 80rpx;
+		height: 80rpx;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.settings-page__notice-icon {
+		width: 80rpx;
+		height: 80rpx;
+	}
+
+	/* ===== 用户资料卡片（普通版式） ===== */
+	.settings-page__profile-card {
+		position: relative;
+		width: 100%;
+		height: 286rpx;
+		padding: 48rpx;
+		box-sizing: border-box;
+		/* 右下角大圆角，其余直角 */
+		border-radius: 0 0 80rpx 0;
+		background-color: $bai-canvas;
+		display: flex;
+		flex-direction: row;
+		justify-content: space-between;
+		align-items: center;
+		overflow: hidden;
+	}
+
+	/* 左缘品牌色装饰竖条 */
+	.settings-page__profile-accent {
+		position: absolute;
+		left: 0;
+		top: 0;
+		width: 12rpx;
+		height: 100%;
+		background-color: $bai-ink;
+	}
+
+	/* 右上角 45° 斜切角：页面背景色三角覆盖卡片角形成 */
+	.settings-page__profile-notch {
+		position: absolute;
+		top: 0;
+		right: 0;
+		width: 0;
+		height: 0;
+		border-top: 80rpx solid $bai-canvas-soft;
+		border-left: 80rpx solid transparent;
+	}
+
+	.settings-page__profile-info {
+		position: relative;
+		z-index: 1;
+		flex: 1;
+		min-width: 0;
+		flex-direction: column;
+		justify-content: center;
+	}
+
+	.settings-page__profile-name {
+		color: $bai-ink;
+		font-size: 56rpx;
+		line-height: 70rpx;
+		font-weight: 700;
+		padding-bottom: 16rpx;
+		lines: 1;
+		text-overflow: ellipsis;
+		overflow: hidden;
+	}
+
+	.settings-page__profile-slogan {
+		color: $bai-body;
+		font-size: 32rpx;
+		line-height: 52rpx;
+		font-weight: 400;
+		lines: 3;
+		text-overflow: ellipsis;
+		overflow: hidden;
+	}
+
+	.settings-page__profile-avatar-wrap {
+		position: relative;
+		z-index: 1;
+		width: 176rpx;
+		height: 176rpx;
+		flex-shrink: 0;
+	}
+
+	.settings-page__profile-avatar {
+		width: 176rpx;
+		height: 176rpx;
+	}
+
+	/* ===== 用户资料卡片（管理员版式：白横幅 + 墨色信息板错位叠放） ===== */
+	.settings-page__kinetic-card {
+		position: relative;
+		width: 100%;
+		box-sizing: border-box;
+		border-radius: 96rpx 0 96rpx 0;
+		background-color: $bai-canvas-soft;
+		flex-direction: column;
+		overflow: hidden;
+	}
+
+	.settings-page__kinetic-hero {
+		position: relative;
+		z-index: 1;
+		flex-direction: row;
+		align-items: center;
+		padding: 48rpx;
+		border-radius: 0 0 96rpx 0;
+		background-color: $bai-canvas;
+	}
+
+	.settings-page__kinetic-pro-wrap {
+		flex: 1;
+		min-width: 0;
+		flex-direction: row;
+		justify-content: center;
+	}
+
+	.settings-page__kinetic-pro {
+		flex-shrink: 0;
+		color: $bai-ink;
+		font-size: 112rpx;
+		line-height: 112rpx;
+		font-weight: 700;
+		font-style: italic;
+		lines: 1;
+		text-overflow: clip;
+	}
+
+	/* 头像固定像素（原图 88x88），固定于横幅右缘 */
+	.settings-page__kinetic-avatar {
+		width: 88px;
+		flex-shrink: 0;
+	}
+
+	/* 墨色信息板：上叠于白横幅之后（负 margin 错位叠放） */
+	.settings-page__kinetic-panel {
+		box-sizing: border-box;
+		margin-top: -48rpx;
+		padding: 96rpx 48rpx 48rpx;
+		border-radius: 96rpx 0 0 0;
+		background-color: $bai-ink;
+		flex-direction: column;
+	}
+
+	.settings-page__kinetic-name {
+		color: $bai-canvas;
+		font-size: 64rpx;
+		line-height: 64rpx;
+		font-weight: 400;
+		lines: 1;
+		text-overflow: ellipsis;
+		overflow: hidden;
+	}
+
+	/* 签名框：仅左侧竖线装饰 */
+	.settings-page__kinetic-slogan-box {
+		margin-top: 24rpx;
+		border-left: 4px solid $bai-canvas;
+		padding: 8rpx 0 8rpx 32rpx;
+	}
+
+	.settings-page__kinetic-slogan {
+		color: rgba(255, 255, 255, 0.75);
+		font-size: 32rpx;
+		line-height: 52rpx;
+		font-weight: 400;
+		font-style: italic;
+		lines: 2;
+		text-overflow: ellipsis;
+		overflow: hidden;
+	}
+
+	/* ===== 会员卡片（支付相关区块：保留原绿色配色，不随主题令牌更换） ===== */
+	.settings-page__member-card {
+		position: relative;
+		width: 100%;
+		min-height: 556rpx;
+		margin-top: 32rpx;
+		padding: 48rpx;
+		box-sizing: border-box;
+		border-radius: 24rpx;
+		background-color: $bai-ink;
+		flex-direction: column;
+		overflow: hidden;
+	}
+
+	/* 右上角装饰微光圆（radial 渐隐以低透明纯色近似，溢出部分裁剪） */
+	.settings-page__member-glow {
+		position: absolute;
+		top: -32rpx;
+		right: -32rpx;
+		width: 192rpx;
+		height: 192rpx;
+		border-radius: 9999px;
+		background-color: rgba(159, 232, 112, 0.12);
+	}
+
+	.settings-page__member-info {
+		position: relative;
+		z-index: 1;
+		flex-direction: column;
+	}
+
+	.settings-page__member-badge {
+		flex-direction: row;
+		align-items: center;
+	}
+
+	.settings-page__member-badge-icon {
+		width: 32rpx;
+		height: 42rpx;
+		flex-shrink: 0;
+	}
+
+	.settings-page__member-badge-text {
+		margin-left: 8rpx;
+		color: #9fe870;
+		font-size: 32rpx;
+		line-height: 48rpx;
+		font-weight: 400;
+	}
+
+	.settings-page__member-title {
+		margin-top: 16rpx;
+		color: $bai-canvas;
+		font-size: 48rpx;
+		line-height: 64rpx;
+		font-weight: 400;
+	}
+
+	/* 价格行：左侧大价格顶对齐，右侧说明组贴底 */
+	.settings-page__member-price-row {
+		position: relative;
+		z-index: 1;
+		margin-top: 48rpx;
+		min-height: 140rpx;
+		flex-direction: row;
+	}
+
+	.settings-page__member-price {
+		color: #9fe870;
+		font-size: 96rpx;
+		line-height: 96rpx;
+		font-weight: 700;
+	}
+
+	.settings-page__member-price-meta {
+		margin-left: 20rpx;
+		align-self: flex-end;
+		flex-direction: column;
+	}
+
+	.settings-page__member-price-original {
+		color: $bai-canvas;
+		font-size: 24rpx;
+		line-height: 32rpx;
+		font-weight: 400;
+		text-decoration: line-through;
+	}
+
+	.settings-page__member-price-unit {
+		color: #9fe870;
+		font-size: 32rpx;
+		line-height: 48rpx;
+		font-weight: 400;
+	}
+
+	/* 抢购按钮：品牌浅绿胶囊 */
+	.settings-page__member-btn {
+		position: relative;
+		z-index: 1;
+		margin-top: 48rpx;
+		height: 96rpx;
+		border-radius: 9999px;
+		background-color: #9fe870;
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+	}
+
+	/* 按压态：对应设计稿 hover opacity 0.8 / click scale 0.95 */
+	.settings-page__member-btn--hover {
+		opacity: 0.8;
+		transform: scale(0.95);
+	}
+
+	.settings-page__member-btn-text {
+		color: #2e6900;
+		font-size: 32rpx;
+		line-height: 48rpx;
+		font-weight: 400;
+	}
+
+	/* ===== 公共管理行：宽度随内容收缩 ===== */
+	.settings-page__admin-row {
+		margin-top: 32rpx;
+		flex-direction: row;
+	}
+
+	.settings-page__admin-card {
+		align-self: flex-start;
+		padding: 24rpx 32rpx;
+		box-sizing: border-box;
+		border-radius: 48rpx;
+		background-color: $bai-canvas;
+		border: 1px solid $bai-pale;
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.settings-page__admin-title {
+		color: $bai-ink;
+		font-size: 32rpx;
+		line-height: 48rpx;
+		font-weight: 600;
+	}
+
+	/* ===== 帮助入口分组 ===== */
+	.settings-page__group2 {
+		margin-top: 64rpx;
+		border-radius: 48rpx;
+		background-color: $bai-canvas;
+		overflow: hidden;
+	}
+
+	.settings-page__group2-item {
+		flex-direction: row;
+		justify-content: space-between;
+		align-items: center;
+		padding: 24rpx 32rpx;
+		box-sizing: border-box;
+		height: 98rpx;
+	}
+
+	.settings-page__group2-item--bordered {
+		border-bottom: 1px solid $bai-pale;
+	}
+
+	.settings-page__group2-text {
+		color: $bai-ink;
+		font-size: 32rpx;
+		line-height: 48rpx;
+		font-weight: 500;
+	}
+</style>
