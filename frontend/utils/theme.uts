@@ -1,0 +1,81 @@
+/**
+ * 运行时颜色唯一定义处（JS 侧）
+ *
+ * SCSS 样式中的颜色一律引用 uni.scss 的 $bai-* 令牌（编译期）；
+ * 此处集中管理无法使用 SCSS 变量的运行时颜色：阅读页动态主题与内联样式取值。
+ * 浅色主题取值与 uni.scss 令牌保持一致（真源：根目录 DESIGN_bai.md）。
+ */
+
+/** 阅读页主题（正文/标题/浮层/抽屉成组切换） */
+export type ReaderTheme = {
+	/** 页面/正文区背景 */
+	readerBg: string
+	/** 正文文字色 */
+	bodyColor: string
+	/** 标题文字色 */
+	titleColor: string
+	/** 章节标签色 */
+	labelColor: string
+	/** 弱化文字色 */
+	mutedColor: string
+	/** 目录章节文字色 */
+	chapterTextColor: string
+	/** 目录抽屉毛玻璃背景 */
+	drawerBg: string
+	/** 顶部菜单毛玻璃背景 */
+	menuTopBg: string
+	/** 底部面板毛玻璃背景 */
+	menuBottomBg: string
+	/** 浮层描边色 */
+	menuBorderColor: string
+	/** 当前章节高亮（正向蓝） */
+	activeBlue: string
+}
+
+/** 日间主题（画布 canvas-soft + 墨色文字，取自 DESIGN_bai.md） */
+export const READER_THEME_LIGHT: ReaderTheme = {
+	readerBg: '#f4f4f2',
+	bodyColor: '#0e0f0c',
+	titleColor: '#0e0f0c',
+	labelColor: '#0e0f0c',
+	mutedColor: '#868685',
+	chapterTextColor: '#0e0f0c',
+	drawerBg: 'rgba(244, 244, 242, 0.75)',
+	menuTopBg: 'rgba(244, 244, 242, 0.95)',
+	menuBottomBg: 'rgba(244, 244, 242, 0.98)',
+	menuBorderColor: '#e9e9e6',
+	activeBlue: '#1e40af'
+} as ReaderTheme
+
+/** 夜间主题（深色纸面） */
+export const READER_THEME_NIGHT: ReaderTheme = {
+	readerBg: '#121212',
+	bodyColor: '#d4d4d4',
+	titleColor: '#f3f4f6',
+	labelColor: '#9ca3af',
+	mutedColor: '#a0a0a0',
+	chapterTextColor: '#d4d4d4',
+	drawerBg: 'rgba(24, 24, 27, 0.88)',
+	menuTopBg: 'rgba(26, 26, 26, 0.95)',
+	menuBottomBg: 'rgba(26, 26, 26, 0.98)',
+	menuBorderColor: 'rgba(255, 255, 255, 0.1)',
+	activeBlue: '#60a5fa'
+} as ReaderTheme
+
+/** 暖米黄纸张主题（阅读背景色板第二选项，浮层与弱化色同日间） */
+export const READER_THEME_PAPER: ReaderTheme = {
+	readerBg: '#fbf4e6',
+	bodyColor: '#2b261d',
+	titleColor: '#2b261d',
+	labelColor: '#2b261d',
+	mutedColor: '#868685',
+	chapterTextColor: '#2b261d',
+	drawerBg: 'rgba(244, 244, 242, 0.75)',
+	menuTopBg: 'rgba(244, 244, 242, 0.95)',
+	menuBottomBg: 'rgba(244, 244, 242, 0.98)',
+	menuBorderColor: '#e9e9e6',
+	activeBlue: '#1e40af'
+} as ReaderTheme
+
+/** 输入框占位内联样式（placeholder-style 仅接受字符串，无法引用 SCSS 变量） */
+export const PLACEHOLDER_STYLE: string = 'color: #868685'

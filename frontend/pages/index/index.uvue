@@ -2,7 +2,7 @@
 	<view class="page">
 		<scroll-view class="scroll" direction="vertical" :show-scrollbar="false">
 			<view class="main" :style="'padding-top:' + topInset + 'px'">
-				<!-- 诗文卡片（Figma: 白底 圆角28px 阴影 0 4 24 @3% 内边距 24x16） -->
+				<!-- 诗文卡片（令牌 poem-card: 白底 圆角 xl 24px 内边距 24x16） -->
 				<view class="poem-card">
 					<!-- 诗文主体：16 行，每行 7 字（拼音 + 汉字）+ 行尾标点 -->
 					<view class="poem-body">
@@ -21,8 +21,8 @@
 							</view>
 						</view>
 					</view>
-					<!-- 底部铭文（Figma: 11px 灰色 衬线体） -->
-					<text class="inscription">《无题》无足鸟著 2017年2月</text>
+					<!-- 底部铭文（令牌: 元信息用思源黑体 11px 灰色，宋体仅限诗句正文） -->
+						<text class="inscription">《无题》无足鸟著 2017年2月</text>
 				</view>
 			</view>
 		</scroll-view>
@@ -309,10 +309,10 @@
 	}
 </script>
 
-<style>
+<style lang="scss">
 	.page {
 		flex: 1;
-		background-color: #f4f4f2;
+		background-color: $bai-canvas-soft;
 	}
 
 	.scroll {
@@ -328,15 +328,14 @@
 		align-items: center;
 	}
 
-	/* 诗文卡片（Figma: 白底、圆角 28px、内边距 24x16、阴影 0 4 24 @3%） */
+	/* 诗文卡片（令牌 poem-card: 白底、圆角 xl 24px、内边距 24x16；层级 2 柔和卡片靠表层对比承载高度，无阴影） */
 	.poem-card {
 		width: 688rpx;
 		flex-direction: column;
 		align-items: center;
 		padding: 46rpx 31rpx;
-		background-color: #ffffff;
-		border-radius: 54rpx;
-		box-shadow: 0rpx 8rpx 46rpx rgba(0, 0, 0, 0.03);
+		background-color: $bai-canvas;
+		border-radius: $bai-rounded-xl;
 	}
 
 	/* 诗文主体（Figma: 上下内边距 8px） */
@@ -376,16 +375,16 @@
 		line-height: 19rpx;
 		padding-top: 3rpx;
 		padding-bottom: 5rpx;
-		color: #868685;
-		font-family: 'Songti SC', 'Noto Serif SC', serif;
+		color: $bai-mute;
+		font-family: $bai-font-serif;
 	}
 
 	/* 汉字（Figma: 字面 16px 墨黑 #0E0F0C 衬线） */
 	.poem-char {
 		font-size: 33rpx;
 		line-height: 31rpx;
-		color: #0e0f0c;
-		font-family: 'Songti SC', 'Noto Serif SC', serif;
+		color: $bai-ink;
+		font-family: $bai-font-serif;
 	}
 
 	/* 行尾标点单元（Figma: 14x19.66px，内容贴底、整体行内居中） */
@@ -401,16 +400,16 @@
 	.poem-punct {
 		font-size: 19rpx;
 		line-height: 19rpx;
-		color: #0e0f0c;
-		font-family: 'Songti SC', 'Noto Serif SC', serif;
+		color: $bai-ink;
+		font-family: $bai-font-serif;
 	}
 
-	/* 底部铭文（Figma: 11px/16.5px 灰 #868685，与诗文主体间距 20px） */
+	/* 底部铭文（令牌 poem-meta: 元信息思源黑体，11px/16.5px 灰 #868685，与诗文主体间距 20px） */
 	.inscription {
 		margin-top: 38rpx;
 		font-size: 21rpx;
 		line-height: 33rpx;
-		color: #868685;
-		font-family: 'Songti SC', 'Noto Serif SC', serif;
+		color: $bai-mute;
+		font-family: $bai-font-ui;
 	}
 </style>

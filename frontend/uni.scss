@@ -1,44 +1,93 @@
 /**
- * 这里是uni-app内置的常用样式变量
+ * 设计令牌唯一定义处（样式侧） —— 取值唯一真源为根目录 DESIGN_bai.md
  *
- * uni-app 官方扩展插件及插件市场（https://ext.dcloud.net.cn）上很多三方插件均使用了这些样式变量
- * 如果你是插件开发者，建议你使用scss预处理，并在插件代码中直接使用这些变量（无需 import 这个文件），方便用户通过搭积木的方式开发整体风格一致的App
- *
+ * 使用方式：.uvue 样式块声明 <style lang="scss"> 后自动注入本文件，直接引用 $bai-* 变量；
+ * 全项目禁止在业务样式中散列定义颜色/圆角/阴影/字体族。
+ * 运行时主题色（JS 状态，无法引用 SCSS 变量）统一定义于 utils/theme.uts。
+ * 间距与字号为 Figma 精确布局值（rpx），暂以字面量书写，不做变量化。
  */
 
-/**
- * 如果你是App开发者（插件使用者），你可以通过修改这些变量来定制自己的插件主题，实现自定义主题功能
- *
- * 如果你的项目同样使用了scss预处理，你也可以直接在你的 scss 代码中使用如下变量，同时无需 import 这个文件
- */
+/* ─── 颜色（DESIGN_bai.md colors） ─── */
+$bai-ink: #0e0f0c;             // 墨黑 primary/ink：唯一品牌强调色与默认文本色
+$bai-on-primary: #ffffff;      // 墨黑底上的文字
+$bai-primary-active: #2e2e2b;  // 墨黑激活/悬停态
+$bai-ink-deep: #2b2b28;        // 深墨色（深色强调文本）
+$bai-body: #454745;            // 正文色
+$bai-mute: #868685;            // 弱文本/占位/说明
+$bai-neutral: #a3a3a0;         // 中性灰（中性填充/描边）
+$bai-pale: #e9e9e6;            // 浅灰（柔和描边/次级胶囊底）
+$bai-canvas: #ffffff;          // 画布：卡片纯白
+$bai-canvas-soft: #f4f4f2;     // 柔和画布：页面雾灰白
+$bai-positive: #1e40af;        // 正向深蓝
+$bai-positive-deep: #1e3a8a;   // 正向深（按下/正向徽章底）
+$bai-warning: #ffd11a;         // 警示黄
+$bai-warning-deep: #b86700;    // 警示深（按下/警示徽章/铜币文字）
+$bai-warning-content: #4a3b1c; // 警示表层文字
+$bai-negative: #d03238;        // 破坏/错误红
+$bai-negative-deep: #a72027;   // 负向深（按下）
+$bai-negative-darkest: #a7000d;// 负向最深（高强调破坏文本）
+$bai-negative-bg: #320707;     // 负向提示框底
+$bai-accent-orange: #ffc091;   // 强调橙（插画/定价，第三层级）
 
-/* 颜色变量 */
+/* 语义色浅底（DESIGN_bai.md 派生 tint，用于选中/今日等浅色底） */
+$bai-positive-tint: #eef3fe;
+$bai-warning-tint: #fff9db;
+
+/* 阅读纸张色（阅读场景专用，与 utils/theme.uts READER_THEME_PAPER 保持一致） */
+$bai-paper: #fbf4e6;      // 暖米黄纸面
+$bai-paper-ink: #2b261d;  // 暖米黄纸面上的文字
+
+/* 工程色（非品牌令牌） */
+$bai-black: #000000;           // 阴影/遮罩专用纯黑
+
+/* ─── 圆角（DESIGN_bai.md rounded；rpx = px × 750/390） ─── */
+$bai-rounded-sm: 15rpx;    // 8px：行内胶囊、小徽章
+$bai-rounded-md: 23rpx;    // 12px：表单输入、较小构件
+$bai-rounded-lg: 31rpx;    // 16px：中等卡片、菜单
+$bai-rounded-xl: 46rpx;    // 24px：品牌卡片/按钮圆角
+$bai-rounded-pill: 9999px; // 状态胶囊/圆形
+
+/* ─── 字体族（DESIGN_bai.md typography；小程序端降级系统字体） ─── */
+$bai-font-ui: 'Source Han Sans SC', 'Noto Sans SC', sans-serif; // 界面思源黑体
+$bai-font-serif: 'Songti SC', 'Noto Serif SC', serif;           // 诗句正文宋体（仅诗句）
+
+/* ─── 阴影（层级规范：静态卡片无阴影靠表层对比；以下仅浮层/悬浮件提升阴影） ─── */
+$bai-shadow-nav: 0rpx 15rpx 58rpx rgba($bai-black, 0.06);       // 底部悬浮导航
+$bai-shadow-dropdown: 0rpx 20rpx 40rpx rgba($bai-black, 0.1);   // 下拉菜单
+$bai-shadow-plus-menu: 0rpx 23rpx 62rpx rgba($bai-ink, 0.12);   // 加号浮动菜单
+$bai-shadow-search: 0rpx 2rpx 8rpx rgba($bai-black, 0.05);      // 搜索栏
+$bai-shadow-panel: 0rpx -10rpx 40rpx rgba($bai-black, 0.1);     // 底部滑出面板
+$bai-shadow-drawer: 0rpx -10rpx 40rpx rgba($bai-black, 0.15);   // 目录抽屉
+$bai-shadow-fab: 0rpx 10rpx 30rpx rgba($bai-black, 0.2);        // 听书悬浮球
+$bai-shadow-popover: 0rpx 20rpx 50rpx rgba($bai-black, 0.3);    // 划词气泡
+
+/* ─── uni-app 内置常用变量（引用上述令牌，勿另行取值） ─── */
 
 /* 行为相关颜色 */
-$uni-color-primary: #007aff;
-$uni-color-success: #4cd964;
-$uni-color-warning: #f0ad4e;
-$uni-color-error: #dd524d;
+$uni-color-primary: $bai-ink;
+$uni-color-success: $bai-positive;
+$uni-color-warning: $bai-warning;
+$uni-color-error: $bai-negative;
 
 /* 文字基本颜色 */
-$uni-text-color:#333;//基本色
-$uni-text-color-inverse:#fff;//反色
-$uni-text-color-grey:#999;//辅助灰色，如加载更多的提示信息
-$uni-text-color-placeholder: #808080;
-$uni-text-color-disable:#c0c0c0;
+$uni-text-color: $bai-ink;
+$uni-text-color-inverse: $bai-on-primary;
+$uni-text-color-grey: $bai-mute;
+$uni-text-color-placeholder: $bai-mute;
+$uni-text-color-disable: $bai-neutral;
 
 /* 背景颜色 */
-$uni-bg-color:#ffffff;
-$uni-bg-color-grey:#f8f8f8;
-$uni-bg-color-hover:#f1f1f1;//点击状态颜色
-$uni-bg-color-mask:rgba(0, 0, 0, 0.4);//遮罩颜色
+$uni-bg-color: $bai-canvas;
+$uni-bg-color-grey: $bai-canvas-soft;
+$uni-bg-color-hover: $bai-pale;
+$uni-bg-color-mask: rgba($bai-black, 0.4);
 
 /* 边框颜色 */
-$uni-border-color:#c8c7cc;
+$uni-border-color: $bai-pale;
 
 /* 尺寸变量 */
 
-/* 文字尺寸 */
+/* 文字尺寸（caption / body-sm / body-md） */
 $uni-font-size-sm:12px;
 $uni-font-size-base:14px;
 $uni-font-size-lg:16px;
@@ -48,29 +97,29 @@ $uni-img-size-sm:20px;
 $uni-img-size-base:26px;
 $uni-img-size-lg:40px;
 
-/* Border Radius */
-$uni-border-radius-sm: 2px;
-$uni-border-radius-base: 3px;
-$uni-border-radius-lg: 6px;
+/* Border Radius（rounded.sm / rounded.md / rounded.lg） */
+$uni-border-radius-sm: 8px;
+$uni-border-radius-base: 12px;
+$uni-border-radius-lg: 16px;
 $uni-border-radius-circle: 50%;
 
-/* 水平间距 */
-$uni-spacing-row-sm: 5px;
-$uni-spacing-row-base: 10px;
-$uni-spacing-row-lg: 15px;
+/* 水平间距（spacing.xs / spacing.sm / spacing.md） */
+$uni-spacing-row-sm: 4px;
+$uni-spacing-row-base: 8px;
+$uni-spacing-row-lg: 12px;
 
-/* 垂直间距 */
+/* 垂直间距（spacing.xs / spacing.sm / spacing.md） */
 $uni-spacing-col-sm: 4px;
 $uni-spacing-col-base: 8px;
 $uni-spacing-col-lg: 12px;
 
 /* 透明度 */
-$uni-opacity-disabled: 0.3; // 组件禁用态的透明度
+$uni-opacity-disabled: 0.3;
 
-/* 文章场景相关 */
-$uni-color-title: #2C405A; // 文章标题颜色
+/* 文章场景相关（标题=墨色；二级标题=深墨；段落=正文色） */
+$uni-color-title: $bai-ink;
 $uni-font-size-title:20px;
-$uni-color-subtitle: #555555; // 二级标题颜色
+$uni-color-subtitle: $bai-ink-deep;
 $uni-font-size-subtitle:26px;
-$uni-color-paragraph: #3F536E; // 文章段落颜色
+$uni-color-paragraph: $bai-body;
 $uni-font-size-paragraph:15px;

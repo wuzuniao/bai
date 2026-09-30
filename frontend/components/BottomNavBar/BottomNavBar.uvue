@@ -39,7 +39,7 @@
 	}
 </script>
 
-<style>
+<style lang="scss">
 	/* 定位层：悬浮于视口底部（fixed 全端一致：App 相对页面、小程序/Web 相对视口，不随内容滚动） */
 	.navbar-layer {
 		position: fixed;
@@ -50,17 +50,17 @@
 		justify-content: center;
 	}
 
-	/* 白色胶囊容器（Stitch 原始文件: 343x54, 内留白 7, 项间距 23.1, 圆角 pill, 描边 #868685/10%） */
+	/* 白色胶囊容器（Stitch 原始文件: 343x54, 内留白 7, 项间距 23.1, 圆角 pill, 描边 弱文本/10%） */
 	.navbar-pill {
 		width: 660rpx;
 		flex-direction: row;
 		align-items: center;
 		justify-content: center;
 		padding: 13rpx;
-		background-color: #ffffff;
-		border-radius: 9999px;
-		border: 1px solid rgba(134, 134, 133, 0.1);
-		box-shadow: 0rpx 15rpx 58rpx rgba(0, 0, 0, 0.06);
+		background-color: $bai-canvas;
+		border-radius: $bai-rounded-pill;
+		border: 1px solid rgba($bai-mute, 0.1);
+		box-shadow: $bai-shadow-nav;
 	}
 
 	/* 导航项：左右各留 22rpx，相邻两项间距 44rpx（Figma 23.1px），两端空隙由容器居中产生 */
@@ -69,13 +69,13 @@
 		margin-right: 22rpx;
 	}
 
-	/* 激活项：墨黑胶囊（Figma: padding 10x20, gap 8, 背景 #0E0F0C） */
+	/* 激活项：墨黑胶囊（Figma: padding 10x20, gap 8, 背景 墨黑令牌） */
 	.nav-btn-active {
 		flex-direction: row;
 		align-items: center;
 		padding: 20rpx 38rpx;
-		background-color: #0e0f0c;
-		border-radius: 9999px;
+		background-color: $bai-ink;
+		border-radius: $bai-rounded-pill;
 	}
 
 	/* 未激活项：透明底（Figma: padding 10x16, gap 6） */
@@ -83,18 +83,19 @@
 		flex-direction: row;
 		align-items: center;
 		padding: 20rpx 31rpx;
-		border-radius: 9999px;
+		border-radius: $bai-rounded-pill;
 	}
 
 	.nav-text {
 		margin-left: 12rpx;
 		font-size: 27rpx;
 		line-height: 38rpx;
-		color: #0e0f0c;
+		font-weight: 600;
+		color: $bai-ink;
 	}
 
 	.nav-text-active {
 		margin-left: 15rpx;
-		color: #ffffff;
+		color: $bai-on-primary;
 	}
 </style>

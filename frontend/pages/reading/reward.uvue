@@ -1,0 +1,823 @@
+<template>
+	<view class="page">
+		<!-- 顶部导航（Stitch: 返回 + 居中标题"活动" + 规则按钮；top 由状态栏/胶囊动态计算） -->
+		<view class="nav" :style="'padding-top:' + navTop + 'px'">
+			<view class="round-btn" @click="onBackTap">
+				<image class="round-btn-icon" src="/static/icons/arrow-back.svg" />
+			</view>
+			<text class="nav-title">活动</text>
+			<view class="rules-btn" @click="showToast('活动规则即将上线')">
+				<text class="rules-btn-text">规则</text>
+			</view>
+		</view>
+
+		<scroll-view class="scroll" direction="vertical" :show-scrollbar="false">
+			<view class="main">
+				<!-- 资产总览卡（Stitch: 今日已获 + 总资产三项） -->
+				<view class="asset-card">
+					<view class="asset-top">
+						<view class="asset-left">
+							<text class="asset-label">今日已获铜币</text>
+							<view class="asset-num-row">
+								<text class="asset-num">5</text>
+								<text class="asset-unit">铜币</text>
+							</view>
+						</view>
+						<view class="use-btn" @click="showToast('铜币商城即将上线')">
+							<text class="use-btn-text">去使用</text>
+						</view>
+					</view>
+					<view class="asset-total">
+						<text class="asset-total-label">总资产：</text>
+						<view class="coin-item">
+							<image class="coin-icon" src="/static/icons/coin-gold.svg" />
+							<text class="coin-num">0</text>
+						</view>
+						<view class="coin-item">
+							<image class="coin-icon" src="/static/icons/coin-silver.svg" />
+							<text class="coin-num">0</text>
+						</view>
+						<view class="coin-item">
+							<image class="coin-icon" src="/static/icons/coin-copper.svg" />
+							<text class="coin-num">42</text>
+						</view>
+					</view>
+				</view>
+
+				<!-- 连续签到卡（Stitch: 状态头 + 7 天胶囊 + 补签提示条） -->
+				<view class="checkin-card">
+					<view class="checkin-head">
+						<view class="checkin-head-text">
+							<view class="checkin-title-row">
+								<text class="checkin-title">已连续签到</text>
+								<text class="checkin-days">1</text>
+								<text class="checkin-title">天</text>
+							</view>
+							<text class="checkin-sub">连签满 7 天才能领福利，断签或领奖后重新计算</text>
+						</view>
+					</view>
+					<view class="checkin-grid">
+						<!-- Day 1 已签 -->
+						<view class="day-cell day-checked">
+							<text class="day-week day-week-dim">周一</text>
+							<view class="day-circle day-circle-dim">
+								<image class="day-check-icon" src="/static/icons/check.svg" />
+							</view>
+							<text class="day-state day-state-dim">已签</text>
+						</view>
+						<!-- Day 2 今日 -->
+						<view class="day-cell day-today">
+							<text class="day-week day-week-amber">周二</text>
+							<view class="day-circle day-circle-accent">
+								<text class="day-reward day-reward-bold">+5</text>
+							</view>
+							<text class="day-state day-state-amber">今日</text>
+						</view>
+						<!-- Day 3-6 待签 -->
+						<view v-for="(d, di) in pendingDays" :key="di" class="day-cell day-pending">
+							<text class="day-week">{{ d.week }}</text>
+							<view class="day-circle day-circle-idle">
+								<text class="day-reward">+{{ d.reward }}</text>
+							</view>
+							<text class="day-state">待签</text>
+						</view>
+						<!-- Day 7 大礼 -->
+						<view class="day-cell day-grand">
+							<text class="day-week day-week-ink">周日</text>
+							<view class="day-circle day-circle-accent">
+								<text class="day-reward day-reward-bold">+20</text>
+							</view>
+							<text class="day-state day-state-ink">大礼</text>
+						</view>
+					</view>
+					<view class="makeup-bar">
+						<text class="makeup-text">漏签无需担忧，开通月卡每月赠 3 次补签</text>
+						<text class="makeup-btn" @click="showToast('补签规则即将上线')">查看</text>
+					</view>
+				</view>
+
+				<!-- 阅读领铜币卡（Stitch: 头部 + 进度条 + 五档阶梯） -->
+				<view class="reward-card">
+					<view class="reward-head">
+						<text class="reward-title">阅读领铜币</text>
+						<view class="reward-stat">
+							<text class="reward-stat-line">总阅读时间：<text class="reward-stat-num">120</text> 分钟</text>
+							<text class="reward-stat-line">今日已读：<text class="reward-stat-num">11</text> 分钟</text>
+						</view>
+					</view>
+					<view class="progress-track">
+						<view class="progress-fill"></view>
+					</view>
+					<view class="tier-list">
+						<!-- 5' 已领取 -->
+						<view class="tier-item tier-dim">
+							<view class="tier-top">
+								<view class="tier-badge tier-badge-dim">
+									<text class="tier-badge-text">5'</text>
+								</view>
+								<view class="tier-title-row">
+									<text class="tier-title tier-title-dim">读满 5 分钟 (5')</text>
+									<view class="tier-tag tier-tag-badge">
+										<text class="tier-tag-text tier-tag-text-amber">+1 铜币</text>
+									</view>
+								</view>
+							</view>
+							<view class="tier-bottom">
+								<text class="tier-desc">已达成任务，获得 1 铜币</text>
+								<view class="tier-btn tier-btn-claimed">
+									<text class="tier-btn-text tier-btn-text-claimed">已领取</text>
+								</view>
+							</view>
+						</view>
+						<!-- 30' 当前目标 -->
+						<view class="tier-item tier-current">
+							<view class="tier-top">
+								<view class="tier-badge tier-badge-ink">
+									<text class="tier-badge-text tier-badge-text-white">30'</text>
+								</view>
+								<view class="tier-title-row">
+									<text class="tier-title tier-title-strong">读满 30 分钟</text>
+									<view class="tier-tag tier-tag-accent">
+										<text class="tier-tag-text tier-tag-text-ink">+6 铜币</text>
+									</view>
+								</view>
+							</view>
+							<view class="tier-bottom">
+								<text class="tier-desc tier-desc-text">还差 19 分钟 解锁</text>
+								<view class="tier-btn tier-btn-primary" @click="goReading">
+									<text class="tier-btn-text tier-btn-text-white">去阅读</text>
+								</view>
+							</view>
+						</view>
+						<!-- 2h -->
+						<view class="tier-item tier-dim">
+							<view class="tier-top">
+								<view class="tier-badge tier-badge-dim">
+									<text class="tier-badge-text">2h</text>
+								</view>
+								<view class="tier-title-row">
+									<text class="tier-title">读满 2 小时 (120')</text>
+									<view class="tier-tag tier-tag-gray">
+										<text class="tier-tag-text">+24 铜币 · 再额外赠送 10 铜币</text>
+									</view>
+								</view>
+							</view>
+							<view class="tier-bottom">
+								<text class="tier-desc">还差 <text class="tier-desc-strong">1 小时 49 分钟</text> 解锁</text>
+								<view class="tier-btn tier-btn-outline" @click="goReading">
+									<text class="tier-btn-text">去阅读</text>
+								</view>
+							</view>
+						</view>
+						<!-- 6h -->
+						<view class="tier-item tier-dim">
+							<view class="tier-top">
+								<view class="tier-badge tier-badge-dim">
+									<text class="tier-badge-text">6h</text>
+								</view>
+								<view class="tier-title-row">
+									<text class="tier-title">读满 6 小时 (360')</text>
+									<view class="tier-tag tier-tag-gray">
+										<text class="tier-tag-text">+72 铜币 · 再额外赠送 30 铜币</text>
+									</view>
+								</view>
+							</view>
+							<view class="tier-bottom">
+								<text class="tier-desc">还差 <text class="tier-desc-strong">5 小时 49 分钟</text> 解锁</text>
+								<view class="tier-btn tier-btn-outline" @click="goReading">
+									<text class="tier-btn-text">去阅读</text>
+								</view>
+							</view>
+						</view>
+						<!-- 12h -->
+						<view class="tier-item tier-dim">
+							<view class="tier-top">
+								<view class="tier-badge tier-badge-dim">
+									<text class="tier-badge-text">12h</text>
+								</view>
+								<view class="tier-title-row">
+									<text class="tier-title">读满 12 小时 (720')</text>
+									<view class="tier-tag tier-tag-gray">
+										<text class="tier-tag-text">+144 铜币 · 再额外赠送 60 铜币</text>
+									</view>
+								</view>
+							</view>
+							<view class="tier-bottom">
+								<text class="tier-desc">还差 <text class="tier-desc-strong">11 小时 49 分钟</text> 解锁</text>
+								<view class="tier-btn tier-btn-outline" @click="goReading">
+									<text class="tier-btn-text">去阅读</text>
+								</view>
+							</view>
+						</view>
+					</view>
+				</view>
+			</view>
+		</scroll-view>
+
+		<!-- 轻提示 -->
+		<view v-if="toastVisible" class="reward-toast">
+			<text class="reward-toast-text">{{ toastMsg }}</text>
+		</view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	type PendingDay = {
+		week: string
+		reward: number
+	}
+
+	/** 待签日程（Stitch 示例：周三至周六，周日为大礼单独渲染） */
+	const pendingDays = ref<PendingDay[]>([
+		{ week: '周三', reward: 5 } as PendingDay,
+		{ week: '周四', reward: 5 } as PendingDay,
+		{ week: '周五', reward: 5 } as PendingDay,
+		{ week: '周六', reward: 10 } as PendingDay
+	])
+
+	/** 顶部导航内边距（px）：小程序端下移避让右上角胶囊，App 端状态栏下 1px，Web 端按设计值 48px */
+	const navTop = ref(48)
+
+	const toastVisible = ref(false)
+	const toastMsg = ref('')
+	let toastTimer = -1
+
+	onLoad(() => {
+		const win = uni.getWindowInfo()
+		// #ifdef MP-WEIXIN
+		if (win.statusBarHeight > 0) {
+			navTop.value = win.statusBarHeight + 48
+		}
+		// #endif
+		// #ifdef APP-ANDROID || APP-IOS
+		navTop.value = win.statusBarHeight + 1
+		// #endif
+	})
+
+	function showToast(msg: string) : void {
+		toastMsg.value = msg
+		toastVisible.value = true
+		if (toastTimer >= 0) {
+			clearTimeout(toastTimer)
+		}
+		toastTimer = setTimeout(() => {
+			toastVisible.value = false
+		}, 1500)
+	}
+
+	function onBackTap() : void {
+		uni.navigateBack()
+	}
+
+	/** "去阅读"：进入阅读正文页继续累计时长 */
+	function goReading() : void {
+		uni.navigateTo({
+			url: '/pages/reading/reader'
+		})
+	}
+</script>
+
+<style lang="scss">
+	.page {
+		flex: 1;
+		background-color: $bai-canvas-soft;
+	}
+
+	.scroll {
+		flex: 1;
+	}
+
+	/* 顶部导航（Stitch: 返回钮 40px + 居中标题 16px/600 + 规则胶囊） */
+	.nav {
+		padding: 15rpx 38rpx;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+	}
+
+	.round-btn {
+		width: 77rpx;
+		height: 77rpx;
+		border-radius: $bai-rounded-pill;
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.round-btn-icon {
+		width: 38rpx;
+		height: 38rpx;
+	}
+
+	.nav-title {
+		font-size: 31rpx;
+		font-weight: 600;
+		color: $bai-ink;
+	}
+
+	.rules-btn {
+		padding: 12rpx 23rpx;
+		border-radius: $bai-rounded-pill;
+		background-color: $bai-canvas;
+		border: 1px solid $bai-pale;
+	}
+
+	.rules-btn-text {
+		font-size: 23rpx;
+		font-weight: 500;
+		color: $bai-mute;
+	}
+
+	/* 主内容（Stitch: 左右 20px、顶部间距 24px、卡片间距 24px） */
+	.main {
+		padding: 46rpx 38rpx 60rpx 38rpx;
+		flex-direction: column;
+		gap: 46rpx;
+	}
+
+	/* 资产总览卡（令牌 card-content: 白底 圆角 xl 24px 内边距 24px；层级 2 表层对比承载高度，无边框无阴影） */
+	.asset-card {
+		border-radius: $bai-rounded-xl;
+		padding: 46rpx;
+		background-color: $bai-canvas;
+	}
+
+	.asset-top {
+		flex-direction: row;
+		align-items: flex-start;
+		justify-content: space-between;
+	}
+
+	.asset-label {
+		font-size: 23rpx;
+		color: $bai-mute;
+	}
+
+	.asset-num-row {
+		flex-direction: row;
+		align-items: flex-end;
+		gap: 15rpx;
+		margin-top: 15rpx;
+	}
+
+	.asset-num {
+		font-size: 69rpx;
+		font-weight: 600;
+		color: $bai-ink;
+	}
+
+	.asset-unit {
+		font-size: 23rpx;
+		font-weight: 500;
+		color: $bai-mute;
+		padding-bottom: 6rpx;
+	}
+
+	.use-btn {
+		padding: 15rpx 27rpx;
+		border-radius: $bai-rounded-pill;
+		background-color: $bai-canvas-soft;
+	}
+
+	.use-btn-text {
+		font-size: 23rpx;
+		font-weight: 500;
+		color: $bai-ink;
+	}
+
+	.asset-total {
+		margin-top: 38rpx;
+		padding-top: 31rpx;
+		border-top-width: 1px;
+		border-top-style: solid;
+		border-top-color: $bai-canvas-soft;
+		flex-direction: row;
+		align-items: center;
+	}
+
+	.asset-total-label {
+		font-size: 21rpx;
+		color: $bai-mute;
+	}
+
+	.coin-item {
+		flex-direction: row;
+		align-items: center;
+		gap: 6rpx;
+		margin-left: 23rpx;
+	}
+
+	.coin-icon {
+		width: 31rpx;
+		height: 31rpx;
+	}
+
+	.coin-num {
+		font-size: 23rpx;
+		font-weight: 500;
+		color: $bai-body;
+	}
+
+	/* 连续签到卡（令牌 card-content: 白底 圆角 xl 24px 内边距 24px，7 天胶囊网格 + 补签提示条） */
+	.checkin-card {
+		border-radius: $bai-rounded-xl;
+		padding: 46rpx;
+		background-color: $bai-canvas;
+		flex-direction: column;
+		gap: 38rpx;
+	}
+
+	.checkin-title-row {
+		flex-direction: row;
+		align-items: baseline;
+		gap: 8rpx;
+	}
+
+	.checkin-title {
+		font-size: 35rpx;
+		font-weight: 600;
+		color: $bai-ink;
+	}
+
+	.checkin-days {
+		font-size: 46rpx;
+		font-weight: 700;
+		color: $bai-ink;
+	}
+
+	.checkin-sub {
+		margin-top: 8rpx;
+		font-size: 23rpx;
+		color: $bai-mute;
+	}
+
+	/* 7 天胶囊网格（Stitch: 7 列 间距 6px，项高 92px 圆角 16px） */
+	.checkin-grid {
+		flex-direction: row;
+		gap: 12rpx;
+		margin-top: 8rpx;
+	}
+
+	.day-cell {
+		flex: 1;
+		min-height: 177rpx;
+		padding: 23rpx 8rpx;
+		border-radius: $bai-rounded-lg;
+		flex-direction: column;
+		align-items: center;
+		justify-content: space-between;
+	}
+
+	.day-week {
+		font-size: 19rpx;
+		color: $bai-mute;
+	}
+
+	.day-week-dim {
+		color: rgba($bai-on-primary, 0.7);
+	}
+
+	.day-week-amber {
+		font-weight: 600;
+		color: $bai-warning-deep;
+	}
+
+	.day-week-ink {
+		font-weight: 500;
+		color: $bai-ink;
+	}
+
+	.day-circle {
+		width: 46rpx;
+		height: 46rpx;
+		border-radius: $bai-rounded-pill;
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.day-circle-dim {
+		background-color: rgba($bai-on-primary, 0.2);
+	}
+
+	.day-circle-accent {
+		background-color: $bai-warning;
+	}
+
+	.day-circle-idle {
+		background-color: $bai-canvas;
+		border: 1px solid $bai-pale;
+	}
+
+	.day-check-icon {
+		width: 27rpx;
+		height: 27rpx;
+	}
+
+	.day-reward {
+		font-size: 21rpx;
+		font-weight: 500;
+		color: $bai-body;
+	}
+
+	.day-reward-bold {
+		font-weight: 700;
+		color: $bai-ink;
+	}
+
+	.day-state {
+		font-size: 19rpx;
+		color: $bai-mute;
+	}
+
+	.day-state-dim {
+		font-weight: 500;
+		color: rgba($bai-on-primary, 0.9);
+	}
+
+	.day-state-amber {
+		font-weight: 500;
+		color: $bai-warning-deep;
+	}
+
+	.day-state-ink {
+		font-weight: 500;
+		color: $bai-ink;
+	}
+
+	/* Day 状态底色（Stitch: 已签墨黑 / 今日警示浅底 / 待签画布灰 / 大礼画布灰） */
+	.day-checked {
+		background-color: $bai-ink;
+	}
+
+	.day-today {
+		background-color: $bai-warning-tint;
+		border: 1px solid rgba($bai-warning, 0.5);
+	}
+
+	.day-pending {
+		background-color: $bai-canvas-soft;
+	}
+
+	.day-grand {
+		background-color: $bai-canvas-soft;
+		border: 1px solid $bai-pale;
+	}
+
+	/* 补签提示条（Stitch: 画布灰底 圆角 lg 16px 两端分布） */
+	.makeup-bar {
+		padding: 19rpx 27rpx;
+		border-radius: $bai-rounded-lg;
+		background-color: $bai-canvas-soft;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+	}
+
+	.makeup-text {
+		font-size: 21rpx;
+		color: $bai-body;
+	}
+
+	.makeup-btn {
+		font-size: 21rpx;
+		font-weight: 500;
+		color: $bai-ink;
+		text-decoration: underline;
+	}
+
+	/* 阅读领铜币卡（令牌 card-content: 白底 圆角 xl 24px 内边距 24px + 进度条 + 五档阶梯） */
+	.reward-card {
+		border-radius: $bai-rounded-xl;
+		padding: 46rpx;
+		background-color: $bai-canvas;
+		flex-direction: column;
+		gap: 23rpx;
+	}
+
+	.reward-title {
+		font-size: 35rpx;
+		font-weight: 600;
+		color: $bai-ink;
+	}
+
+	.reward-stat {
+		margin-top: 8rpx;
+		flex-direction: column;
+		gap: 15rpx;
+	}
+
+	.reward-stat-line {
+		font-size: 23rpx;
+		color: $bai-mute;
+	}
+
+	.reward-stat-num {
+		font-weight: 500;
+		color: $bai-ink;
+	}
+
+	.progress-track {
+		width: 100%;
+		height: 12rpx;
+		border-radius: $bai-rounded-pill;
+		background-color: $bai-pale;
+		overflow: hidden;
+	}
+
+	.progress-fill {
+		width: 18.3%;
+		height: 12rpx;
+		border-radius: $bai-rounded-pill;
+		background-color: $bai-ink;
+	}
+
+	.tier-list {
+		margin-top: 15rpx;
+		flex-direction: column;
+		gap: 27rpx;
+	}
+
+	.tier-item {
+		border-radius: $bai-rounded-lg;
+		padding: 31rpx;
+		flex-direction: column;
+		gap: 19rpx;
+	}
+
+	.tier-dim {
+		background-color: $bai-canvas-soft;
+	}
+
+	/* 当前目标档（item-card: 白卡置于白卡之上，靠 1px 浅灰描边区分层级，不加阴影） */
+	.tier-current {
+		background-color: $bai-canvas;
+		border: 1px solid $bai-pale;
+	}
+
+	.tier-top {
+		flex-direction: row;
+		align-items: center;
+		gap: 23rpx;
+	}
+
+	.tier-badge {
+		width: 62rpx;
+		height: 62rpx;
+		border-radius: $bai-rounded-pill;
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.tier-badge-dim {
+		background-color: $bai-canvas;
+		border: 1px solid $bai-pale;
+	}
+
+	.tier-badge-ink {
+		background-color: $bai-ink;
+	}
+
+	.tier-badge-text {
+		font-size: 23rpx;
+		font-weight: 600;
+		color: $bai-mute;
+	}
+
+	.tier-badge-text-white {
+		color: $bai-on-primary;
+	}
+
+	.tier-title-row {
+		flex-direction: row;
+		align-items: center;
+		gap: 15rpx;
+	}
+
+	.tier-title {
+		font-size: 23rpx;
+		font-weight: 500;
+		color: $bai-body;
+	}
+
+	.tier-title-dim {
+		color: $bai-ink;
+	}
+
+	.tier-title-strong {
+		font-weight: 600;
+		color: $bai-ink;
+	}
+
+	.tier-tag {
+		padding: 4rpx 15rpx;
+		border-radius: $bai-rounded-sm;
+	}
+
+	.tier-tag-badge {
+		background-color: $bai-warning-tint;
+	}
+
+	.tier-tag-accent {
+		background-color: $bai-warning;
+	}
+
+	.tier-tag-gray {
+		background-color: $bai-pale;
+	}
+
+	.tier-tag-text {
+		font-size: 19rpx;
+		font-weight: 500;
+		color: $bai-body;
+	}
+
+	.tier-tag-text-amber {
+		color: $bai-warning-deep;
+	}
+
+	.tier-tag-text-ink {
+		font-weight: 600;
+		color: $bai-ink;
+	}
+
+	.tier-bottom {
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		padding-top: 8rpx;
+		padding-left: 85rpx;
+	}
+
+	.tier-desc {
+		font-size: 21rpx;
+		color: $bai-mute;
+	}
+
+	.tier-desc-text {
+		color: $bai-body;
+	}
+
+	.tier-desc-strong {
+		font-weight: 600;
+		color: $bai-ink;
+	}
+
+	.tier-btn {
+		border-radius: $bai-rounded-pill;
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.tier-btn-claimed {
+		padding: 12rpx 27rpx;
+		background-color: $bai-pale;
+	}
+
+	.tier-btn-primary {
+		padding: 12rpx 31rpx;
+		background-color: $bai-ink;
+	}
+
+	.tier-btn-outline {
+		padding: 12rpx 27rpx;
+		background-color: $bai-canvas;
+		border: 1px solid $bai-pale;
+	}
+
+	.tier-btn-text {
+		font-size: 21rpx;
+		font-weight: 500;
+		color: $bai-body;
+	}
+
+	.tier-btn-text-claimed {
+		color: $bai-mute;
+	}
+
+	.tier-btn-text-white {
+		font-weight: 400;
+		color: $bai-on-primary;
+	}
+
+	/* 轻提示（同阅读页样式） */
+	.reward-toast {
+		position: fixed;
+		left: 0;
+		right: 0;
+		top: 185rpx;
+		flex-direction: row;
+		justify-content: center;
+		z-index: 60;
+	}
+
+	.reward-toast-text {
+		font-size: 23rpx;
+		color: $bai-on-primary;
+		padding: 15rpx 31rpx;
+		border-radius: $bai-rounded-pill;
+		background-color: rgba($bai-ink, 0.9);
+	}
+</style>

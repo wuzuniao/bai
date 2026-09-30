@@ -1,0 +1,1191 @@
+<template>
+	<view class="page" :style="'background-color:' + readerBg">
+		<!-- 阅读内容区：点击空白切换菜单显隐 / 清除划词 / 收起设置；左右滑动翻页（切换章节） -->
+		<view class="content" @click="onContentTap" @touchstart="onContentTouchStart" @touchend="onContentTouchEnd">
+			<view class="content-inner">
+				<!-- 章节头部（Stitch: 标签行 + 36px/900 大标题 + 分隔条） -->
+				<view class="chapter-header">
+					<view class="chapter-label-row">
+						<view class="chapter-label-dot"></view>
+						<text class="chapter-label" :style="'color:' + labelColor">{{ chapterLabel }}</text>
+					</view>
+					<text class="chapter-title" :style="'color:' + titleColor">{{ contentTitle }}</text>
+					<view class="chapter-divider"></view>
+				</view>
+				<!-- 正文段落（Stitch: 19px、行距 1.95、首行缩进 2em、两端对齐；长按划词） -->
+				<view class="novel-body" :style="'font-size:' + fontSize + 'px;color:' + bodyColor">
+					<view
+						v-for="(item, vi) in currentPageItems"
+						:key="item.origin"
+						class="novel-paragraph"
+						@longpress="onLongPress(item.origin)"
+					>
+						<text class="novel-text">
+							<text v-if="item.underlined" class="para-underlined">{{ item.text }}</text>
+							<text v-else-if="selectedIdx === item.origin">
+								<text>{{ selBefore }}</text>
+								<text class="para-highlight">{{ selSelected }}</text>
+								<text>{{ selAfter }}</text>
+							</text>
+							<text v-else>{{ item.text }}</text>
+						</text>
+					</view>
+				</view>
+			</view>
+			<!-- 底部进度（Stitch: 时间 + 章节进度 + 百分比标签） -->
+			<view class="reader-footer">
+				<view class="footer-left">
+					<view class="footer-dot"></view>
+					<text class="footer-time">14:30</text>
+				</view>
+				<view class="footer-right">
+					<text class="footer-progress">{{ footerProgress }}</text>
+					<text class="footer-percent">{{ footerPercent }}</text>
+				</view>
+			</view>
+		</view>
+
+		<!-- 划词气泡（Stitch: 黑底圆角 12px，复制/写想法/划线竖排图标+文字，底部三角指向选区） -->
+		<view v-if="selectedIdx >= 0" class="selection-popover" @click="clearSelection">
+			<view class="popover-body">
+				<view class="popover-btn" @click="onPopoverAction('copy')">
+					<image class="popover-icon" src="/static/icons/popover-copy.svg" />
+					<text class="popover-text">复制</text>
+				</view>
+				<view class="popover-divider"></view>
+				<view class="popover-btn" @click="onPopoverAction('idea')">
+					<image class="popover-icon" src="/static/icons/popover-idea.svg" />
+					<text class="popover-text">写想法</text>
+				</view>
+				<view class="popover-divider"></view>
+				<view class="popover-btn" @click="onPopoverAction('underline')">
+					<image class="popover-icon" src="/static/icons/popover-underline.svg" />
+					<text class="popover-text">划线</text>
+				</view>
+				<view class="popover-arrow"></view>
+			</view>
+		</view>
+
+		<!-- 顶部导航菜单（Stitch: 返回/书名/书签，呼出态从顶部滑入） -->
+		<view
+			class="menu-top"
+			:class="menuVisible && !settingsOpen ? '' : 'menu-top-hidden'"
+			:style="'background-color:' + menuTopBg + ';border-color:' + menuBorderColor"
+		>
+			<view class="menu-top-left">
+				<view class="round-btn" @click="onBackTap">
+					<image class="round-btn-icon" :src="themeIcon('arrow-back')" />
+				</view>
+				<view class="menu-top-title">
+					<text class="book-name" :style="'color:' + titleColor">星渊行者</text>
+					<text class="book-sub" :style="'color:' + mutedColor">连载中 · 每日更新</text>
+				</view>
+			</view>
+			<view class="round-btn" @click="showToast('已添加书签')">
+				<image class="round-btn-icon" :src="themeIcon('reader-bookmark')" />
+			</view>
+		</view>
+
+		<!-- 底部控制面板（Stitch: 设置面板 + 听书悬浮球 + 三项导航，呼出态从底部滑入） -->
+		<view
+			class="menu-bottom"
+			:class="menuVisible ? '' : 'menu-bottom-hidden'"
+			:style="'background-color:' + menuBottomBg + ';border-color:' + menuBorderColor"
+		>
+			<!-- 设置面板（Stitch: 字号/背景/翻页，展开时隐藏顶栏与听书球） -->
+			<view v-if="settingsOpen" class="settings-panel">
+				<view class="settings-grip-row">
+					<view class="settings-grip"></view>
+				</view>
+				<view class="settings-row">
+					<text class="settings-label" :style="'color:' + mutedColor">字号</text>
+					<view class="settings-row-body">
+						<view class="stepper-group">
+							<view class="stepper-btn" @click="changeFontSize(-1)">
+								<text class="stepper-text" :style="'color:' + titleColor">A⁻</text>
+							</view>
+							<text class="stepper-val" :style="'color:' + titleColor">{{ fontSize }}</text>
+							<view class="stepper-btn" @click="changeFontSize(1)">
+								<text class="stepper-text" :style="'color:' + titleColor">A⁺</text>
+							</view>
+						</view>
+						<view class="font-btn" @click="showToast('系统字体')">
+							<text class="font-btn-text" :style="'color:' + titleColor">思源黑体</text>
+							<text class="font-btn-arrow" :style="'color:' + mutedColor">&gt;</text>
+						</view>
+					</view>
+				</view>
+				<view class="settings-row">
+					<text class="settings-label" :style="'color:' + mutedColor">背景</text>
+					<view class="settings-row-body">
+						<view class="swatch-group">
+							<view
+								class="swatch swatch-white"
+								:class="selectedBg === READER_THEME_LIGHT.readerBg ? 'swatch-active' : ''"
+								@click="changeReaderBg(READER_THEME_LIGHT.readerBg, READER_THEME_LIGHT.bodyColor)"
+							></view>
+							<view
+								class="swatch swatch-milky"
+								:class="selectedBg === READER_THEME_PAPER.readerBg ? 'swatch-active' : ''"
+								@click="changeReaderBg(READER_THEME_PAPER.readerBg, READER_THEME_PAPER.bodyColor)"
+							></view>
+						</view>
+					</view>
+				</view>
+				<view class="settings-row">
+					<text class="settings-label" :style="'color:' + mutedColor">翻页</text>
+					<view class="page-turn-group">
+						<view
+							v-for="(m, mi) in pageTurnModes"
+							:key="mi"
+							class="page-turn-btn"
+							:class="pageTurn === m ? 'page-turn-active' : 'page-turn-idle'"
+							@click="selectPageTurn(m)"
+						>
+							<text class="page-turn-text" :class="pageTurn === m ? 'page-turn-text-active' : ''">{{ m }}</text>
+						</view>
+					</view>
+				</view>
+			</view>
+			<!-- 听书悬浮球（Stitch: 黑底 64px 圆，"听" 28px/900，设置展开时隐藏） -->
+			<view v-if="!settingsOpen" class="listen-wrap">
+				<view class="listen-btn" @click="showToast('听书模式即将上线')">
+					<text class="listen-text">听</text>
+				</view>
+			</view>
+			<!-- 底部三项导航（Stitch: 目录/夜间/设置） -->
+			<view class="bottom-nav">
+				<view class="bottom-nav-btn" @click="openDrawer">
+					<image class="bottom-nav-icon" :src="themeIcon('reader-catalog')" />
+					<text class="bottom-nav-text" :style="'color:' + titleColor">目录</text>
+				</view>
+				<view class="bottom-nav-btn" @click="toggleNightMode">
+					<image class="bottom-nav-icon" :src="nightMode ? '/static/icons/reader-sun.svg' : themeIcon('reader-moon')" />
+					<text class="bottom-nav-text" :style="'color:' + titleColor">{{ nightMode ? '日间' : '夜间' }}</text>
+				</view>
+				<view class="bottom-nav-btn" @click="toggleSettings">
+					<image class="bottom-nav-icon" :src="themeIcon('reader-settings')" />
+					<text class="bottom-nav-text" :style="'color:' + titleColor">设置</text>
+				</view>
+			</view>
+		</view>
+
+		<!-- 目录抽屉遮罩（Stitch: 透明黑渐显） -->
+		<view v-if="drawerOpen" class="drawer-backdrop" @click="closeDrawer"></view>
+		<!-- 目录抽屉（Stitch: 顶部下滑 0.32s 弹性曲线，毛玻璃背景，正/倒序切换） -->
+		<view
+			class="chapter-drawer"
+			:class="drawerOpen ? 'drawer-open' : 'drawer-closed'"
+			:style="'background-color:' + drawerBg"
+		>
+			<view class="drawer-header">
+				<view class="drawer-tab-active" @click="toggleOrder">
+					<text class="drawer-tab-title">目录</text>
+					<text class="drawer-tab-sort">{{ orderDesc ? '↓↑' : '⇅' }}</text>
+				</view>
+				<text class="drawer-tab-plain" @click="showToast('暂无想法与划线记录')">想法/划线</text>
+				<text class="drawer-tab-plain" @click="showToast('书签列表为空')">书签</text>
+			</view>
+			<scroll-view class="drawer-list" direction="vertical" :show-scrollbar="false">
+				<view
+					v-for="(ch, ci) in displayChapters"
+					:key="ch.id"
+					class="chapter-item"
+					@click="selectChapter(ch)"
+				>
+					<text class="chapter-item-text" :class="ch.active ? 'chapter-item-text-active' : ''" :style="'color:' + (ch.active ? activeBlue : chapterTextColor)">{{ ch.title }}</text>
+				</view>
+			</scroll-view>
+			<view class="drawer-bottom">
+				<view class="bottom-nav-btn" @click="closeDrawer">
+					<image class="bottom-nav-icon" :src="drawerCatalogIcon" />
+					<text class="bottom-nav-text drawer-nav-text-active">目录</text>
+				</view>
+				<view class="bottom-nav-btn" @click="toggleNightMode">
+					<image class="bottom-nav-icon" :src="nightMode ? '/static/icons/reader-sun.svg' : themeIcon('reader-moon')" />
+					<text class="bottom-nav-text" :style="'color:' + titleColor">{{ nightMode ? '日间' : '夜间' }}</text>
+				</view>
+				<view class="bottom-nav-btn" @click="closeDrawerAndOpenSettings">
+					<image class="bottom-nav-icon" :src="themeIcon('reader-settings')" />
+					<text class="bottom-nav-text" :style="'color:' + titleColor">设置</text>
+				</view>
+			</view>
+		</view>
+
+		<!-- 自定义 Toast（Stitch: 顶部 96px 黑底圆角胶囊，1.5s 自动消失） -->
+		<view v-if="toastVisible" class="reader-toast">
+			<text class="reader-toast-text">{{ toastMsg }}</text>
+		</view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { READER_THEME_LIGHT, READER_THEME_NIGHT, READER_THEME_PAPER } from '@/utils/theme.uts'
+
+	type Paragraph = {
+		text: string
+		/** 划线标记（气泡"划线"后持久为波浪下划线样式） */
+		underlined: boolean
+	}
+
+	/** 当前页渲染项（origin 为段落在章内的索引，划词状态按其定位） */
+	type PageItem = {
+		origin: number
+		text: string
+		underlined: boolean
+	}
+
+	type Chapter = {
+		id: number
+		/** 目录标题（第1章 灵魂融合） */
+		title: string
+		/** 正文页章节标签（第 1 章 / 扉页） */
+		label: string
+		/** 正文页大标题 */
+		contentTitle: string
+		/** 当前阅读章节高亮（由 currentChapterId 驱动） */
+		active: boolean
+	}
+
+	/** 章节正文示例内容（Stitch 原型 7 段 + 剧情延续示例；后续接入后端按章加载） */
+	const paragraphs = ref<Paragraph[]>([
+		{ text: '深秋时节，黄叶飘落，恰逢秋雨绵绵，冷风一吹，怎一个愁字了得。', underlined: false } as Paragraph,
+		{ text: '李唯独自一人走在公园的小路上，就像是一只被遗弃的流浪狗，从里到外，都是湿漉漉，冰凉凉的。', underlined: false } as Paragraph,
+		{ text: '灰败的心情，灰败的天地，像极了他注定灰败的一生。', underlined: false } as Paragraph,
+		{ text: '正麻木时。', underlined: false } as Paragraph,
+		{ text: '“嘀！”的一声在耳畔响起，这本是寻常的声音，但不知为何，他却有一种时间都被暂停的错觉。', underlined: false } as Paragraph,
+		{ text: '连那细密的雨雾，在此刻都清晰可见的被定住。', underlined: false } as Paragraph,
+		{ text: '然后，一张灰扑扑的卡片出现在眼前。', underlined: false } as Paragraph,
+		{ text: '李唯怔怔地望着那张卡片，卡片表面粗糙得像是被砂纸打磨过，边角处还沾着一点怎么也洗不掉的泥渍。', underlined: false } as Paragraph,
+		{ text: '他下意识地环顾四周，公园里空无一人，连方才那种雨雾凝滞的错觉也消失得无影无踪。', underlined: false } as Paragraph,
+		{ text: '就在他以为自己出现了幻觉的时候，卡片正中央忽然亮起了一行淡金色的字。', underlined: false } as Paragraph,
+		{ text: '【签到成功，获得新手礼包一份】', underlined: false } as Paragraph,
+		{ text: '字迹浮现的瞬间，一段陌生的记忆如同潮水般涌进了他的脑海。', underlined: false } as Paragraph
+	])
+
+	/** 目录章节与正文页章节信息（Stitch 示例） */
+	const chapters = ref<Chapter[]>([
+		{ id: 0, title: '扉页', label: '扉页', contentTitle: '扉页', active: false } as Chapter,
+		{ id: 1, title: '第1章 灵魂融合', label: '第 1 章', contentTitle: '灵魂融合', active: false } as Chapter,
+		{ id: 2, title: '第2章 必须要挖到的第一桶金', label: '第 2 章', contentTitle: '农夫卡', active: true } as Chapter,
+		{ id: 3, title: '第3章 临江道院', label: '第 3 章', contentTitle: '临江道院', active: false } as Chapter,
+		{ id: 4, title: '第4章 论知识的重要性', label: '第 4 章', contentTitle: '论知识的重要性', active: false } as Chapter,
+		{ id: 5, title: '第5章 灵能手臂', label: '第 5 章', contentTitle: '灵能手臂', active: false } as Chapter,
+		{ id: 6, title: '第6章 噬生魔', label: '第 6 章', contentTitle: '噬生魔', active: false } as Chapter,
+		{ id: 7, title: '第7章 天眷之火', label: '第 7 章', contentTitle: '天眷之火', active: false } as Chapter,
+		{ id: 8, title: '第8章 孤注一掷', label: '第 8 章', contentTitle: '孤注一掷', active: false } as Chapter,
+		{ id: 9, title: '第9章 第一单买卖', label: '第 9 章', contentTitle: '第一单买卖', active: false } as Chapter,
+		{ id: 10, title: '第10章 事实俱在', label: '第 10 章', contentTitle: '事实俱在', active: false } as Chapter,
+		{ id: 11, title: '第11章 未来之路', label: '第 11 章', contentTitle: '未来之路', active: false } as Chapter
+	])
+
+	/** 当前阅读章节 id（Stitch 展示态：第 2 章 农夫卡；左右滑动翻页切换） */
+	const currentChapterId = ref(2)
+
+	/** 当前章节信息（标签/标题/底部进度均由此派生） */
+	const currentChapter = computed(() : Chapter => {
+		return chapters.value[currentChapterId.value]
+	})
+
+	const chapterLabel = computed(() : string => {
+		return currentChapter.value.label
+	})
+
+	const contentTitle = computed(() : string => {
+		return currentChapter.value.contentTitle
+	})
+
+	const footerProgress = computed(() : string => {
+		return currentChapter.value.label + ' / 共 150 章'
+	})
+
+	const footerPercent = computed(() : string => {
+		const percent = currentChapterId.value / 150 * 100
+		return percent.toFixed(1) + '%'
+	})
+
+	/** 当前页码（章内 0-based，左右滑动翻页切换） */
+	const pageIndex = ref(0)
+
+	/** 每页字数预算（对应原型一屏排版密度约 160 字；段落不跨页拆分） */
+	const PAGE_CHAR_BUDGET = 160
+
+	/** 分页结果：每页的章内段落索引数组 */
+	const pageBreaks = computed(() : number[][] => {
+		const paras = paragraphs.value
+		const pages: number[][] = []
+		let current: number[] = []
+		let count = 0
+		for (let i = 0; i < paras.length; i++) {
+			current.push(i)
+			count += paras[i].text.length
+			if (count >= PAGE_CHAR_BUDGET) {
+				pages.push(current)
+				current = []
+				count = 0
+			}
+		}
+		if (current.length > 0) {
+			pages.push(current)
+		}
+		return pages
+	})
+
+	/** 当前页渲染项（随 pageIndex 变化） */
+	const currentPageItems = computed(() : PageItem[] => {
+		const paras = paragraphs.value
+		const breaks = pageBreaks.value
+		const page = pageIndex.value < breaks.length ? breaks[pageIndex.value] : breaks[0]
+		return page.map((i) : PageItem => {
+			return { origin: i, text: paras[i].text, underlined: paras[i].underlined } as PageItem
+		})
+	})
+
+	/** 主题状态（色值唯一定义于 utils/theme.uts：日间=画布令牌，夜间/纸张为阅读专用主题） */
+	const nightMode = ref(false)
+	const readerBg = ref(READER_THEME_LIGHT.readerBg)
+	const bodyColor = ref(READER_THEME_LIGHT.bodyColor)
+	const titleColor = ref(READER_THEME_LIGHT.titleColor)
+	/** 章节标签色：原型内联样式为墨色（覆盖灰色类），日间墨色、夜间浅灰 */
+	const labelColor = ref(READER_THEME_LIGHT.labelColor)
+	const mutedColor = ref(READER_THEME_LIGHT.mutedColor)
+	const chapterTextColor = ref(READER_THEME_LIGHT.chapterTextColor)
+	const drawerBg = ref(READER_THEME_LIGHT.drawerBg)
+	const menuTopBg = ref(READER_THEME_LIGHT.menuTopBg)
+	const menuBottomBg = ref(READER_THEME_LIGHT.menuBottomBg)
+	const menuBorderColor = ref(READER_THEME_LIGHT.menuBorderColor)
+	const activeBlue = ref(READER_THEME_LIGHT.activeBlue)
+
+	/** 阅读设置（Stitch: 字号 12-36、背景色板、翻页模式） */
+	const fontSize = ref(19)
+	const selectedBg = ref(READER_THEME_LIGHT.readerBg)
+	const pageTurnModes = ref<string[]>(['仿真', '覆盖', '平移', '上下'])
+	const pageTurn = ref('仿真')
+
+	/** 浮层状态（Stitch: 菜单默认呼出，点击正文空白切换） */
+	const menuVisible = ref(true)
+	const settingsOpen = ref(false)
+	const drawerOpen = ref(false)
+	const orderDesc = ref(false)
+
+	/** 划词状态（Stitch: 长按选中段落 22%-72% 区间） */
+	const selectedIdx = ref(-1)
+	const selBefore = ref('')
+	const selSelected = ref('')
+	const selAfter = ref('')
+
+	/** Toast（Stitch: 顶部 96px 黑底胶囊 1.5s 自动消失） */
+	const toastVisible = ref(false)
+	const toastMsg = ref('')
+	let toastTimer = -1
+
+	/** 主题图标路径：夜间使用 -light 白色变体 */
+	function themeIcon(name: string) : string {
+		return '/static/icons/' + name + (nightMode.value ? '-light' : '') + '.svg'
+	}
+
+	/** 目录抽屉内目录按钮图标（日间蓝/夜间浅蓝） */
+	const drawerCatalogIcon = computed(() : string => {
+		return nightMode.value ? '/static/icons/reader-catalog-blue-light.svg' : '/static/icons/reader-catalog-blue.svg'
+	})
+
+	/** 目录正/倒序展示（Stitch: ⇅/↓↑ 切换） */
+	/** 目录正/倒序展示（Stitch: ⇅/↓↑ 切换；当前阅读章节蓝色高亮由 currentChapterId 驱动） */
+	const displayChapters = computed(() : Chapter[] => {
+		const list = chapters.value
+		const marked = list.map((c) : Chapter => {
+			return {
+				id: c.id,
+				title: c.title,
+				label: c.label,
+				contentTitle: c.contentTitle,
+				active: c.id === currentChapterId.value
+			} as Chapter
+		})
+		if (!orderDesc.value) {
+			return marked
+		}
+		return marked.slice().reverse()
+	})
+
+	/** 左右滑动翻页手势（Stitch 设置面板"翻页"模式：左滑下一章、右滑上一章，水平位移阈值避免与纵向滚动冲突） */
+	let touchStartX = 0
+	let touchStartY = 0
+
+	function onContentTouchStart(e: TouchEvent) : void {
+		touchStartX = e.touches[0].clientX
+		touchStartY = e.touches[0].clientY
+	}
+
+	function onContentTouchEnd(e: TouchEvent) : void {
+		const dx = e.changedTouches[0].clientX - touchStartX
+		const dy = e.changedTouches[0].clientY - touchStartY
+		if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 2) {
+			flipPage(dx < 0 ? 1 : -1)
+		}
+	}
+
+	/** 翻页（左滑下一页、右滑上一页；章首/章尾越界时切换上一章末页/下一章首页，Stitch 边界 toast 提示） */
+	function flipPage(delta: number) : void {
+		const totalPages = pageBreaks.value.length
+		const next = pageIndex.value + delta
+		if (next < 0) {
+			if (currentChapterId.value === 0) {
+				showToast('已经是第一章')
+				return
+			}
+			goToChapter(currentChapterId.value - 1, true)
+			return
+		}
+		if (next > totalPages - 1) {
+			if (currentChapterId.value === chapters.value.length - 1) {
+				showToast('已经是最后一章')
+				return
+			}
+			goToChapter(currentChapterId.value + 1, false)
+			return
+		}
+		pageIndex.value = next
+		clearSelection()
+	}
+
+	/** 切换章节并定位页（进入新章默认首页，回退上一章定位末页） */
+	function goToChapter(id: number, atLastPage: boolean) : void {
+		currentChapterId.value = id
+		pageIndex.value = atLastPage ? pageBreaks.value.length - 1 : 0
+		clearSelection()
+	}
+
+	function showToast(msg: string) : void {
+		toastMsg.value = msg
+		toastVisible.value = true
+		if (toastTimer >= 0) {
+			clearTimeout(toastTimer)
+		}
+		toastTimer = setTimeout(() => {
+			toastVisible.value = false
+		}, 1500)
+	}
+
+	/** 点击正文空白（Stitch: 划词激活→清除；设置展开→收起；否则切换菜单显隐） */
+	function onContentTap() : void {
+		if (selectedIdx.value >= 0) {
+			clearSelection()
+			return
+		}
+		if (settingsOpen.value) {
+			closeSettings()
+			return
+		}
+		menuVisible.value = !menuVisible.value
+		if (menuVisible.value) {
+			settingsOpen.value = false
+		}
+	}
+
+	function onBackTap() : void {
+		uni.navigateBack()
+	}
+
+	/** 长按段落：选中 22%-72% 区间（Stitch: triggerSelectionOnElement） */
+	function onLongPress(pi: number) : void {
+		const p = paragraphs.value[pi]
+		menuVisible.value = false
+		settingsOpen.value = false
+		if (p.text.length > 8) {
+			const startIdx = Math.floor(p.text.length * 0.22)
+			const endIdx = Math.floor(p.text.length * 0.72)
+			selBefore.value = p.text.slice(0, startIdx)
+			selSelected.value = p.text.slice(startIdx, endIdx)
+			selAfter.value = p.text.slice(endIdx)
+		} else {
+			selBefore.value = ''
+			selSelected.value = p.text
+			selAfter.value = ''
+		}
+		selectedIdx.value = pi
+	}
+
+	function clearSelection() : void {
+		selectedIdx.value = -1
+	}
+
+	/** 划词气泡操作（Stitch: 复制/写想法/划线） */
+	function onPopoverAction(action: string) : void {
+		if (action === 'copy') {
+			uni.setClipboardData({
+				data: selSelected.value,
+				success: () => {
+					showToast('已复制到剪贴板')
+				}
+			})
+			setTimeout(() => {
+				clearSelection()
+			}, 500)
+		} else if (action === 'idea') {
+			showToast('进入想法编辑器')
+			setTimeout(() => {
+				clearSelection()
+			}, 500)
+		} else {
+			const p = paragraphs.value[selectedIdx.value]
+			if (p != null) {
+				p.underlined = true
+			}
+			showToast('已划线标注')
+			selectedIdx.value = -1
+		}
+	}
+
+	/** 设置面板开关（Stitch: 展开时隐藏顶栏与听书球） */
+	function toggleSettings() : void {
+		settingsOpen.value = !settingsOpen.value
+	}
+
+	function closeSettings() : void {
+		settingsOpen.value = false
+	}
+
+	/** 字号调节（Stitch: 12-36px 范围，实时作用于正文） */
+	function changeFontSize(delta: number) : void {
+		const next = fontSize.value + delta
+		if (next < 12 || next > 36) {
+			return
+		}
+		fontSize.value = next
+	}
+
+	/** 背景色板切换（Stitch: 纯白/暖米黄，正文与标题色跟随；浮层重置为日间主题） */
+	function changeReaderBg(bg: string, text: string) : void {
+		selectedBg.value = bg
+		readerBg.value = bg
+		bodyColor.value = text
+		titleColor.value = text
+		labelColor.value = text
+		nightMode.value = false
+		mutedColor.value = READER_THEME_LIGHT.mutedColor
+		chapterTextColor.value = text
+		menuTopBg.value = READER_THEME_LIGHT.menuTopBg
+		menuBottomBg.value = READER_THEME_LIGHT.menuBottomBg
+		menuBorderColor.value = READER_THEME_LIGHT.menuBorderColor
+		drawerBg.value = READER_THEME_LIGHT.drawerBg
+	}
+
+	/** 翻页模式选择（Stitch: 单选高亮 + toast） */
+	function selectPageTurn(mode: string) : void {
+		pageTurn.value = mode
+		showToast('已切换至【' + mode + '】模式')
+	}
+
+	/** 日/夜切换（主题成组取自 utils/theme.uts） */
+	function toggleNightMode() : void {
+		nightMode.value = !nightMode.value
+		const theme = nightMode.value ? READER_THEME_NIGHT : READER_THEME_LIGHT
+		readerBg.value = theme.readerBg
+		bodyColor.value = theme.bodyColor
+		titleColor.value = theme.titleColor
+		labelColor.value = theme.labelColor
+		mutedColor.value = theme.mutedColor
+		chapterTextColor.value = theme.chapterTextColor
+		menuTopBg.value = theme.menuTopBg
+		menuBottomBg.value = theme.menuBottomBg
+		menuBorderColor.value = theme.menuBorderColor
+		drawerBg.value = theme.drawerBg
+		activeBlue.value = theme.activeBlue
+		showToast(nightMode.value ? '已切换至夜间模式' : '已切换至日间模式')
+	}
+
+	/** 目录抽屉（Stitch: 遮罩渐显 + 抽屉顶部下滑 0.32s） */
+	function openDrawer() : void {
+		drawerOpen.value = true
+	}
+
+	function closeDrawer() : void {
+		drawerOpen.value = false
+	}
+
+	function closeDrawerAndOpenSettings() : void {
+		closeDrawer()
+		settingsOpen.value = true
+	}
+
+	/** 目录正/倒序（Stitch: ⇅/↓↑ 图标 + toast） */
+	function toggleOrder() : void {
+		orderDesc.value = !orderDesc.value
+		showToast(orderDesc.value ? '已切换至倒序排列' : '已切换至正序排列')
+	}
+
+	/** 章节点击（Stitch: 高亮切换 + toast + 260ms 后收起抽屉） */
+	function selectChapter(ch: Chapter) : void {
+		goToChapter(ch.id, false)
+		if (ch.title.indexOf('第1章') >= 0) {
+			showToast('当前正在阅读此章节')
+		} else {
+			showToast('已跳转至 ' + ch.title)
+		}
+		setTimeout(() => {
+			drawerOpen.value = false
+		}, 260)
+	}
+</script>
+
+<style lang="scss">
+	.page {
+		flex: 1;
+		position: relative;
+		overflow: hidden;
+	}
+
+	/* 阅读内容区（Stitch: 左右 32px、上 80px、下 16px，上下两端分布） */
+	.content {
+		flex: 1;
+		padding-left: 62rpx;
+		padding-right: 62rpx;
+		padding-top: 154rpx;
+		padding-bottom: 31rpx;
+		flex-direction: column;
+		justify-content: space-between;
+	}
+
+	/* 章节头部（Stitch: 标签行 + 大标题 + 分隔条，与正文间距 56px） */
+	.chapter-header {
+		margin-bottom: 108rpx;
+	}
+
+	.chapter-label-row {
+		flex-direction: row;
+		align-items: center;
+		gap: 15rpx;
+		margin-bottom: 15rpx;
+	}
+
+	.chapter-label-dot {
+		width: 12rpx;
+		height: 12rpx;
+		border-radius: $bai-rounded-pill;
+		background-color: $bai-positive;
+	}
+
+	.chapter-label {
+		font-size: 25rpx;
+		font-weight: 600;
+	}
+
+	.chapter-title {
+		font-size: 69rpx;
+		font-weight: 900;
+		margin-bottom: 31rpx;
+	}
+
+	.chapter-divider {
+		width: 92rpx;
+		height: 8rpx;
+		border-radius: $bai-rounded-pill;
+		background-color: $bai-ink;
+		opacity: 0.9;
+	}
+
+	/* 正文（Stitch: 行距 1.95、首行缩进 2em、字距 0.02em、两端对齐、段落间距 21px） */
+	.novel-body {
+		flex-direction: column;
+		gap: 40rpx;
+	}
+
+	.novel-paragraph {
+		position: relative;
+	}
+
+	.novel-text {
+		line-height: 1.95;
+		letter-spacing: 0.4rpx;
+		text-align: justify;
+	}
+
+	/* 划线标注（Stitch: 划线持久为下划线样式，颜色取弱文本 mute） */
+	.para-underlined {
+		text-decoration: underline;
+		text-decoration-style: wavy;
+		text-decoration-color: $bai-mute;
+	}
+
+	/* 划词高亮（Stitch: 正蓝 14% 背景；微圆角 2px，rounded 令牌未覆盖，保留字面值） */
+	.para-highlight {
+		background-color: rgba($bai-positive, 0.14);
+		border-radius: 4rpx;
+	}
+
+	/* 底部进度（Stitch: 上 40px 下 24px 两端分布） */
+	.reader-footer {
+		padding-top: 77rpx;
+		padding-bottom: 46rpx;
+		padding-left: 8rpx;
+		padding-right: 8rpx;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+	}
+
+	.footer-left {
+		flex-direction: row;
+		align-items: center;
+		gap: 15rpx;
+	}
+
+	.footer-dot {
+		width: 12rpx;
+		height: 12rpx;
+		border-radius: $bai-rounded-pill;
+		background-color: rgba($bai-mute, 0.4);
+	}
+
+	.footer-time {
+		font-size: 25rpx;
+		color: $bai-mute;
+	}
+
+	.footer-right {
+		flex-direction: row;
+		align-items: center;
+		gap: 15rpx;
+	}
+
+	.footer-progress {
+		font-size: 25rpx;
+		color: $bai-mute;
+	}
+
+	.footer-percent {
+		font-size: 21rpx;
+		color: $bai-mute;
+		padding: 4rpx 12rpx;
+		border-radius: $bai-rounded-sm;
+		background-color: $bai-pale;
+	}
+
+	/* 顶部导航菜单（Stitch: 毛玻璃背景、底边框、底部圆角 16px，呼出/隐藏滑移动效） */
+	.menu-top {
+		position: absolute;
+		left: 0;
+		right: 0;
+		top: 0;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		padding: 23rpx 38rpx 27rpx 38rpx;
+		border-bottom-width: 1px;
+		border-bottom-style: solid;
+		border-bottom-left-radius: $bai-rounded-lg;
+		border-bottom-right-radius: $bai-rounded-lg;
+		z-index: 40;
+		transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+	}
+
+	.menu-top-hidden {
+		transform: translateY(-110%);
+		opacity: 0;
+	}
+
+	.menu-top-left {
+		flex-direction: row;
+		align-items: center;
+		gap: 23rpx;
+	}
+
+	.round-btn {
+		width: 69rpx;
+		height: 69rpx;
+		border-radius: 9999px;
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.round-btn-icon {
+		width: 38rpx;
+		height: 38rpx;
+	}
+
+	.menu-top-title {
+		flex-direction: column;
+	}
+
+	.book-name {
+		font-size: 29rpx;
+		font-weight: 600;
+	}
+
+	.book-sub {
+		font-size: 19rpx;
+		margin-top: 2rpx;
+	}
+
+	/* 底部控制面板（令牌: 顶部圆角 xl 24px、毛玻璃、浮层提升阴影，呼出/隐藏滑移动效） */
+	.menu-bottom {
+		position: absolute;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		border-top-left-radius: $bai-rounded-xl;
+		border-top-right-radius: $bai-rounded-xl;
+		z-index: 30;
+		box-shadow: $bai-shadow-panel;
+		transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+	}
+
+	.menu-bottom-hidden {
+		transform: translateY(110%);
+		opacity: 0;
+	}
+
+	/* 设置面板（Stitch: 顶部药丸指示器 + 字号/背景/翻页三行） */
+	.settings-panel {
+		padding: 23rpx 38rpx 31rpx 38rpx;
+	}
+
+	.settings-grip-row {
+		flex-direction: row;
+		justify-content: center;
+		padding-bottom: 23rpx;
+	}
+
+	.settings-grip {
+		width: 69rpx;
+		height: 8rpx;
+		border-radius: $bai-rounded-pill;
+		background-color: $bai-neutral;
+	}
+
+	.settings-row {
+		flex-direction: row;
+		align-items: center;
+		padding: 19rpx 0;
+	}
+
+	.settings-label {
+		font-size: 23rpx;
+		width: 69rpx;
+	}
+
+	.settings-row-body {
+		flex: 1;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		margin-left: 15rpx;
+	}
+
+	.stepper-group {
+		flex-direction: row;
+		align-items: center;
+		gap: 23rpx;
+	}
+
+	.stepper-btn {
+		width: 154rpx;
+		height: 69rpx;
+		border-radius: $bai-rounded-pill;
+		border: 1px solid $bai-pale;
+		background-color: $bai-canvas;
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.stepper-text {
+		font-size: 34rpx;
+		font-weight: 700;
+	}
+
+	.stepper-val {
+		font-size: 27rpx;
+		font-weight: 700;
+		min-width: 46rpx;
+		text-align: center;
+	}
+
+	.font-btn {
+		flex-direction: row;
+		align-items: center;
+		gap: 8rpx;
+		height: 69rpx;
+		padding: 0 27rpx;
+		border-radius: $bai-rounded-pill;
+		border: 1px solid $bai-pale;
+		background-color: $bai-canvas;
+	}
+
+	.font-btn-text {
+		font-size: 23rpx;
+	}
+
+	.font-btn-arrow {
+		font-size: 19rpx;
+	}
+
+	.swatch-group {
+		flex-direction: row;
+		align-items: center;
+		gap: 23rpx;
+	}
+
+	.swatch {
+		width: 154rpx;
+		height: 62rpx;
+		border-radius: $bai-rounded-pill;
+	}
+
+	.swatch-white {
+		border: 1px solid $bai-pale;
+	}
+
+	.swatch-milky {
+		background-color: $bai-paper;
+		border: 1px solid $bai-pale;
+	}
+
+	.swatch-active {
+		border: 4rpx solid $bai-positive;
+	}
+
+	.page-turn-group {
+		flex: 1;
+		flex-direction: row;
+		gap: 15rpx;
+		margin-left: 8rpx;
+	}
+
+	.page-turn-btn {
+		flex: 1;
+		height: 62rpx;
+		border-radius: $bai-rounded-pill;
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.page-turn-idle {
+		border: 1px solid $bai-pale;
+		background-color: $bai-canvas;
+	}
+
+	.page-turn-active {
+		border: 4rpx solid $bai-positive;
+		background-color: $bai-positive-tint;
+	}
+
+	.page-turn-text {
+		font-size: 23rpx;
+		color: $bai-ink;
+	}
+
+	.page-turn-text-active {
+		font-weight: 500;
+		color: $bai-positive;
+	}
+
+	/* 听书悬浮球（Stitch: 64px 黑底圆，悬浮于底栏上方 96px，右 20px） */
+	.listen-wrap {
+		position: relative;
+		flex-direction: row;
+		justify-content: flex-end;
+		padding-right: 38rpx;
+	}
+
+	.listen-btn {
+		position: absolute;
+		right: 38rpx;
+		bottom: 185rpx;
+		width: 123rpx;
+		height: 123rpx;
+		border-radius: $bai-rounded-pill;
+		background-color: $bai-ink;
+		border: 1px solid rgba($bai-on-primary, 0.15);
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+		box-shadow: $bai-shadow-fab;
+	}
+
+	.listen-text {
+		font-size: 54rpx;
+		font-weight: 900;
+		color: $bai-on-primary;
+	}
+
+	/* 底部三项导航（Stitch: 三等分，图标 20px + 文字 11px） */
+	.bottom-nav {
+		flex-direction: row;
+		padding: 23rpx 46rpx 54rpx 46rpx;
+	}
+
+	.bottom-nav-btn {
+		flex: 1;
+		flex-direction: column;
+		align-items: center;
+		gap: 8rpx;
+	}
+
+	.bottom-nav-icon {
+		width: 38rpx;
+		height: 38rpx;
+	}
+
+	.bottom-nav-text {
+		font-size: 21rpx;
+	}
+
+	.drawer-nav-text-active {
+		font-weight: 600;
+	}
+
+	/* 划词气泡（Stitch: 黑底圆角 12px 内边距 12x8，操作项竖排图标+文字，底部 7px 三角） */
+	.selection-popover {
+		position: fixed;
+		left: 0;
+		right: 0;
+		top: 480rpx;
+		flex-direction: row;
+		justify-content: center;
+		z-index: 60;
+	}
+
+	.popover-body {
+		position: relative;
+		flex-direction: row;
+		align-items: center;
+		gap: 23rpx;
+		padding: 15rpx 23rpx;
+		background-color: $bai-ink;
+		border-radius: $bai-rounded-md;
+		box-shadow: $bai-shadow-popover;
+	}
+
+	.popover-btn {
+		flex-direction: column;
+		align-items: center;
+		gap: 6rpx;
+		padding: 8rpx 23rpx;
+	}
+
+	.popover-icon {
+		width: 31rpx;
+		height: 31rpx;
+	}
+
+	.popover-text {
+		font-size: 21rpx;
+		font-weight: 500;
+		color: $bai-on-primary;
+	}
+
+	.popover-divider {
+		width: 1px;
+		height: 46rpx;
+		background-color: rgba($bai-on-primary, 0.2);
+	}
+
+	.popover-arrow {
+		position: absolute;
+		left: 50%;
+		bottom: -12rpx;
+		margin-left: -13rpx;
+		width: 0;
+		height: 0;
+		border-left-width: 13rpx;
+		border-left-style: solid;
+		border-left-color: transparent;
+		border-right-width: 13rpx;
+		border-right-style: solid;
+		border-right-color: transparent;
+		border-top-width: 13rpx;
+		border-top-style: solid;
+		border-top-color: $bai-ink;
+	}
+
+	/* 目录抽屉遮罩（Stitch: 透明黑，200ms 渐显） */
+	.drawer-backdrop {
+		position: fixed;
+		left: 0;
+		right: 0;
+		top: 0;
+		bottom: 0;
+		background-color: rgba($bai-black, 0.4);
+		z-index: 40;
+	}
+
+	/* 目录抽屉（Stitch: 顶部 64px 下滑覆盖，圆角顶 xl 24px，毛玻璃 75% 背景，滑移动效 0.32s） */
+	.chapter-drawer {
+		position: fixed;
+		left: 0;
+		right: 0;
+		top: 123rpx;
+		bottom: 0;
+		border-top-left-radius: $bai-rounded-xl;
+		border-top-right-radius: $bai-rounded-xl;
+		flex-direction: column;
+		z-index: 50;
+		box-shadow: $bai-shadow-drawer;
+		transition: transform 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+	}
+
+	.drawer-open {
+		transform: translateY(0);
+	}
+
+	.drawer-closed {
+		transform: translateY(-110%);
+	}
+
+	.drawer-header {
+		flex-direction: row;
+		align-items: center;
+		gap: 46rpx;
+		padding: 31rpx 38rpx 23rpx 38rpx;
+	}
+
+	.drawer-tab-active {
+		flex-direction: row;
+		align-items: flex-end;
+		gap: 4rpx;
+		padding-bottom: 4rpx;
+	}
+
+	.drawer-tab-title {
+		font-size: 38rpx;
+		font-weight: 700;
+		color: $bai-positive;
+	}
+
+	.drawer-tab-sort {
+		font-size: 27rpx;
+		line-height: 27rpx;
+		font-weight: 600;
+		color: $bai-positive;
+	}
+
+	.drawer-tab-plain {
+		font-size: 33rpx;
+		color: $bai-mute;
+	}
+
+	.drawer-list {
+		flex: 1;
+	}
+
+	.chapter-item {
+		padding: 27rpx 38rpx;
+	}
+
+	.chapter-item-text {
+		font-size: 29rpx;
+	}
+
+	.chapter-item-text-active {
+		font-weight: 600;
+	}
+
+	.drawer-bottom {
+		flex-direction: row;
+		padding: 23rpx 46rpx 54rpx 46rpx;
+	}
+</style>

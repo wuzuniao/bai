@@ -13,12 +13,26 @@
 				"navigationStyle": "custom",
 				"navigationBarTitleText": "书架"
 			}
+		},
+		{
+			"path": "pages/reading/reader",
+			"style": {
+				"navigationStyle": "custom",
+				"navigationBarTitleText": "阅读"
+			}
+		},
+		{
+			"path": "pages/reading/reward",
+			"style": {
+				"navigationStyle": "custom",
+				"navigationBarTitleText": "活动"
+			}
 		}
 	],
 	"globalStyle": {
 		"navigationBarTextStyle": "black",
 		"navigationBarTitleText": "uni-app x",
-		"navigationBarBackgroundColor": "#F8F8F8",
+		"navigationBarBackgroundColor": "#F4F4F2",
 		"backgroundColor": "#F4F4F2"
 	},
 	"uniIdRouter": {}
