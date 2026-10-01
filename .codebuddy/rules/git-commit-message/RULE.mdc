@@ -1,0 +1,209 @@
+---
+description: Git 提交信息生成规范：生成/撰写 Git 提交描述时必须遵循的 Conventional Commits 中文规范
+alwaysApply: true
+enabled: true
+---
+# 提交信息生成规则
+
+> 本规则与 `.trae/rules/git-commit-message.md` 内容同步维护，修改任一份须同步另一份。
+
+本规则定义 AI 在协助 Git 提交时应遵循的提交信息风格，确保项目提交历史清晰、一致、可追溯。
+
+## 1. 基本规范
+
+1. 提交描述全部使用中文。
+2. 遵循 [Conventional Commits](https://www.conventionalcommits.org/zh-hans/v1.0.0/) 规范。
+3. 每个提交应只包含一个逻辑变更，保持原子性。
+4. 提交信息应简洁明了，准确描述变更内容，避免无意义的描述。
+
+## 2. 提交格式
+
+提交信息采用以下结构：
+
+```
+<type>[(optional scope)][!]: <short description>
+
+[optional body]
+
+[optional footer(s)]
+```
+
+### 2.1 Header（必填）
+
+Header 由 `type`、`scope`（可选）、`!`（可选，表示破坏性变更）和 `short description` 组成，单行不超过 72 个字符。
+
+```
+feat(user): 新增用户登录功能
+fix(api): 修复登录接口 token 过期判断错误
+docs: 更新 API 接口文档
+```
+
+#### type（必填）
+
+| 类型 | 说明 | 使用场景 |
+|------|------|----------|
+| `feat` | 新功能（feature） | 新增业务功能、新页面、新接口等 |
+| `fix` | 修复 bug | 修复缺陷、异常、错误行为 |
+| `docs` | 文档 | 仅修改文档、注释、README、更新记录等 |
+| `style` | 格式 | 不影响代码运行的格式调整（如空格、缩进、分号、换行） |
+| `refactor` | 重构 | 代码重构，既不新增功能也不修复 bug |
+| `perf` | 性能优化 | 提升性能的代码改动 |
+| `test` | 测试 | 新增或修改测试代码 |
+| `build` | 构建 | 影响构建系统或外部依赖的变更（如 vite、webpack、npm 依赖） |
+| `ci` | 持续集成 | CI/CD 配置和脚本的变更 |
+| `chore` | 杂项 | 其他不修改源代码或测试的变更（如脚本、工具配置） |
+| `revert` | 回滚 | 撤销之前的提交 |
+
+#### scope（可选）
+
+scope 用于说明变更影响的范围，使用小写英文，常见取值：
+
+- `frontend`：前端整体
+- `backend`：后端整体
+- `api`：后端接口
+- `db`：数据库、模型、迁移脚本
+- `user`：用户模块
+- `plan`：计划模块
+- `checkin`：打卡模块
+- `notification`：通知模块
+- `message`：站内信模块
+- `ui`：UI 样式、组件
+- `config`：配置文件
+- `deps`：依赖管理
+- `scripts`：脚本文件
+
+当变更涉及多个模块或无法精确归类时，可省略 scope。
+
+#### short description（必填）
+
+- 使用中文，简洁描述本次提交做了什么
+- 使用动词开头，如：新增、修复、更新、重构、优化、删除、调整
+- 句尾不加句号
+- 控制在 50 个字符以内
+
+### 2.2 Body（可选）
+
+当需要详细说明时使用，每行不超过 72 个字符：
+
+- 说明变更的原因（why）和方式（how）
+- 与 Header 之间空一行
+- 可使用多个段落
+- 使用 `-` 列出重要的变更点
+
+示例：
+
+```
+fix(api): 修复登录接口 token 过期判断错误
+
+原逻辑未正确区分 token 过期与 token 无效两种情况，导致过期提示不准确。
+本次修改通过捕获 ExpiredSignatureError 与 InvalidTokenError 分别处理，
+并统一返回 401 状态码与清晰的中文错误信息。
+
+- 区分 token 过期与无效异常
+- 更新错误提示文案
+- 补充相关接口的异常处理逻辑
+```
+
+### 2.3 Footer（可选）
+
+用于标记关联信息，常见格式：
+
+#### 关联 issue / 任务
+
+```
+Closes #123
+Fixes #123
+Refs #123
+```
+
+#### 破坏性变更
+
+当提交包含不兼容变更时，使用 `!` 标记或 `BREAKING CHANGE:` footer：
+
+```
+feat(api)!: 重构用户认证接口返回格式
+
+BREAKING CHANGE: 登录接口响应结构由 { token: string } 变更为 { access_token: string, expires_in: number }，
+前端需同步调整 token 读取逻辑。
+```
+
+#### Co-authored-by
+
+当多人协作时使用：
+
+```
+Co-authored-by: 张三 <zhangsan@example.com>
+```
+
+## 3. 提交信息示例
+
+```
+feat(plan): 新增计划优先级字段
+
+在创建/更新计划时支持设置优先级（0-7），数字越小优先级越高。
+数据库新增 priority 字段，API 与前端表单同步支持。
+
+- 新增 Plan.priority 字段与数据库迁移
+- 更新 Plan Schema 校验规则
+- 前端计划页面增加优先级单选框
+
+Closes #45
+```
+
+```
+fix(ui): 修复首页打卡按钮状态更新延迟问题
+
+原定时器未在页面隐藏时停止，导致后台运行时状态未正确刷新。
+
+- 在 onHide 中清除定时器
+- 在 onShow 中重新启动定时器
+```
+
+```
+docs: 更新目录结构说明
+
+新增 notification-logs 相关表与 API 的说明。
+```
+
+```
+refactor(backend): 抽离用户认证依赖到 deps 模块
+
+将 get_current_user_id 从各路由中重复的逻辑提取到 deps.py，
+减少代码重复并便于统一维护。
+```
+
+## 4. 禁止事项
+
+1. 禁止使用无意义的提交信息，如：`修改`、`更新`、`修复 bug`、`提交代码`、`111`。
+2. 禁止中英文混用，除专有名词（如 API、JWT、URL）外。
+3. 禁止提交信息过长导致无法在一行内完整阅读。
+4. 禁止将多个不相关的变更合并为一个提交。
+5. 禁止使用第一人称或疑问句，如：`我修复了...`、`为什么不生效？`。
+
+## 5. 特殊情况
+
+### 5.1 回滚提交
+
+使用 `revert` 类型，并在 Body 中说明回滚原因：
+
+```
+revert: 回滚 feat(plan): 新增计划优先级字段
+
+该功能导致生产环境数据库迁移失败，先回滚待修复后重新上线。
+```
+
+### 5.2 仅更新项目文档
+
+若变更仅涉及 `目录结构.json` 或 `更新记录.md`，使用 `docs` 类型：
+
+```
+docs: 同步更新目录结构与更新记录
+```
+
+### 5.3 仅修改 AI 规则文件
+
+对 `.trae/rules/` 或 `.codebuddy/rules/` 下规则的修改使用 `chore` 类型：
+
+```
+chore(rules): 完善 Git 提交信息规范
+```
