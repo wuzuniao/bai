@@ -138,10 +138,10 @@
 		isEditingTemplate.value = false
 	}
 
-	// 角色守卫：非管理员禁止进入（公告管理仅管理员可操作）
+	// 角色守卫：非管理员（roles 不含 admin）禁止进入（公告管理仅管理员可操作）
 	onLoad(() => {
 		const info = userStore.userInfo
-		if (info == null || info.role !== 7) {
+		if (info == null || !info.roles.includes('admin')) {
 			uni.showToast({ title: '无权限访问', icon: 'none' })
 			setTimeout(() => {
 				uni.navigateBack()

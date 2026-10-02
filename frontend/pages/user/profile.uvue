@@ -880,9 +880,9 @@
 					if (st != null) {
 						userStore.patchUser('status', st)
 					}
-					const rl = d.getNumber('role')
-					if (rl != null) {
-						userStore.patchUser('role', rl)
+					const rs = d.getArray('roles')
+					if (rs != null) {
+						userStore.patchUser('roles', rs.map((x): string => x as string))
 					}
 				}
 			}).catch((_e) => {

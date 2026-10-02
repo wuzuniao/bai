@@ -3,8 +3,8 @@
  * --------------------------------------------------------------------------
  * - 管理用户登录态（access_token + refresh_token，由 auth 统一认证服务签发）和个人信息
  * - token 与用户信息持久化到本地存储（userInfo 存 JSON 字符串，跨端读取稳定）
- * - 用户信息包含：id、username、signature、avatar_url、email、has_password、status、role
- * - status：1-正常，0-待删除（24 小时冷静期）；role：0-普通用户，7-管理员
+ * - 用户信息包含：id、username、signature、avatar_url、email、has_password、status、roles
+ * - status：1-正常，0-待删除（24 小时冷静期）；roles：全局角色编码数组（如 ["admin"]），空数组=普通用户
  * - 未登录时 userInfo 为 null，登录成功后经 setUser 写入
  */
 import { defineStore } from 'pinia'
@@ -23,8 +23,8 @@ export type UserInfo = {
 	has_password: boolean
 	/** 1-正常，0-待删除 */
 	status: number
-	/** 0-普通用户，7-管理员 */
-	role: number
+	/** 全局角色编码数组（如 ["admin"]），空数组=普通用户 */
+	roles: string[]
 }
 
 export const useUserStore = defineStore('user', () => {
@@ -96,7 +96,7 @@ export const useUserStore = defineStore('user', () => {
 			email: data.getString('email') ?? '',
 			has_password: data.getBoolean('has_password') ?? false,
 			status: data.getNumber('status') ?? 1,
-			role: data.getNumber('role') ?? 0
+			roles: (data.getArray('roles') ?? []).map((x): string => x as string)
 		} as UserInfo
 		userInfo.value = info
 		const at = data.getString('access_token')
@@ -128,7 +128,7 @@ export const useUserStore = defineStore('user', () => {
 	}
 
 	/** 更新单个用户字段（资料修改成功后同步本地展示与持久化） */
-	const patchUser = (key: string, value: string | boolean | number) : void => {
+	const patchUser = (key: string, value: string | boolean | number | string[]) : void => {
 		if (userInfo.value == null) {
 			return
 		}
@@ -144,8 +144,8 @@ export const useUserStore = defineStore('user', () => {
 			userInfo.value.has_password = value as boolean
 		} else if (key == 'status') {
 			userInfo.value.status = value as number
-		} else if (key == 'role') {
-			userInfo.value.role = value as number
+		} else if (key == 'roles') {
+			userInfo.value.roles = value as string[]
 		}
 		saveUserLocal()
 	}

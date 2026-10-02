@@ -3,7 +3,7 @@ FastAPI 依赖：认证依赖
 --------------------------------------------------------------------------
 提供 `get_current_payload` 与 `get_current_user_id` 依赖函数，受保护接口通过
 `Depends(get_current_user_id)` 获取当前登录用户ID，或经
-`Depends(get_current_payload)` 获取完整令牌 claims（含 role/azp）。
+`Depends(get_current_payload)` 获取完整令牌 claims（含 roles/azp）。
 
 安全校验：
 1. RS256 签名 + issuer + 过期校验（security.verify_access_token，本地公钥验签）
@@ -31,7 +31,7 @@ async def _authenticate_and_validate(authorization: str | None) -> dict[str, Any
     """
     解析 access_token 并完成本地校验
     :param authorization: 请求头 Authorization 字段
-    :return: 令牌 payload（含 iss/sub/role/azp/jti/iat/exp）
+    :return: 令牌 payload（含 iss/sub/roles/azp/jti/iat/exp）
     :raises HTTPException: 401 未登录/无效/过期/已撤销
     """
     if not authorization:
@@ -65,7 +65,7 @@ async def get_current_payload(
     """
     从请求头 Authorization 解析 access_token，本地验签后返回完整令牌 claims
     :param authorization: 请求头 Authorization 字段，格式 "Bearer <access_token>"
-    :return: payload（含 iss/sub/role/azp/jti/iat/exp）
+    :return: payload（含 iss/sub/roles/azp/jti/iat/exp）
     :raises HTTPException: 401 未携带 token / token 无效 / token 已过期 / token 已撤销
     """
     return await _authenticate_and_validate(authorization)

@@ -26,7 +26,7 @@ async def get_me(payload: dict = Depends(get_current_payload)) -> dict:
         "msg": "success",
         "data": {
             "id": int(payload["sub"]),
-            "role": payload.get("role"),
+            "roles": payload.get("roles") or [],
             "azp": payload.get("azp"),
         },
     }

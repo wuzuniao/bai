@@ -2,7 +2,11 @@
 	<view class="settings-page">
 		<!-- 站内信入口（左上角，绝对定位避让状态栏，不随内容滚动） -->
 		<view class="settings-page__notice" :style="'top:' + noticeTop + 'px'" @click="goMessages">
-			<image class="settings-page__notice-icon" src="/static/icons/notice.png" mode="aspectFit" />
+			<view class="settings-page__notice-icon-wrap">
+				<image class="settings-page__notice-icon" src="/static/icons/notice.svg" mode="aspectFit" />
+				<!-- 未读徽标：有未读站内信时显示（负向红点 + 页面底色描边，悬于图标右上角） -->
+				<view v-if="hasUnread" class="settings-page__notice-dot"></view>
+			</view>
 		</view>
 
 		<scroll-view class="settings-page__scroll" direction="vertical" :show-scrollbar="false">
@@ -93,6 +97,11 @@
 
 	const userStore = useUserStore()
 
+	// 未读站内信状态：驱动铃铛未读红点显隐（有消息/无消息两种状态）。
+	// 消息能力依赖本项目后端（暂未交付，站内信页为空态），当前恒为无消息；
+	// 接口就绪后将此状态接入未读数查询即可。
+	const hasUnread = ref(false)
+
 	/** 顶部留白：站内信入口与内容区均避让状态栏（小程序端胶囊在右侧，不冲突） */
 	const noticeTop = ref(44)
 	const mainTop = ref(96)
@@ -109,21 +118,23 @@
 	memberChannelVisible = true
 	// #endif
 
-	// 用户角色等级（未登录为 0），驱动 PRO 徽标数字与管理员版式判断
-	const memberLevel = computed((): number => {
+	// 是否为管理员（roles 含 admin）
+	const isAdmin = computed((): boolean => {
 		const info = userStore.userInfo
-		return info == null ? 0 : info.role
+		return info != null && info.roles.includes('admin')
 	})
 
-	// 是否为管理员（role=7）
-	const isAdmin = computed((): boolean => memberLevel.value === 7)
+	// 兼容角色等级（未登录为 0，管理员为 7），驱动 PRO 徽标数字与管理员版式判断
+	const memberLevel = computed((): number => {
+		return isAdmin.value ? 7 : 0
+	})
 
 	// 是否使用管理员版式资料卡：已登录且角色等级 ≥1
 	const isAdminProfile = computed((): boolean => memberLevel.value >= 1)
 
-	// 是否显示会员卡片：允许的分发渠道 + 已登录 + 普通用户（role=0）
+	// 是否显示会员卡片：允许的分发渠道 + 已登录 + 非管理员
 	const showMemberCard = computed((): boolean => {
-		return memberChannelVisible && userStore.userInfo != null && memberLevel.value === 0
+		return memberChannelVisible && userStore.userInfo != null && !isAdmin.value
 	})
 
 	// PRO 徽标文案（角色等级动态）
@@ -236,9 +247,29 @@
 		justify-content: center;
 	}
 
+	/* 图标包裹层：定位红点的基准（对齐设计稿 24px 图标结构） */
+	.settings-page__notice-icon-wrap {
+		position: relative;
+		width: 48rpx;
+		height: 48rpx;
+	}
+
 	.settings-page__notice-icon {
-		width: 80rpx;
-		height: 80rpx;
+		width: 48rpx;
+		height: 48rpx;
+	}
+
+	/* 未读徽标：负向红点带页面底色描边，按设计稿原值（10px 含 2px 描边，外偏 2px）悬于右上角 */
+	.settings-page__notice-dot {
+		position: absolute;
+		top: -4rpx;
+		right: -4rpx;
+		width: 20rpx;
+		height: 20rpx;
+		box-sizing: border-box;
+		border: 4rpx solid $bai-canvas-soft;
+		border-radius: 9999px;
+		background-color: $bai-negative;
 	}
 
 	/* ===== 用户资料卡片（普通版式） ===== */
