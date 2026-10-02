@@ -15,6 +15,11 @@ export const AUTH_BASE_URL: string = process.env.NODE_ENV === 'production'
 // OIDC 接入方 client_id（本应用在 auth 服务 oauth_clients 表注册的公共 client）
 export const AUTH_CLIENT_ID: string = 'bai'
 
+// 微信小程序 appid（与 manifest.json mp-weixin.appid 一致；appid 为公开信息）
+// 微信一键登录 wx.login() 的 code 与本 appid 绑定，请求认证服务时须显式携带，
+// 认证服务按 appid 解析对应应用密钥换取 openid
+export const WX_APPID: string = 'wx1fe7d69d23fdffb4'
+
 // 服务协议 / 隐私政策（外部页面，以链接形式关联，应用内不建页）
 export const AGREEMENT_URL: string = 'https://auth.wuzuniao.com/pages/agreement.html'
 export const PRIVACY_URL: string = 'https://auth.wuzuniao.com/pages/privacy.html'

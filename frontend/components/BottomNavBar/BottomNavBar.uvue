@@ -5,15 +5,15 @@
 				v-for="(item, index) in items"
 				:key="item.key"
 				class="nav-btn"
-				:class="index === modelValue ? 'nav-btn-active' : 'nav-btn-idle'"
+				:class="item.key === active ? 'nav-btn-active' : 'nav-btn-idle'"
 				@click="onTap(index)"
 			>
 				<image
 					class="nav-icon"
-					:src="index === modelValue ? item.iconActive : item.icon"
+					:src="item.key === active ? item.iconActive : item.icon"
 					:style="'width:' + item.iconWidth + 'rpx;height:' + item.iconHeight + 'rpx'"
 				/>
-				<text class="nav-text" :class="index === modelValue ? 'nav-text-active' : ''">{{ item.text }}</text>
+				<text class="nav-text" :class="item.key === active ? 'nav-text-active' : ''">{{ item.text }}</text>
 			</view>
 		</view>
 	</view>
@@ -22,20 +22,61 @@
 <script setup lang="uts">
 	import { BottomNavItem } from './navItem.uts'
 
+	/** 导航项定义（含目标路径）：导航数据与页面跳转均由本组件统一管理，页面仅需传入 active */
+	const items : BottomNavItem[] = [
+		{
+			key: 'home',
+			text: '首页',
+			icon: '/static/icons/home.svg',
+			iconActive: '/static/icons/home-active.svg',
+			iconWidth: 31,
+			iconHeight: 31,
+			path: '/pages/index/index'
+		} as BottomNavItem,
+		{
+			key: 'bookshelf',
+			text: '书架',
+			icon: '/static/icons/bookshelf.svg',
+			iconActive: '/static/icons/bookshelf-active.svg',
+			iconWidth: 38,
+			iconHeight: 38,
+			path: '/pages/reading/bookshelf'
+		} as BottomNavItem,
+		{
+			key: 'mine',
+			text: '我的',
+			icon: '/static/icons/mine.svg',
+			iconActive: '/static/icons/mine-active.svg',
+			iconWidth: 31,
+			iconHeight: 31,
+			path: '/pages/user/settings'
+		} as BottomNavItem
+	]
+
 	const props = defineProps<{
-		/** 导航项列表 */
-		items: BottomNavItem[]
-		/** 当前激活项索引 */
-		modelValue: number
+		/** 当前激活项 key（home / bookshelf / mine） */
+		active: string
 	}>()
 
 	const emit = defineEmits(['change'])
 
 	function onTap(index: number) : void {
-		if (index === props.modelValue) {
+		// 每次点击均通知页面（如书架页借此关闭浮层菜单）
+		emit('change', index)
+		if (items[index].key === props.active) {
 			return
 		}
-		emit('change', index)
+		const target : BottomNavItem = items[index]
+		const targetRoute : string = target.path.substring(1)
+		// 目标页已在页面栈中则回退到该层，否则替换当前页，页面栈深恒定不增长
+		const pages = getCurrentPages()
+		for (let i = pages.length - 1; i >= 0; i--) {
+			if (pages[i].route === targetRoute) {
+				uni.navigateBack({ delta: pages.length - 1 - i })
+				return
+			}
+		}
+		uni.redirectTo({ url: target.path })
 	}
 </script>
 

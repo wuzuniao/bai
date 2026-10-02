@@ -83,46 +83,15 @@
 			</view>
 		</scroll-view>
 
-		<BottomNavBar :items="navItems" :model-value="navActive" @change="onNavChange" />
+		<BottomNavBar active="mine" />
 	</view>
 </template>
 
 <script setup lang="uts">
 	import BottomNavBar from '@/components/BottomNavBar/BottomNavBar.uvue'
-	import { BottomNavItem } from '@/components/BottomNavBar/navItem.uts'
 	import { useUserStore } from '@/stores/user.uts'
 
 	const userStore = useUserStore()
-
-	/** 悬浮导航项（与首页/书架一致，当前页为「我的」） */
-	const navItems = ref<BottomNavItem[]>([
-		{
-			key: 'home',
-			text: '首页',
-			icon: '/static/icons/home.svg',
-			iconActive: '/static/icons/home-active.svg',
-			iconWidth: 31,
-			iconHeight: 31
-		} as BottomNavItem,
-		{
-			key: 'bookshelf',
-			text: '书架',
-			icon: '/static/icons/bookshelf.svg',
-			iconActive: '/static/icons/bookshelf-active.svg',
-			iconWidth: 38,
-			iconHeight: 38
-		} as BottomNavItem,
-		{
-			key: 'mine',
-			text: '我的',
-			icon: '/static/icons/mine.svg',
-			iconActive: '/static/icons/mine-active.svg',
-			iconWidth: 31,
-			iconHeight: 31
-		} as BottomNavItem
-	])
-
-	const navActive = ref(2)
 
 	/** 顶部留白：站内信入口与内容区均避让状态栏（小程序端胶囊在右侧，不冲突） */
 	const noticeTop = ref(44)
@@ -230,24 +199,6 @@
 
 	function goMessages() : void {
 		uni.navigateTo({ url: '/pages/user/messages' })
-	}
-
-	/** 底部导航切换：首页返回上一页，书架替换当前页，我的为本页 */
-	function onNavChange(index: number) : void {
-		if (index === 0) {
-			const pages = getCurrentPages()
-			if (pages.length > 1) {
-				uni.navigateBack()
-			} else {
-				uni.reLaunch({ url: '/pages/index/index' })
-			}
-			return
-		}
-		if (index === 1) {
-			uni.redirectTo({ url: '/pages/reading/bookshelf' })
-			return
-		}
-		navActive.value = index
 	}
 </script>
 

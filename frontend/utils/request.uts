@@ -4,9 +4,11 @@
  * - 当前仅直连 auth 统一认证服务（登录/注册/资料类接口），baseUrl 固定 AUTH_BASE_URL
  * - 自动附加 Authorization: Bearer <access_token>（本地存储读取）
  * - 统一解析 code/msg/data 响应结构；错误响应兼容 FastAPI detail 字段
- * - 401 统一处理：清除本地登录态并跳转登录页
+ * - 401 静默刷新重试：本地存在 refreshToken 时先直连认证服务续期并重试一次，
+ *   仍失败才清态跳登录（并发 401 共享同一次刷新请求）
  */
-import { AUTH_BASE_URL } from './config'
+import { AUTH_BASE_URL, AUTH_CLIENT_ID } from './config'
+import { syncAuthCookie, clearAuthCookie, SyncAuthCookieOptions } from './authCookie'
 
 /** 统一响应结构（code 非 0 表示业务错误，msg 面向用户） */
 export type ApiResponse = {
@@ -27,10 +29,15 @@ export type RequestOptions = {
 	auth: boolean
 	/** 超时毫秒数 */
 	timeout: number
+	/** 收到 401 时不再触发静默刷新（防递归，重试请求置 true） */
+	skipAuthRefresh?: boolean
 }
 
 // 标记是否已触发 401 跳转，防止并发请求重复跳转
 let handling401 = false
+
+// 共享的静默刷新 Promise（并发 401 只发一次刷新请求）
+let refreshPromise: Promise<string> | null = null
 
 /** 清除本地登录态 */
 function clearAuthStorage() : void {
@@ -51,10 +58,12 @@ function handleUnauthorized() : void {
 	handling401 = true
 	let hadToken = false
 	const stored = uni.getStorageSync('accessToken')
-	if (stored instanceof string && (stored as string).length > 0) {
+	if (stored != null && stored != '') {
 		hadToken = true
 	}
 	clearAuthStorage()
+	// 同步清除父域 SSO Cookie（WEB 端），避免其他子域仍读取到已失效登录态
+	clearAuthCookie()
 	if (hadToken) {
 		uni.showToast({ title: '登录已过期，请重新登录', icon: 'none' })
 	}
@@ -68,13 +77,79 @@ function handleUnauthorized() : void {
 	}, hadToken ? 1500 : 0)
 }
 
+/**
+ * 静默刷新令牌（直连认证服务 /oauth/token，refresh_token 轮换制）
+ * - 成功后更新本地双 token 并 resolve 新 access_token
+ * - 并发调用共享同一 Promise（轮换制下并发刷新会触发重放检测导致全端下线）
+ */
+function silentRefresh() : Promise<string> {
+	if (refreshPromise != null) {
+		return refreshPromise as Promise<string>
+	}
+	refreshPromise = new Promise<string>((resolve, reject) => {
+		const body = {} as UTSJSONObject
+		body['grant_type'] = 'refresh_token'
+		body['refresh_token'] = getRefreshToken()
+		body['client_id'] = AUTH_CLIENT_ID
+		const header = {} as UTSJSONObject
+		header['Content-Type'] = 'application/json'
+		uni.request<UTSJSONObject>({
+			url: AUTH_BASE_URL + '/oauth/token',
+			method: 'POST',
+			header: header,
+			data: body,
+			timeout: 10000,
+			success: (res) => {
+				// /oauth/token 成功直接返回令牌三件套（非业务包装格式）
+				const data = res.data
+				if (res.statusCode >= 200 && res.statusCode < 300 && data != null) {
+					const newAccessToken = data.getString('access_token')
+					const newRefreshToken = data.getString('refresh_token')
+					if (newAccessToken != null) {
+						try {
+							uni.setStorageSync('accessToken', newAccessToken)
+							if (newRefreshToken != null) {
+								uni.setStorageSync('refreshToken', newRefreshToken)
+							}
+						} catch (e) {
+							console.warn('保存刷新后的令牌失败', e)
+						}
+						// 同步刷新后的令牌到父域 SSO Cookie（WEB 端），保持其他子域登录态可用
+						syncAuthCookie({
+							access_token: newAccessToken,
+							refresh_token: newRefreshToken ?? '',
+							expires_in: data.getNumber('expires_in') ?? 0
+						} as SyncAuthCookieOptions)
+						resolve(newAccessToken)
+						return
+					}
+				}
+				reject(new Error('refresh token failed'))
+			},
+			fail: (err) => {
+				reject(new Error(err.errMsg))
+			}
+		})
+	})
+	// 结束后重置共享标记
+	refreshPromise.then((_token: string) => {
+		refreshPromise = null
+	}, (_e) => {
+		refreshPromise = null
+	})
+	return refreshPromise as Promise<string>
+}
+
 /** 读取本地 access_token */
 function getAccessToken() : string {
-	const stored = uni.getStorageSync('accessToken')
-	if (stored instanceof string) {
-		return stored as string
-	}
-	return ''
+	const v = uni.getStorageSync('accessToken')
+	return v == null ? '' : v as string
+}
+
+/** 读取本地 refresh_token（认证服务签发，轮换制） */
+function getRefreshToken() : string {
+	const v = uni.getStorageSync('refreshToken')
+	return v == null ? '' : v as string
 }
 
 /**
@@ -108,15 +183,38 @@ export function request(options: RequestOptions) : Promise<ApiResponse> {
 				header['Authorization'] = 'Bearer ' + token
 			}
 		}
-		uni.request({
+		uni.request<UTSJSONObject>({
 			url: AUTH_BASE_URL + options.url,
 			method: options.method,
 			data: options.data,
 			header: header,
 			timeout: options.timeout,
 			success: (res) => {
-				// 401 未授权：token 失效或缺失，统一清态跳登录
+				// 401 未授权：token 失效或缺失
 				if (res.statusCode === 401) {
+					// 静默刷新重试：非刷新请求且本地存在 refreshToken 时先续期，成功后重试一次
+					if (options.skipAuthRefresh != true && getRefreshToken() != '') {
+						silentRefresh().then((_token: string) => {
+							const retryOptions: RequestOptions = {
+								url: options.url,
+								method: options.method,
+								data: options.data,
+								auth: options.auth,
+								timeout: options.timeout,
+								skipAuthRefresh: true
+							}
+							request(retryOptions).then((retryRes: ApiResponse) => {
+								resolve(retryRes)
+							}, (retryErr: Error) => {
+								reject(retryErr)
+							})
+						}, (_e: Error) => {
+							// 刷新失败（refresh_token 已失效/被撤销）：清态跳登录
+							handleUnauthorized()
+							reject(new Error('登录已过期，请重新登录'))
+						})
+						return
+					}
 					handleUnauthorized()
 					reject(new Error('登录已过期，请重新登录'))
 					return
@@ -127,20 +225,23 @@ export function request(options: RequestOptions) : Promise<ApiResponse> {
 					return
 				}
 				if (res.statusCode >= 200 && res.statusCode < 300) {
+					// 统一解析业务包装格式 {code, msg, data}：code=0 → data 取内层业务数据；
+					// code!=0 → reject(msg)。uts2js（小程序/H5 JS 运行时）类型化 JSON.parse
+					// 产出的嵌套对象无 UTSJSONObject 方法，故响应体用泛型实参接收、
+					// 嵌套取值用索引访问（与 jin 项目同构做法）
 					if (res.data == null) {
 						resolve({ code: 0, msg: 'success', data: null } as ApiResponse)
 						return
 					}
-					try {
-						const body = JSON.parse<ApiResponse>(JSON.stringify(res.data))
-						if (body != null) {
-							resolve(body)
-							return
-						}
-					} catch (e) {
-						// 响应体非预期结构，走通用失败
+					const body = res.data as UTSJSONObject
+					const code = body.getNumber('code')
+					if (code == null || code != 0) {
+						const bizMsg = body.getString('msg')
+						reject(new Error(bizMsg != null && bizMsg != '' ? bizMsg : '请求失败'))
+						return
 					}
-					reject(new Error('响应解析失败，请稍后重试'))
+					const data = body['data']
+					resolve({ code: 0, msg: body.getString('msg') ?? 'success', data: data == null ? null : (data as UTSJSONObject) } as ApiResponse)
 					return
 				}
 				reject(new Error(parseErrMsg(res.data, '请求失败')))

@@ -9,6 +9,7 @@
  */
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { syncAuthCookie, clearAuthCookie, restoreAuthFromCookie, SyncAuthCookieOptions, RestoredAuthState } from '../utils/authCookie'
 
 /** 用户信息结构 */
 export type UserInfo = {
@@ -39,19 +40,33 @@ export const useUserStore = defineStore('user', () => {
 	/** 从本地存储恢复用户信息与双 token（页面刷新/重启后恢复状态） */
 	const loadUserFromStorage = () : void => {
 		try {
+			// WEB 端：本地已有项目令牌则维持（N34 本地有效不交换）；本地无令牌时经父域
+			// SSO Cookie 的平台令牌异步交换恢复，完成后经回调写入 store 响应式状态
+			restoreAuthFromCookie((restored: RestoredAuthState) => {
+				if (restored.userInfoJson.length > 0) {
+					const parsed = JSON.parse<UserInfo>(restored.userInfoJson)
+					if (parsed != null && parsed.id > 0) {
+						userInfo.value = parsed
+					}
+				}
+				accessToken.value = restored.access_token
+				if (restored.refresh_token.length > 0) {
+					refreshToken.value = restored.refresh_token
+				}
+			})
 			const stored = uni.getStorageSync('userInfo')
-			if (stored instanceof string) {
+			if (stored != null && stored != '') {
 				const parsed = JSON.parse<UserInfo>(stored as string)
 				if (parsed != null && parsed.id > 0) {
 					userInfo.value = parsed
 				}
 			}
 			const token = uni.getStorageSync('accessToken')
-			if (token instanceof string) {
+			if (token != null && token != '') {
 				accessToken.value = token as string
 			}
 			const rToken = uni.getStorageSync('refreshToken')
-			if (rToken instanceof string) {
+			if (rToken != null && rToken != '') {
 				refreshToken.value = rToken as string
 			}
 		} catch (e) {
@@ -73,7 +88,7 @@ export const useUserStore = defineStore('user', () => {
 	 * data 含用户字段与 access_token/refresh_token）
 	 */
 	const setUser = (data: UTSJSONObject) : void => {
-		userInfo.value = {
+		const info: UserInfo = {
 			id: data.getNumber('id') ?? 0,
 			username: data.getString('username') ?? '',
 			signature: data.getString('signature') ?? '',
@@ -83,6 +98,7 @@ export const useUserStore = defineStore('user', () => {
 			status: data.getNumber('status') ?? 1,
 			role: data.getNumber('role') ?? 0
 		} as UserInfo
+		userInfo.value = info
 		const at = data.getString('access_token')
 		if (at != null && at.length > 0) {
 			accessToken.value = at
@@ -102,6 +118,13 @@ export const useUserStore = defineStore('user', () => {
 			}
 		}
 		saveUserLocal()
+		// 同步登录态到父域 SSO Cookie（WEB 端）：其他子域据此实现「一处登录，处处通行」
+		syncAuthCookie({
+			access_token: at ?? '',
+			refresh_token: rt ?? '',
+			expires_in: data.getNumber('expires_in') ?? 0,
+			userInfoJson: JSON.stringify(info)
+		} as SyncAuthCookieOptions)
 	}
 
 	/** 更新单个用户字段（资料修改成功后同步本地展示与持久化） */
@@ -139,6 +162,8 @@ export const useUserStore = defineStore('user', () => {
 		} catch (e) {
 			console.warn('清除本地用户信息失败', e)
 		}
+		// 同步清除父域 SSO Cookie，避免其他子域仍读取到已失效登录态
+		clearAuthCookie()
 	}
 
 	// 初始化时恢复本地登录态

@@ -1,0 +1,403 @@
+﻿/**
+ * 跨子域 SSO Cookie 工具（WEB 端专用，其余端 no-op；账号别名与合并改造：Cookie 固定持有平台令牌）
+ * --------------------------------------------------------------------------
+ * 同一浏览器内「一处登录，处处通行」——bai/jin/yao/auth 各子域的 localStorage
+ * 互相隔离（同源策略），经父域 Cookie（Domain=.wuzuniao.com）互通登录态。
+ *
+ * 令牌体系（N13=A1 / N23 / N34 / P39）：
+ * - Cookie（wz_sso）固定持有「平台令牌」（client_id=auth，sub=主账号 id），
+ *   仅用于跨站登录态恢复与交换，不直接用于业务数据接口
+ * - 本项目本地持「项目令牌」（sub=本项目认识的 identity id），业务接口用
+ * - 登录/刷新拿到项目令牌后：经 POST /oauth/token-exchange 换平台令牌写入 Cookie
+ * - 恢复：本地已有项目令牌则不交换（N34，各项目本地身份独立维持）；
+ *   仅本地无令牌时读 Cookie 平台令牌 → 交换 → 项目令牌写本地
+ *   （平台 access 失效时用 Cookie 内平台 refresh_token 走 /oauth/token client=auth
+ *   独立刷新链续期后再交换，P39）
+ *
+ * Cookie 契约（与 yao 项目 frontend/utils/authCookie.js 一致，跨项目互通）：
+ * - 单条 wz_sso，值为 encodeURIComponent(JSON)：
+ *   { at: 平台 access_token, rt: 平台 refresh_token, exp: access 过期毫秒时间戳, ui: 用户信息 }
+ * - 属性：Domain=.wuzuniao.com（仅生产子域设置）；Path=/；SameSite=Lax；HTTPS 下加 Secure
+ *
+ * 非 WEB 端（App/小程序无 document.cookie）全部为 no-op，调用方无需判断平台。
+ */
+import { AUTH_BASE_URL, AUTH_CLIENT_ID } from './config'
+
+// Cookie 名（跨项目统一契约，勿改动）
+const SSO_COOKIE_NAME = 'wz_sso'
+// Cookie 有效期（秒）：与 refresh_token TTL（14 天）对齐；access_token 时效由 exp 字段表达
+const SSO_COOKIE_MAX_AGE = 14 * 24 * 3600
+// access_token 缺省有效期（秒）：与 auth 服务 ACCESS_TOKEN_EXPIRE_DAYS 一致
+const DEFAULT_ACCESS_TTL_SECONDS = 3 * 24 * 3600
+// auth 平台 client_id（Cookie 内平台令牌的签发目标，N12/P24）
+const PLATFORM_CLIENT_ID = 'auth'
+
+/** Cookie 中的登录态（读取结果） */
+export type SsoAuthState = {
+	access_token: string
+	refresh_token: string
+	/** access_token 过期毫秒时间戳（仅参考；有效性以服务端验签为准） */
+	expires_at: number
+	userInfo: UTSJSONObject | null
+}
+
+/** Cookie 内的原始 JSON 结构（字段宽松声明，防其他子域旧版本缺键） */
+type SsoCookiePayload = {
+	at?: string
+	rt?: string
+	exp?: number
+	ui?: UTSJSONObject | null
+}
+
+/** 交换端点返回的令牌组（N46 裸格式字段） */
+type ExchangedTokenSet = {
+	access_token: string
+	refresh_token: string
+	expires_in: number
+}
+
+/** 同步登录态的入参（传入的为项目令牌；内部交换平台令牌后写 Cookie） */
+export type SyncAuthCookieOptions = {
+	access_token: string
+	/** 项目 refresh_token（交换用不到，仅兼容调用点签名） */
+	refresh_token: string
+	/** 项目 access_token 有效期（秒）；<=0 时用缺省 TTL（仅作兜底） */
+	expires_in: number
+	/** 用户信息 JSON 字符串（可选）；缺省时保留 Cookie 旧值 */
+	userInfoJson?: string
+}
+
+/** 恢复成功回调入参（项目令牌 + 资料 JSON 字符串，写入本地 storage） */
+export type RestoredAuthState = {
+	access_token: string
+	refresh_token: string
+	/** 项目身份资料 JSON 字符串（GET /users/info 的 data，可能为空串） */
+	userInfoJson: string
+}
+
+// #ifdef WEB
+
+/** 当前是否生产跨子域场景（wuzuniao.com 的子域）——决定是否设置 Domain 属性 */
+function onProductionSubDomain(): boolean {
+	return window.location.hostname.endsWith('.wuzuniao.com')
+}
+
+function writeCookie(value: string, maxAgeSeconds: number): void {
+	let attrs = `; Max-Age=${maxAgeSeconds}; Path=/; SameSite=Lax`
+	if (window.location.protocol == 'https:') {
+		attrs += '; Secure'
+	}
+	if (onProductionSubDomain()) {
+		attrs += '; Domain=.wuzuniao.com'
+	}
+	document.cookie = `${SSO_COOKIE_NAME}=${value}${attrs}`
+}
+
+/** 读取本 Cookie 的原始值（不存在返回 null；纯字符串解析，避免正则的跨端类型问题） */
+function readCookieRaw(): string | null {
+	const cookie = document.cookie
+	if (cookie.length == 0) {
+		return null
+	}
+	const pairs = cookie.split(';')
+	for (let i = 0; i < pairs.length; i++) {
+		const pair = pairs[i].trim()
+		const eq = pair.indexOf('=')
+		if (eq <= 0) {
+			continue
+		}
+		if (pair.substring(0, eq) == SSO_COOKIE_NAME) {
+			return pair.substring(eq + 1)
+		}
+	}
+	return null
+}
+
+// #endif
+
+/**
+ * 读取 Cookie 中的平台登录态（无则返回 null；仅 WEB 端有数据）
+ */
+function readAuthCookie(): SsoAuthState | null {
+	// #ifdef WEB
+	try {
+		const raw = readCookieRaw()
+		if (raw == null) {
+			return null
+		}
+		const payload = JSON.parseObject<SsoCookiePayload>(decodeURIComponent(raw))
+		if (payload == null) {
+			return null
+		}
+		const at = payload.at
+		if (at == null || at.length == 0) {
+			return null
+		}
+		const state: SsoAuthState = {
+			access_token: at,
+			refresh_token: payload.rt ?? '',
+			expires_at: payload.exp ?? 0,
+			userInfo: payload.ui ?? null
+		}
+		return state
+	} catch (e) {
+		// 解析失败按无 Cookie 处理
+	}
+	// #endif
+	return null
+}
+
+/**
+ * 统一交换端点（POST /oauth/token-exchange，N25=a；响应 N46 裸格式）
+ * @param bearerToken 源 client 有效令牌
+ * @param targetClientId 目标 client_id
+ * @returns 令牌组；失败返回 null
+ */
+async function exchangeToken(bearerToken: string, targetClientId: string): Promise<ExchangedTokenSet | null> {
+	// #ifndef WEB
+	return null
+	// #endif
+	// #ifdef WEB
+	return new Promise((resolve) => {
+		const header = {} as UTSJSONObject
+		header['Content-Type'] = 'application/json'
+		header['Authorization'] = `Bearer ${bearerToken}`
+		const body = {} as UTSJSONObject
+		body['target_client_id'] = targetClientId
+		uni.request<UTSJSONObject>({
+			url: AUTH_BASE_URL + '/oauth/token-exchange',
+			method: 'POST',
+			header: header,
+			data: body,
+			timeout: 10000,
+			success: (res) => {
+				const data = res.data
+				const at = data == null ? null : data.getString('access_token')
+				if (res.statusCode >= 200 && res.statusCode < 300 && at != null && at.length > 0) {
+					const set: ExchangedTokenSet = {
+						access_token: at,
+						refresh_token: data.getString('refresh_token') ?? '',
+						expires_in: data.getNumber('expires_in') ?? 0
+					}
+					resolve(set)
+					return
+				}
+				resolve(null)
+			},
+			fail: (_err) => {
+				resolve(null)
+			}
+		})
+	})
+	// #endif
+}
+
+/**
+ * 平台 refresh_token 刷新（P39 独立刷新链：POST /oauth/token client=auth）
+ * @returns 令牌组；失败返回 null
+ */
+async function refreshPlatformToken(platformRefreshToken: string): Promise<ExchangedTokenSet | null> {
+	// #ifndef WEB
+	return null
+	// #endif
+	// #ifdef WEB
+	return new Promise((resolve) => {
+		const header = {} as UTSJSONObject
+		header['Content-Type'] = 'application/json'
+		const body = {} as UTSJSONObject
+		body['grant_type'] = 'refresh_token'
+		body['refresh_token'] = platformRefreshToken
+		body['client_id'] = PLATFORM_CLIENT_ID
+		uni.request<UTSJSONObject>({
+			url: AUTH_BASE_URL + '/oauth/token',
+			method: 'POST',
+			header: header,
+			data: body,
+			timeout: 10000,
+			success: (res) => {
+				const data = res.data
+				const at = data == null ? null : data.getString('access_token')
+				if (res.statusCode >= 200 && res.statusCode < 300 && at != null && at.length > 0) {
+					const set: ExchangedTokenSet = {
+						access_token: at,
+						refresh_token: data.getString('refresh_token') ?? '',
+						expires_in: data.getNumber('expires_in') ?? 0
+					}
+					resolve(set)
+					return
+				}
+				resolve(null)
+			},
+			fail: (_err) => {
+				resolve(null)
+			}
+		})
+	})
+	// #endif
+}
+
+/**
+ * 同步登录态到父域 Cookie（登录/注册/绑定成功、令牌静默刷新后调用）
+ * - 传入的为项目令牌：先交换平台令牌再写 Cookie（fire-and-forget，不阻塞调用方）
+ * - 交换失败不写 Cookie（本地登录态不受影响；下次触发再试）
+ * - userInfo 缺省时保留 Cookie 旧值
+ */
+export function syncAuthCookie(opts: SyncAuthCookieOptions): void {
+	if (opts.access_token.length == 0) {
+		return
+	}
+	// #ifdef WEB
+	(async () => {
+		const platform = await exchangeToken(opts.access_token, PLATFORM_CLIENT_ID)
+		if (platform == null) {
+			return
+		}
+		try {
+			const prev = readAuthCookie()
+			let ui: UTSJSONObject | null = null
+			const uiJson = opts.userInfoJson
+			if (uiJson != null && uiJson.length > 0) {
+				ui = JSON.parseObject(uiJson)
+			}
+			if (ui == null && prev != null) {
+				ui = prev.userInfo
+			}
+			const ttlSeconds = platform.expires_in > 0 ? platform.expires_in : DEFAULT_ACCESS_TTL_SECONDS
+			const payload = {} as UTSJSONObject
+			payload['at'] = platform.access_token
+			payload['rt'] = platform.refresh_token
+			payload['exp'] = Date.now() + ttlSeconds * 1000
+			if (ui != null) {
+				payload['ui'] = ui
+			}
+			writeCookie(encodeURIComponent(JSON.stringify(payload)), SSO_COOKIE_MAX_AGE)
+		} catch (e) {
+			// Cookie 写入失败不影响主流程
+		}
+	})()
+	// #endif
+}
+
+/**
+ * 启动时从父域 Cookie 恢复登录态（N34/P39 恢复语义）
+ * 1. 本地已有项目 access_token：本地有效不交换（N34，各项目本地身份独立维持），直接返回
+ * 2. 本地无令牌 + Cookie 有平台令牌：交换 → 项目令牌写本地（资料经 /users/info 另拉），
+ *    成功后经 onRestored 回调通知调用方写响应式状态
+ * 3. 平台 access 失效：用 Cookie 内平台 refresh_token 刷新后重试交换（P39）；
+ *    平台刷新也失败（Cookie 登录态已失效）→ 清 Cookie 保持跨站一致
+ * 4. Cookie 缺失：无事可做（本地身份独立维持；登出经 auth 全端撤销后由 401 链收敛）
+ * @param onRestored 恢复成功回调（可空）
+ * @returns 是否立即判断为无需恢复（异步恢复不改变返回值语义）
+ */
+export function restoreAuthFromCookie(onRestored: ((res: RestoredAuthState) => void) | null = null): boolean {
+	// #ifndef WEB
+	return false
+	// #endif
+	// #ifdef WEB
+	try {
+		const saved = readAuthCookie()
+		const localTokenRaw = uni.getStorageSync('accessToken')
+		const localToken = localTokenRaw == null ? '' : localTokenRaw as string
+		// N34：本地已有项目令牌（无论与 Cookie 是否一致），本地身份独立维持不交换
+		if (localToken.length > 0) {
+			return false
+		}
+		if (saved == null || saved.access_token.length == 0) {
+			return false
+		}
+		// 异步恢复：平台令牌 → 交换 → 项目令牌 + 资料 → 写本地 → 回调
+		(async () => {
+			let platformAt = saved.access_token
+			let platformRt = saved.refresh_token
+			let project = await exchangeToken(platformAt, AUTH_CLIENT_ID)
+			if (project == null && platformRt.length > 0) {
+				// 平台 access 失效：平台 rt 独立刷新链（P39）
+				const refreshed = await refreshPlatformToken(platformRt)
+				if (refreshed != null) {
+					platformAt = refreshed.access_token
+					platformRt = refreshed.refresh_token
+					project = await exchangeToken(platformAt, AUTH_CLIENT_ID)
+				}
+			}
+			if (project == null) {
+				// 平台登录态已失效：清 Cookie（与各站「Cookie 缺失即退出」语义一致）
+				clearAuthCookie()
+				return
+			}
+			uni.setStorageSync('accessToken', project.access_token)
+			if (project.refresh_token.length > 0) {
+				uni.setStorageSync('refreshToken', project.refresh_token)
+			}
+			// 拉取本项目身份资料（资料缺失时仅恢复令牌）
+			let userInfoJson = ''
+			const info = await fetchProjectUserInfo(project.access_token)
+			if (info != null && info.getNumber('id') != null) {
+				userInfoJson = JSON.stringify(info)
+				uni.setStorageSync('userInfo', userInfoJson)
+			}
+			if (onRestored != null) {
+				const restored: RestoredAuthState = {
+					access_token: project.access_token,
+					refresh_token: project.refresh_token,
+					userInfoJson: userInfoJson
+				}
+				onRestored(restored)
+			}
+		})()
+		return false
+	} catch (e) {
+		return false
+	}
+	// #endif
+}
+
+/**
+ * 拉取项目身份资料（GET /api/v1/users/info，Bearer=项目令牌）
+ * @returns 资料 JSON 对象；失败返回 null
+ */
+async function fetchProjectUserInfo(accessToken: string): Promise<UTSJSONObject | null> {
+	// #ifndef WEB
+	return null
+	// #endif
+	// #ifdef WEB
+	return new Promise((resolve) => {
+		const header = {} as UTSJSONObject
+		header['Authorization'] = `Bearer ${accessToken}`
+		uni.request<UTSJSONObject>({
+			url: AUTH_BASE_URL + '/api/v1/users/info',
+			method: 'GET',
+			header: header,
+			timeout: 10000,
+			success: (res) => {
+				const body = res.data
+				if (res.statusCode >= 200 && res.statusCode < 300 && body != null && body.getNumber('code') == 0) {
+					resolve(body.getJSONObject('data'))
+					return
+				}
+				resolve(null)
+			},
+			fail: (_err) => {
+				resolve(null)
+			}
+		})
+	})
+	// #endif
+}
+
+/** 清除父域 Cookie（退出登录/登录态失效/账号删除时调用） */
+export function clearAuthCookie(): void {
+	// #ifdef WEB
+	try {
+		let attrs = '; Max-Age=0; Path=/; SameSite=Lax'
+		if (window.location.protocol == 'https:') {
+			attrs += '; Secure'
+		}
+		if (onProductionSubDomain()) {
+			attrs += '; Domain=.wuzuniao.com'
+		}
+		document.cookie = `${SSO_COOKIE_NAME}=${attrs}`
+	} catch (e) {
+		// 忽略清除失败
+	}
+	// #endif
+}

@@ -6,7 +6,7 @@
  * - 需登录态的接口（Authorization 由 request 自动附加）：user_id 由 JWT 提供
  */
 import { request, ApiResponse, RequestOptions } from '@/utils/request.uts'
-import { AUTH_CLIENT_ID } from '@/utils/config.uts'
+import { AUTH_CLIENT_ID, WX_APPID } from '@/utils/config.uts'
 
 /** 构造请求选项（默认带认证头、10s 超时） */
 function opts(url: string, method: RequestMethod, data: UTSJSONObject | null, auth: boolean = true) : RequestOptions {
@@ -126,7 +126,7 @@ export function changeEmail(oldCode: string, newEmail: string, newCode: string) 
 	return request(opts('/api/v1/users/change-email', 'PUT', data))
 }
 
-/** 绑定邮箱（无邮箱用户首次绑定；邮箱已存在时响应 data 含 need_merge） */
+/** 绑定邮箱（无邮箱用户首次绑定；邮箱已存在时 auth 内部自动合并，响应=合并后完整登录态） */
 export function bindEmail(newEmail: string, newCode: string) : Promise<ApiResponse> {
 	const data = {} as UTSJSONObject
 	data['new_email'] = newEmail
@@ -135,9 +135,11 @@ export function bindEmail(newEmail: string, newCode: string) : Promise<ApiRespon
 	return request(opts('/api/v1/users/bind-email', 'PUT', data))
 }
 
-/** 计划删除账号（status 置 0，24 小时冷静期） */
+/** 计划删除账号（person+全部别名 status 置 0，24 小时冷静期；client_id 供审计） */
 export function scheduleDeletion() : Promise<ApiResponse> {
-	return request(opts('/api/v1/users/schedule-deletion', 'POST', {} as UTSJSONObject))
+	const data = {} as UTSJSONObject
+	data['client_id'] = AUTH_CLIENT_ID
+	return request(opts('/api/v1/users/schedule-deletion', 'POST', data))
 }
 
 /** 取消账号删除计划（status 恢复 1） */
@@ -155,5 +157,6 @@ export function wechatLogin(code: string) : Promise<ApiResponse> {
 	const data = {} as UTSJSONObject
 	data['code'] = code
 	data['client_id'] = AUTH_CLIENT_ID
+	data['app_id'] = WX_APPID
 	return request(opts('/api/v1/users/wechat-login', 'POST', data, false))
 }

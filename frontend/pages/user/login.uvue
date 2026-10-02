@@ -290,6 +290,7 @@
 			}, 200)
 		}, 15000)
 		uni.login({
+			provider: 'weixin',
 			success: (loginRes) => {
 				const code = loginRes.code
 				if (code.length == 0) {

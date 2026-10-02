@@ -828,20 +828,12 @@
 				uni.showToast({ title: msg, icon: 'none' })
 			})
 		} else {
-			// 绑定邮箱：无邮箱用户首次绑定（邮箱已存在时 auth 返回 need_merge，合并依赖本项目后端，暂未开放）
+			// 绑定邮箱：无邮箱用户首次绑定（邮箱已存在时 auth 内部自动合并，响应返回合并后资料与全新令牌组）
 			bindEmail(newEmailValue.value, newCodeValue.value).then((res: ApiResponse) => {
-				const d = res.data
-				const needMerge = d != null && d.getBoolean('need_merge') == true
-				if (needMerge) {
-					uni.showModal({
-						title: '提示',
-						content: '该邮箱已注册账号，账号合并功能暂未开放，请直接使用该账号登录',
-						showCancel: false,
-						confirmText: '确定'
-					})
-					return
+				if (res.data != null) {
+					// 全量更新登录态（id/资料/令牌三件套），并同步父域 SSO Cookie
+					userStore.setUser(res.data as UTSJSONObject)
 				}
-				userStore.patchUser('email', newEmailValue.value)
 				uni.showToast({ title: '邮箱绑定成功', icon: 'success' })
 				collapseAll()
 			}).catch((e) => {

@@ -5,6 +5,8 @@
 
 	onLaunch(() => {
 		console.log('App Launch')
+		// WEB 端 SSO 恢复已收敛至 store 初始化（stores/user.uts loadUserFromStorage：
+		// 本地无令牌时经父域 Cookie 平台令牌异步交换恢复，N34）
 	})
 
 	onAppShow(() => {

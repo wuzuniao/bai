@@ -26,13 +26,12 @@
 				</view>
 			</view>
 		</scroll-view>
-		<BottomNavBar :items="navItems" :model-value="navActive" @change="onNavChange" />
+		<BottomNavBar active="home" />
 	</view>
 </template>
 
 <script setup lang="uts">
 	import BottomNavBar from '@/components/BottomNavBar/BottomNavBar.uvue'
-	import { BottomNavItem } from '@/components/BottomNavBar/navItem.uts'
 
 	type PoemChar = {
 		char: string
@@ -240,36 +239,6 @@
 		} as PoemLine
 	])
 
-	/** 悬浮导航项（图标尺寸对应 Figma：首页/我的 16px，书架 20px） */
-	const navItems = ref<BottomNavItem[]>([
-		{
-			key: 'home',
-			text: '首页',
-			icon: '/static/icons/home.svg',
-			iconActive: '/static/icons/home-active.svg',
-			iconWidth: 31,
-			iconHeight: 31
-		} as BottomNavItem,
-		{
-			key: 'bookshelf',
-			text: '书架',
-			icon: '/static/icons/bookshelf.svg',
-			iconActive: '/static/icons/bookshelf-active.svg',
-			iconWidth: 38,
-			iconHeight: 38
-		} as BottomNavItem,
-		{
-			key: 'mine',
-			text: '我的',
-			icon: '/static/icons/mine.svg',
-			iconActive: '/static/icons/mine-active.svg',
-			iconWidth: 31,
-			iconHeight: 31
-		} as BottomNavItem
-	])
-
-	const navActive = ref(0)
-
 	/** 顶部留白：设计稿 48px 含状态栏，优先取系统状态栏高度（Web 端回退 48px） */
 	const topInset = ref(48)
 
@@ -295,24 +264,6 @@
 			return ''
 		}
 		return index % 2 === 1 ? 'poem-line-gap-inner' : 'poem-line-gap-outer'
-	}
-
-	function onNavChange(index: number) : void {
-		if (index === 1) {
-			// 跳转书架页（阅读子目录），首页保持"首页"激活态
-			uni.navigateTo({
-				url: '/pages/reading/bookshelf'
-			})
-			return
-		}
-		if (index === 2) {
-			// 跳转「我的」页（用户子包），首页保持"首页"激活态
-			uni.navigateTo({
-				url: '/pages/user/settings'
-			})
-			return
-		}
-		navActive.value = index
 	}
 </script>
 

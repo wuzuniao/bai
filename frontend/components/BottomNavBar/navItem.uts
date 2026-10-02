@@ -15,4 +15,6 @@ export type BottomNavItem = {
 	iconWidth: number
 	/** 图标高度（rpx） */
 	iconHeight: number
+	/** 点击后跳转的目标页面路径 */
+	path: string
 }

@@ -111,13 +111,12 @@
 			</view>
 		</view>
 
-		<BottomNavBar :items="navItems" :model-value="navActive" @change="onNavChange" @click="closeMenus" />
+		<BottomNavBar active="bookshelf" @change="closeMenus" />
 	</view>
 </template>
 
 <script setup lang="uts">
 	import BottomNavBar from '@/components/BottomNavBar/BottomNavBar.uvue'
-	import { BottomNavItem } from '@/components/BottomNavBar/navItem.uts'
 	import { PLACEHOLDER_STYLE } from '@/utils/theme.uts'
 
 	type BookItem = {
@@ -154,36 +153,6 @@
 			{ key: 'add', kind: 'add', title: '', meta: '', badge: '', badgeKind: '', author: '' } as BookItem
 		]
 	])
-
-	/** 悬浮导航项（与首页一致，当前页激活"书架"） */
-	const navItems = ref<BottomNavItem[]>([
-		{
-			key: 'home',
-			text: '首页',
-			icon: '/static/icons/home.svg',
-			iconActive: '/static/icons/home-active.svg',
-			iconWidth: 31,
-			iconHeight: 31
-		} as BottomNavItem,
-		{
-			key: 'bookshelf',
-			text: '书架',
-			icon: '/static/icons/bookshelf.svg',
-			iconActive: '/static/icons/bookshelf-active.svg',
-			iconWidth: 38,
-			iconHeight: 38
-		} as BottomNavItem,
-		{
-			key: 'mine',
-			text: '我的',
-			icon: '/static/icons/mine.svg',
-			iconActive: '/static/icons/mine-active.svg',
-			iconWidth: 31,
-			iconHeight: 31
-		} as BottomNavItem
-	])
-
-	const navActive = ref(1)
 
 	/** 状态栏高度（Web 端为 0，顶部导航自行下移） */
 	const statusBarInset = ref(0)
@@ -275,14 +244,6 @@
 		uni.navigateTo({
 			url: '/pages/reading/reward'
 		})
-	}
-
-	function onNavChange(index: number) : void {
-		if (index === 0) {
-			uni.navigateBack()
-			return
-		}
-		navActive.value = index
 	}
 </script>
 
