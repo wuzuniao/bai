@@ -9,7 +9,7 @@
 			<!-- 主内容：标题区 / 权益卡 / 价格区 -->
 			<view class="pay-page__main" :style="'padding-top:' + mainTop + 'px'">
 				<view class="pay-page__heading">
-					<text class="pay-page__title">Pro会员</text>
+					<text class="pay-page__title">会员</text>
 					<text class="pay-page__subtitle">终极体验，即刻开启</text>
 				</view>
 

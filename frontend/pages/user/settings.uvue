@@ -11,8 +11,8 @@
 
 		<scroll-view class="settings-page__scroll" direction="vertical" :show-scrollbar="false">
 			<view class="settings-page__main" :style="'padding-top:' + mainTop + 'px'">
-				<!-- 用户资料卡片（普通版式：未登录或角色等级 0） -->
-				<view v-if="!isAdminProfile" class="settings-page__profile-card" @click="goProfileOrLogin">
+				<!-- 用户资料卡片（普通版式：未登录或普通会员） -->
+				<view v-if="!isMemberProfile" class="settings-page__profile-card" @click="goProfileOrLogin">
 					<!-- 左缘品牌色装饰竖条 -->
 					<view class="settings-page__profile-accent"></view>
 					<view class="settings-page__profile-info">
@@ -26,12 +26,12 @@
 					<view class="settings-page__profile-notch"></view>
 				</view>
 
-				<!-- 用户资料卡片（管理员版式：已登录且角色等级 ≥1；
-				     白色横幅 + 墨色信息板错位叠放，对应 bai 双表层设计语言） -->
+				<!-- 用户资料卡片（会员版式：黑铁及以上或管理员；
+				     白色横幅（会员名徽标）+ 墨色信息板错位叠放，对应 bai 双表层设计语言） -->
 				<view v-else class="settings-page__kinetic-card" @click="goProfileOrLogin">
 					<view class="settings-page__kinetic-hero">
 						<view class="settings-page__kinetic-pro-wrap">
-							<text class="settings-page__kinetic-pro">{{ proBadge }}</text>
+							<text class="settings-page__kinetic-pro">{{ memberTierName }}</text>
 						</view>
 						<image v-if="avatarUrl.length > 0" class="settings-page__kinetic-avatar" :src="avatarUrl" mode="widthFix" />
 					</view>
@@ -124,21 +124,56 @@
 		return info != null && info.roles.includes('admin')
 	})
 
-	// 兼容角色等级（未登录为 0，管理员为 7），驱动 PRO 徽标数字与管理员版式判断
+	// 会员档位：档位数值采用 auth 角色表 id（member=1 普通会员、iron=2 黑铁、
+	// bronze=3 青铜、silver=4 白银、gold=5 黄金，取已授最高档）；
+	// admin（id=0）不参与档位序，作为最高特殊档直通会员卡与会员版式
 	const memberLevel = computed((): number => {
-		return isAdmin.value ? 7 : 0
+		const info = userStore.userInfo
+		if (info == null) {
+			return 1
+		}
+		let level = 1
+		if (info.roles.includes('gold')) {
+			level = 5
+		} else if (info.roles.includes('silver')) {
+			level = 4
+		} else if (info.roles.includes('bronze')) {
+			level = 3
+		} else if (info.roles.includes('iron')) {
+			level = 2
+		}
+		return level
 	})
 
-	// 是否使用管理员版式资料卡：已登录且角色等级 ≥1
-	const isAdminProfile = computed((): boolean => memberLevel.value >= 1)
+	// 是否使用会员版式资料卡：黑铁及以上（memberLevel ≥ 2）或管理员
+	const isMemberProfile = computed((): boolean => {
+		return isAdmin.value || memberLevel.value >= 2
+	})
 
-	// 是否显示会员卡片：允许的分发渠道 + 已登录 + 非管理员
+	// 是否显示会员卡片：允许的分发渠道 + 已登录 + 黑铁及以上会员或管理员
 	const showMemberCard = computed((): boolean => {
-		return memberChannelVisible && userStore.userInfo != null && !isAdmin.value
+		return memberChannelVisible && userStore.userInfo != null && (isAdmin.value || memberLevel.value >= 2)
 	})
 
-	// PRO 徽标文案（角色等级动态）
-	const proBadge = computed((): string => 'PRO ' + memberLevel.value)
+	// 会员档位名（资料卡横幅徽标文案）：管理员显示「管理员」，其余按档位取名（不含「会员」后缀）
+	const memberTierName = computed((): string => {
+		if (isAdmin.value) {
+			return '管理员'
+		}
+		if (memberLevel.value >= 5) {
+			return '黄金'
+		}
+		if (memberLevel.value >= 4) {
+			return '白银'
+		}
+		if (memberLevel.value >= 3) {
+			return '青铜'
+		}
+		if (memberLevel.value >= 2) {
+			return '黑铁'
+		}
+		return '普通'
+	})
 
 	// 用户名显示：已登录显示 username（可能为空），未登录显示「请登录」
 	const displayName = computed((): string => {
@@ -279,8 +314,8 @@
 		height: 286rpx;
 		padding: 48rpx;
 		box-sizing: border-box;
-		/* 右下角大圆角，其余直角 */
-		border-radius: 0 0 80rpx 0;
+		/* 左侧上下与右下同弧度大圆角（overflow 裁齐左侧竖条圆弧），右上由斜切角覆盖保持直角 */
+		border-radius: 48rpx 0 48rpx 48rpx;
 		background-color: $bai-canvas;
 		display: flex;
 		flex-direction: row;
@@ -390,6 +425,8 @@
 		font-style: italic;
 		lines: 1;
 		text-overflow: clip;
+		/* 斜体右倾出血余量：防止末字右缘被文本框边界裁剪（对称不破坏居中） */
+		padding: 0 16rpx;
 	}
 
 	/* 头像固定像素（原图 88x88），固定于横幅右缘 */
