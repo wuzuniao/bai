@@ -90,13 +90,6 @@
 					}
 				},
 				{
-					"path": "announcement",
-					"style": {
-						"navigationStyle": "custom",
-						"navigationBarTitleText": "公告管理"
-					}
-				},
-				{
 					"path": "delete-account",
 					"style": {
 						"navigationStyle": "custom",

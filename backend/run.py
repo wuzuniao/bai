@@ -1,10 +1,9 @@
 """
-bai 后端开发启动脚本
+bai 后端开发启动脚本（兼容从任意工作目录运行；启动不依赖 auth 服务就绪——
+JWKS 拉取失败时自动回退磁盘缓存，auth 恢复后各接口自动可用）
 --------------------------------------------------------------------------
-用法：backend 目录下执行 `python run.py`（可选参数覆盖端口，如 `python run.py 10011`）。
-等价于：python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 10001
-
-前置条件：认证服务 auth 已就绪（开发环境 http://localhost:10000）。
+用法：backend 目录下执行 `python run.py`（可选参数覆盖端口，如 `python run.py 11011`）。
+等价于：python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 11001
 """
 import os
 import sys
@@ -12,12 +11,12 @@ from pathlib import Path
 
 # 后端目录（run.py 位于 backend/ 下）
 BACKEND_DIR = Path(__file__).resolve().parent
-DEFAULT_PORT = 10001
+DEFAULT_PORT = 11001
 PROJECT_NAME = "无足鸟古诗词学习助手（bai）"
 
 
 def main() -> None:
-    # 端口：可选第一个参数覆盖（默认 10001，与 backend/.env 及 项目规范.md 保持一致）
+    # 端口：可选第一个参数覆盖（默认 11001，与 backend/.env 及 项目规范.md 保持一致）
     port = int(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_PORT
 
     if not (BACKEND_DIR / "app" / "main.py").exists():
@@ -36,7 +35,6 @@ def main() -> None:
         sys.path.insert(0, str(BACKEND_DIR))
     print(f"[启动] {PROJECT_NAME} 后端")
     print(f"[地址] http://localhost:{port} （接口文档 http://localhost:{port}/docs）")
-    print("[说明] 认证服务 auth 需先就绪（http://localhost:10000）")
     print("[停止] Ctrl+C")
     uvicorn.run("app.main:app", host="0.0.0.0", port=port, reload=True)
 

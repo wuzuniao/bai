@@ -1,0 +1,132 @@
+/**
+ * 公告接口（直连 auth 统一认证服务；公告管理迁移 auth，2026-10-02）
+ * --------------------------------------------------------------------------
+ * - 公告内容与已读状态收口 auth 库，项目归属由 JWT azp 判定（无需传 client_id）
+ * - 已读状态按 (公告, 用户, 项目) 维度分别维护（user_id 取令牌 sub）
+ * - request 由 utils/request.uts 提供baseUrl 固定 AUTH_BASE_URL，401 静默刷新
+ */
+import { request, ApiResponse, RequestOptions } from '@/utils/request.uts'
+
+/** 公告条目（列表接口返回项） */
+export type AnnouncementItem = {
+	id: number
+	title: string
+	content: string
+	created_at: string
+	updated_at: string
+	is_read: boolean
+}
+
+/** 构造请求选项（默认带认证头、10s 超时） */
+function opts(url: string, method: RequestMethod, data: UTSJSONObject | null) : RequestOptions {
+	return {
+		url: url,
+		method: method,
+		data: data,
+		auth: true,
+		timeout: 10000
+	} as RequestOptions
+}
+
+/** 解析公告条目数组（响应 data.items → AnnouncementItem[]） */
+function parseItems(data: UTSJSONObject | null) : AnnouncementItem[] {
+	const items: AnnouncementItem[] = []
+	if (data == null) {
+		return items
+	}
+	const raw = data.getArray('items')
+	if (raw == null) {
+		return items
+	}
+	raw.forEach((el) => {
+		const o = el as UTSJSONObject
+		items.push({
+			id: o.getNumber('id') ?? 0,
+			title: o.getString('title') ?? '',
+			content: o.getString('content') ?? '',
+			created_at: o.getString('created_at') ?? '',
+			updated_at: o.getString('updated_at') ?? '',
+			is_read: o.getBoolean('is_read') ?? false
+		} as AnnouncementItem)
+	})
+	return items
+}
+
+/** 解析响应 data 中的未读数（unread_count 字段；uts2js 端 number 无 toInt，直接返回） */
+function parseUnread(data: UTSJSONObject | null) : number {
+	if (data == null) {
+		return 0
+	}
+	return data.getNumber('unread_count') ?? 0
+}
+
+/**
+ * 分页查询本项目可见公告（倒序；每条含 is_read，data 附 unread_count / has_more）
+ * @param page 页码（1 起）
+ * @param pageSize 每页条数
+ */
+export function getAnnouncements(page: number, pageSize: number) : Promise<AnnouncementsPage> {
+	return new Promise<AnnouncementsPage>((resolve, reject) => {
+		request(opts(`/api/v1/announcements?page=${page}&page_size=${pageSize}`, 'GET', null))
+			.then((res: ApiResponse) => {
+				let hasMore = false
+				if (res.data != null) {
+					hasMore = res.data!.getBoolean('has_more') ?? false
+				}
+				resolve({
+					items: parseItems(res.data),
+					hasMore: hasMore,
+					unreadCount: parseUnread(res.data)
+				} as AnnouncementsPage)
+			}, (err: Error) => {
+				reject(err)
+			})
+	})
+}
+
+/** 公告分页结果 */
+export type AnnouncementsPage = {
+	items: AnnouncementItem[]
+	hasMore: boolean
+	unreadCount: number
+}
+
+/** 查询公告未读数（通知组件查询用） */
+export function getAnnouncementUnreadCount() : Promise<number> {
+	return new Promise<number>((resolve, reject) => {
+		request(opts('/api/v1/announcements/unread-count', 'GET', null))
+			.then((res: ApiResponse) => {
+				resolve(parseUnread(res.data))
+			}, (err: Error) => {
+				reject(err)
+			})
+	})
+}
+
+/** 标记单条公告已读（幂等）；成功响应含最新未读数 */
+export function markAnnouncementRead(id: number) : Promise<number> {
+	return new Promise<number>((resolve, reject) => {
+		request(opts(`/api/v1/announcements/${id}/read`, 'POST', {} as UTSJSONObject))
+			.then((res: ApiResponse) => {
+				resolve(parseUnread(res.data))
+			}, (err: Error) => {
+				reject(err)
+			})
+	})
+}
+
+/** 全部已读（当前项目全部未读公告）；resolve 本次标记条数 */
+export function markAllAnnouncementsRead() : Promise<number> {
+	return new Promise<number>((resolve, reject) => {
+		request(opts('/api/v1/announcements/read-all', 'POST', {} as UTSJSONObject))
+			.then((res: ApiResponse) => {
+				let marked = 0
+				if (res.data != null) {
+					marked = res.data!.getNumber('marked') ?? 0
+				}
+				resolve(marked)
+			}, (err: Error) => {
+				reject(err)
+			})
+	})
+}

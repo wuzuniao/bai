@@ -1,16 +1,10 @@
 <template>
 	<view class="settings-page">
-		<!-- 站内信入口（左上角，绝对定位避让状态栏，不随内容滚动） -->
-		<view class="settings-page__notice" :style="'top:' + noticeTop + 'px'" @click="goMessages">
-			<view class="settings-page__notice-icon-wrap">
-				<image class="settings-page__notice-icon" src="/static/icons/notice.svg" mode="aspectFit" />
-				<!-- 未读徽标：有未读站内信时显示（负向红点 + 页面底色描边，悬于图标右上角） -->
-				<view v-if="hasUnread" class="settings-page__notice-dot"></view>
-			</view>
-		</view>
+		<!-- 站内信通知按钮（组件化：内部查询 auth 公告未读数驱动两态图标） -->
+		<NoticeButton ref="noticeRef" />
 
 		<scroll-view class="settings-page__scroll" direction="vertical" :show-scrollbar="false">
-			<view class="settings-page__main" :style="'padding-top:' + mainTop + 'px'">
+			<view class="settings-page__main">
 				<!-- 用户资料卡片（普通版式：未登录或普通会员） -->
 				<view v-if="!isMemberProfile" class="settings-page__profile-card" @click="goProfileOrLogin">
 					<!-- 左缘品牌色装饰竖条 -->
@@ -66,12 +60,7 @@
 					</view>
 				</view>
 
-				<!-- 公共管理（仅管理员可见） -->
-				<view v-if="isAdmin" class="settings-page__admin-row">
-					<view class="settings-page__admin-card" @click="goAnnouncement">
-						<text class="settings-page__admin-title">公告管理</text>
-					</view>
-				</view>
+				<!-- 公告管理已随「公告管理迁移 auth」（2026-10-02）下线：管理员经 auth 前端管理公告 -->
 
 				<!-- 帮助入口分组：帮助中心 + 联系我们 -->
 				<view class="settings-page__group2">
@@ -92,24 +81,20 @@
 </template>
 
 <script setup lang="uts">
+	import NoticeButton from '@/components/NoticeButton/NoticeButton.uvue'
 	import BottomNavBar from '@/components/BottomNavBar/BottomNavBar.uvue'
 	import { useUserStore } from '@/stores/user.uts'
 
 	const userStore = useUserStore()
 
-	// 未读站内信状态：驱动铃铛未读红点显隐（有消息/无消息两种状态）。
-	// 消息能力依赖本项目后端（暂未交付，站内信页为空态），当前恒为无消息；
-	// 接口就绪后将此状态接入未读数查询即可。
-	const hasUnread = ref(false)
+	// 通知按钮组件引用：页面显示时刷新未读状态（响应站内信页标记已读后的返回）
+	const noticeRef = ref<NoticeButton | null>(null)
 
-	/** 顶部留白：站内信入口与内容区均避让状态栏（小程序端胶囊在右侧，不冲突） */
-	const noticeTop = ref(44)
-	const mainTop = ref(96)
-	const win = uni.getWindowInfo()
-	if (win.statusBarHeight > 0) {
-		noticeTop.value = win.statusBarHeight
-		mainTop.value = win.statusBarHeight + 52
-	}
+	/** 顶部留白：内容区避让状态栏（小程序端胶囊在右侧，不冲突） */
+	// 页面显示：刷新登录态与通知未读状态
+	onShow(() => {
+		noticeRef.value?.refresh()
+	})
 
 	// 会员卡片渠道可见性：仅 App 商店分发渠道可见（小程序/H5 无此入口）。
 	// 渠道包细分（google 等）待后续上架时再接入。
@@ -231,20 +216,12 @@
 		uni.navigateTo({ url: '/pages/user/member-pay' })
 	}
 
-	function goAnnouncement() : void {
-		uni.navigateTo({ url: '/pages/user/announcement' })
-	}
-
 	function goHelp() : void {
 		uni.navigateTo({ url: '/pages/user/help' })
 	}
 
 	function goContact() : void {
 		uni.navigateTo({ url: '/pages/user/contact' })
-	}
-
-	function goMessages() : void {
-		uni.navigateTo({ url: '/pages/user/messages' })
 	}
 </script>
 
@@ -263,7 +240,8 @@
 	}
 
 	.settings-page__main {
-		/* 底部留白：悬浮导航高度 + 余量 */
+		/* padding-top 210rpx：通知按钮 top约50px + 高40px = 底部约90px，留间隙避免与内容重叠（与 yao 布局一致） */
+		padding-top: 210rpx;
 		padding-left: 48rpx;
 		padding-right: 48rpx;
 		padding-bottom: 240rpx;
@@ -271,41 +249,7 @@
 	}
 
 	/* ===== 站内信入口 ===== */
-	.settings-page__notice {
-		position: absolute;
-		left: 48rpx;
-		z-index: 10;
-		width: 80rpx;
-		height: 80rpx;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-	}
-
-	/* 图标包裹层：定位红点的基准（对齐设计稿 24px 图标结构） */
-	.settings-page__notice-icon-wrap {
-		position: relative;
-		width: 48rpx;
-		height: 48rpx;
-	}
-
-	.settings-page__notice-icon {
-		width: 48rpx;
-		height: 48rpx;
-	}
-
-	/* 未读徽标：负向红点带页面底色描边，按设计稿原值（10px 含 2px 描边，外偏 2px）悬于右上角 */
-	.settings-page__notice-dot {
-		position: absolute;
-		top: -4rpx;
-		right: -4rpx;
-		width: 20rpx;
-		height: 20rpx;
-		box-sizing: border-box;
-		border: 4rpx solid $bai-canvas-soft;
-		border-radius: 9999px;
-		background-color: $bai-negative;
-	}
+	/* 通知按钮已组件化（components/NoticeButton/NoticeButton.uvue），样式随组件 */
 
 	/* ===== 用户资料卡片（普通版式） ===== */
 	.settings-page__profile-card {
@@ -592,31 +536,6 @@
 		font-size: 32rpx;
 		line-height: 48rpx;
 		font-weight: 400;
-	}
-
-	/* ===== 公共管理行：宽度随内容收缩 ===== */
-	.settings-page__admin-row {
-		margin-top: 32rpx;
-		flex-direction: row;
-	}
-
-	.settings-page__admin-card {
-		align-self: flex-start;
-		padding: 24rpx 32rpx;
-		box-sizing: border-box;
-		border-radius: 48rpx;
-		background-color: $bai-canvas;
-		border: 1px solid $bai-pale;
-		flex-direction: row;
-		align-items: center;
-		justify-content: center;
-	}
-
-	.settings-page__admin-title {
-		color: $bai-ink;
-		font-size: 32rpx;
-		line-height: 48rpx;
-		font-weight: 600;
 	}
 
 	/* ===== 帮助入口分组 ===== */

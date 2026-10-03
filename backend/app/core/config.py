@@ -12,7 +12,7 @@ class Settings(BaseSettings):
 
     # ==================== auth 统一认证服务配置 ====================
     # auth 服务基础地址（调用其 /internal/* 接口时使用）
-    # 开发环境：http://localhost:10000；生产环境：https://auth.wuzuniao.com
+    # 开发环境：http://localhost:11000；生产环境：https://auth.wuzuniao.com
     AUTH_BASE_URL: str = "https://auth.wuzuniao.com"
     # 令牌签发方标识（须与 auth 服务 .env 的 ISSUER 完全一致，否则验签不通过）
     AUTH_ISSUER: str = "https://auth.wuzuniao.com"

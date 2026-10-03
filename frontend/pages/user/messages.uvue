@@ -1,70 +1,337 @@
 <template>
 	<view class="messages-page">
-		<!-- 顶部返回按钮（次级页面统一返回组件） -->
+		<!-- 顶部返回按钮 -->
 		<BackButton />
 
-		<scroll-view class="messages-page__scroll" direction="vertical" :show-scrollbar="false">
-			<view class="messages-page__canvas" :style="'padding-top:' + mainTop + 'px'">
-				<PageHeader title="站内信" desc="查看您的提醒消息，点击未读消息可标记为已读。" />
+		<view class="messages-page__canvas">
+			<!-- 页面标题区 -->
+			<PageHeader title="站内信" desc="查看系统公告，点击未读公告可标记为已读。" />
 
-				<!-- 消息卡片列表（消息能力依赖本项目后端，暂未交付，当前展示空态） -->
-				<view class="messages-page__list">
-					<view class="messages-page__status">
-						<text class="messages-page__status-text">暂无站内信消息</text>
+			<!-- 工具栏：分类（公告）+ 全部已读 -->
+			<view class="messages-page__toolbar">
+				<view class="messages-page__tabs">
+					<view class="messages-page__tab messages-page__tab--active">
+						<text class="messages-page__tab-text messages-page__tab-text--active">公告</text>
 					</view>
 				</view>
+				<view
+					v-if="hasUnread && !loading && announcements.length > 0"
+					class="messages-page__mark-all"
+					:class="{ 'messages-page__mark-all--disabled': markingAll }"
+					@tap="handleMarkAllRead"
+				>
+					<text class="messages-page__mark-all-text">全部已读</text>
+				</view>
 			</view>
-		</scroll-view>
+
+			<!-- 公告卡片列表 -->
+			<view class="messages-page__list">
+				<!-- 加载中（初次加载） -->
+				<view v-if="loading && announcements.length === 0" class="messages-page__status">
+					<text class="messages-page__status-text">加载中…</text>
+				</view>
+
+				<!-- 加载失败（初次加载，点击重试） -->
+				<view v-else-if="error && announcements.length === 0" class="messages-page__status" @tap="retry">
+					<text class="messages-page__status-text messages-page__status-text--error">加载失败，点击重试</text>
+				</view>
+
+				<!-- 空数据 -->
+				<view v-else-if="announcements.length === 0" class="messages-page__status">
+					<text class="messages-page__status-text">暂无公告</text>
+				</view>
+
+				<!-- 公告卡片（数据来源：auth /api/v1/announcements，卡片直接显示全部内容） -->
+				<template v-else>
+					<view
+						v-for="item in announcements"
+						:key="item.id"
+						class="messages-page__card"
+						:class="{ 'messages-page__card--unread': !item.is_read }"
+						@tap="handleCardClick(item)"
+					>
+						<!-- 未读左侧高亮竖条 -->
+						<view v-if="!item.is_read" class="messages-page__card-bar"></view>
+						<view class="messages-page__card-body">
+							<text class="messages-page__card-title">{{ item.title }}</text>
+							<text class="messages-page__card-meta">{{ formatTime(item.created_at) }}</text>
+							<text class="messages-page__card-text">{{ item.content }}</text>
+						</view>
+					</view>
+
+					<!-- 加载更多（分页加载中） -->
+					<view v-if="loadingMore" class="messages-page__status">
+						<text class="messages-page__status-text">加载中…</text>
+					</view>
+					<!-- 没有更多 -->
+					<view v-else-if="!hasMore && announcements.length > 0" class="messages-page__status">
+						<text class="messages-page__status-text">没有更多了</text>
+					</view>
+				</template>
+			</view>
+		</view>
 	</view>
 </template>
 
 <script setup lang="uts">
+	/**
+	 * 站内信页（pages/user/messages.uvue，分包页面）
+	 * --------------------------------------------------------------------------
+	 * 功能：展示当前用户的系统公告列表，支持标记已读（公告管理迁移 auth，2026-10-02）
+	 *  - 数据来源：auth /api/v1/announcements（直连，未读按用户+项目独立维护）
+	 *  - 未读公告：左侧高亮竖条 + 浅色底；点击未读卡片标记已读（幂等）
+	 *  - 全部已读：一键将当前项目全部未读公告标记已读（仅存在未读时显示）
+	 *  - 分页加载：懒加载触底加载下一页（onReachBottom），无时间窗口限制
+	 *  - 加载中/空数据/加载失败三种状态反馈，失败可点击重试
+	 */
 	import BackButton from '@/components/BackButton/BackButton.uvue'
 	import PageHeader from '@/components/PageHeader/PageHeader.uvue'
+	import { getAnnouncements, markAnnouncementRead, markAllAnnouncementsRead, AnnouncementItem, AnnouncementsPage } from '@/api/announcement.uts'
 
-	/** 顶部留白：返回按钮（状态栏高度 + 40px）之下再留 12px */
-	const mainTop = ref(96)
-	const win = uni.getWindowInfo()
-	if (win.statusBarHeight > 0) {
-		mainTop.value = win.statusBarHeight + 52
+	const announcements = ref<AnnouncementItem[]>([])
+	const loading = ref(false)
+	const loadingMore = ref(false)
+	const error = ref(false)
+	const hasMore = ref(false)
+	const page = ref(1)
+	const markingAll = ref(false) // 全部已读防抖（点击后立即置灰，避免重复点击）
+
+	// 列表中是否存在未读公告（控制"全部已读"按钮显示）
+	const hasUnread = computed((): boolean => {
+		return announcements.value.some((item): boolean => !item.is_read)
+	})
+
+	const PAGE_SIZE = 20
+
+	// ===== 数据加载 =====
+
+	// 加载公告列表（reset=true 重新加载第一页，false 加载下一页）
+	function loadAnnouncements(reset: boolean) : void {
+		if (reset) {
+			page.value = 1
+			loading.value = true
+			error.value = false
+		} else {
+			loadingMore.value = true
+		}
+		getAnnouncements(page.value, PAGE_SIZE).then((res: AnnouncementsPage) => {
+			if (reset) {
+				announcements.value = res.items
+			} else {
+				announcements.value = announcements.value.concat(res.items)
+			}
+			hasMore.value = res.hasMore
+		}, (_e: Error) => {
+			// 仅初次加载失败时显示错误态（分页失败静默，避免打断用户）
+			if (reset) {
+				error.value = true
+			}
+		}).finally(() => {
+			loading.value = false
+			loadingMore.value = false
+		})
 	}
+
+	// ===== 交互 =====
+
+	// 点击公告卡片：未读则标记已读（已读公告无操作）
+	function handleCardClick(item: AnnouncementItem) : void {
+		if (item.is_read) {
+			return
+		}
+		markAnnouncementRead(item.id).then((_unread: number) => {
+			// 状态更新成功：前端实时移除高亮（卡片保留在列表）
+			item.is_read = true
+		}, (e: Error) => {
+			uni.showToast({ title: e.message, icon: 'none' })
+		})
+	}
+
+	// 全部标记已读：批量将当前项目全部未读公告置为已读（防抖，点击后立即置灰）
+	function handleMarkAllRead() : void {
+		if (markingAll.value) {
+			return
+		}
+		markingAll.value = true
+		markAllAnnouncementsRead().then((_marked: number) => {
+			announcements.value.forEach((item: AnnouncementItem) => {
+				item.is_read = true
+			})
+			uni.showToast({ title: '已全部标记为已读', icon: 'none' })
+		}, (e: Error) => {
+			uni.showToast({ title: e.message, icon: 'none' })
+		}).finally(() => {
+			markingAll.value = false
+		})
+	}
+
+	// 重试初次加载
+	function retry() : void {
+		loadAnnouncements(true)
+	}
+
+	// 格式化发布时间："2026-07-02 14:30:00" / "2026-07-02T14:30:00" → "2026-07-02 14:30"
+	function formatTime(iso: string) : string {
+		return iso.replace('T', ' ').slice(0, 16)
+	}
+
+	// ===== 生命周期 =====
+
+	onShow(() => {
+		loadAnnouncements(true)
+	})
+
+	// 触底加载下一页
+	onReachBottom(() => {
+		if (hasMore.value && !loadingMore.value && !loading.value) {
+			page.value += 1
+			loadAnnouncements(false)
+		}
+	})
 </script>
 
 <style lang="scss">
 	.messages-page {
-		flex: 1;
-		position: relative;
+		min-height: 100vh;
 		background-color: $bai-canvas-soft;
-	}
-
-	.messages-page__scroll {
-		flex: 1;
-	}
-
-	.messages-page__canvas {
-		padding-left: 48rpx;
-		padding-right: 48rpx;
-		padding-bottom: 64rpx;
+		position: relative;
 		box-sizing: border-box;
-		flex-direction: column;
 	}
 
-	/* ===== 消息卡片列表 ===== */
-	.messages-page__list {
-		margin-top: 64rpx;
-		flex-direction: column;
+	/* ===== 主内容画布（结构与 help.uvue 一致）===== */
+	.messages-page__canvas {
+		padding: 210rpx 48rpx 64rpx;
+		box-sizing: border-box;
+		min-height: 100vh;
 	}
 
-	/* ===== 状态提示（空数据） ===== */
-	.messages-page__status {
-		padding: 64rpx 32rpx;
+	/* ===== 工具栏：分类（公告）+ 全部已读 ===== */
+	.messages-page__toolbar {
+		display: flex;
 		flex-direction: row;
 		align-items: center;
+		justify-content: space-between;
+		margin-top: 64rpx;
+	}
+
+	.messages-page__tabs {
+		display: flex;
+		flex-direction: row;
+	}
+
+	.messages-page__tab {
+		padding: 12rpx 32rpx;
+		/* 未选中：次级按钮（卡片白底 + 次级文字，无描边） */
+		border-radius: 9999px;
+		background-color: $bai-canvas;
+	}
+
+	.messages-page__tab-text {
+		color: $bai-body;
+		font-size: 28rpx;
+		line-height: 40rpx;
+	}
+
+	/* 选中：主按钮（墨黑实底 + on-primary 文字，无描边） */
+	.messages-page__tab--active {
+		background-color: $bai-ink;
+	}
+
+	.messages-page__tab-text--active {
+		color: $bai-on-primary;
+		font-weight: 600;
+	}
+
+	/* 全部已读按钮（墨色描边胶囊） */
+	.messages-page__mark-all {
+		padding: 12rpx 24rpx;
+		border: 1px solid $bai-ink;
+		border-radius: 9999px;
+	}
+
+	.messages-page__mark-all--disabled {
+		opacity: 0.5;
+	}
+
+	.messages-page__mark-all-text {
+		color: $bai-ink;
+		font-size: 28rpx;
+		line-height: 40rpx;
+	}
+
+	/* ===== 公告卡片列表 ===== */
+	.messages-page__list {
+		margin-top: 32rpx;
+		flex-direction: column;
+	}
+
+	/* ===== 单张公告卡片 ===== */
+	.messages-page__card {
+		position: relative;
+		padding: 32rpx;
+		box-sizing: border-box;
+		background-color: $bai-canvas;
+		border-radius: 32rpx;
+		margin-bottom: 32rpx;
+		overflow: hidden;
+	}
+
+	/* 未读卡片高亮：浅灰底强调（$bai-pale 比页面底深一档，配左竖条区分未读） */
+	.messages-page__card--unread {
+		background-color: $bai-pale;
+	}
+
+	/* 未读左侧高亮竖条（墨色） */
+	.messages-page__card-bar {
+		position: absolute;
+		left: 0;
+		top: 0;
+		bottom: 0;
+		width: 8rpx;
+		background-color: $bai-ink;
+	}
+
+	.messages-page__card-body {
+		display: flex;
+		flex-direction: column;
+	}
+
+	.messages-page__card-title {
+		color: $bai-ink;
+		font-size: 32rpx;
+		line-height: 48rpx;
+		font-weight: 600;
+	}
+
+	.messages-page__card-meta {
+		color: $bai-body;
+		font-size: 24rpx;
+		line-height: 36rpx;
+		margin-top: 8rpx;
+	}
+
+	.messages-page__card-text {
+		color: $bai-body;
+		font-size: 28rpx;
+		line-height: 48rpx;
+		font-weight: 400;
+		margin-top: 16rpx;
+	}
+
+	/* ===== 状态提示（加载中 / 空数据 / 加载失败 / 分页）===== */
+	.messages-page__status {
+		padding: 64rpx 32rpx;
+		display: flex;
 		justify-content: center;
+		align-items: center;
 	}
 
 	.messages-page__status-text {
-		color: $bai-mute;
+		color: $bai-body;
 		font-size: 28rpx;
+	}
+
+	.messages-page__status-text--error {
+		color: $bai-negative;
 	}
 </style>

@@ -10,7 +10,7 @@
 // 发行（production）走生产 HTTPS 域名；开发（运行）连本地认证服务。
 export const AUTH_BASE_URL: string = process.env.NODE_ENV === 'production'
 	? 'https://auth.wuzuniao.com'
-	: 'http://localhost:10000'
+	: 'http://localhost:11000'
 
 // OIDC 接入方 client_id（本应用在 auth 服务 oauth_clients 表注册的公共 client）
 export const AUTH_CLIENT_ID: string = 'bai'

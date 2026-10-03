@@ -1,0 +1,94 @@
+<template>
+	<view class="notice-button" :style="{ top: noticeTop }" @tap="handleTap">
+		<image class="notice-button__icon" :src="iconSrc" mode="aspectFit" />
+	</view>
+</template>
+
+<script setup lang="uts">
+	/**
+	 * NoticeButton —— 左上角站内信通知按钮（通知组件抽象，2026-10-02）
+	 * --------------------------------------------------------------------------
+	 * - 位置规范：与原设置页内嵌铃铛一致（左上角绝对定位，避让状态栏）
+	 * - 两态图标：无消息 notice.svg（墨色铃铛）、有消息 notice-unread.svg（铃铛 + 红点角标）
+	 * - 未读状态组件内驱动：挂载时与 refresh() 调用时直连 auth 查询公告未读数
+	 *   （公告管理迁移 auth，未读按用户+项目独立维护）；未登录/请求失败静默降级为无消息态
+	 * - 所在页面应在 onShow 时调用 refresh()（响应从站内信页标记已读后的返回）
+	 */
+	import { getAnnouncementUnreadCount } from '@/api/announcement.uts'
+	import { useUserStore } from '@/stores/user.uts'
+
+	const userStore = useUserStore()
+
+	const hasUnread = ref(false)
+
+	const noticeTop = ref('45px')
+
+	// 图标两态切换（显示尺寸 46rpx，与 jin 同规格）
+	const iconSrc = computed((): string => {
+		return hasUnread.value ? '/static/icons/notice-unread.svg' : '/static/icons/notice.svg'
+	})
+
+	/** 顶部留白：statusBarHeight - 5px 基础偏移 + 约 0.6vh 相对增量，各机型视觉比例一致（与 yao 同款算法） */
+	function computeTop(): void {
+		try {
+			const sysInfo = uni.getSystemInfoSync()
+			const statusBarHeight = sysInfo.statusBarHeight != null ? sysInfo.statusBarHeight : 44
+			const extra = sysInfo.windowHeight * 0.006
+			noticeTop.value = (statusBarHeight - 5 + extra).toString() + 'px'
+		} catch (e) {
+			noticeTop.value = '45px'
+		}
+	}
+
+	/** 查询公告未读数驱动图标（未登录/失败静默降级为无消息态） */
+	function refresh(): void {
+		if (userStore.userInfo == null) {
+			hasUnread.value = false
+			return
+		}
+		getAnnouncementUnreadCount().then((count: number) => {
+			hasUnread.value = count > 0
+		}, (_e: Error) => {
+			// 静默降级：不打断页面，保持当前图标状态
+		})
+	}
+
+	computeTop()
+	// 打开所在页面即查询（组件随页面挂载执行 setup）
+	refresh()
+
+	// 供所在页面 onShow 调用（从站内信页返回后刷新未读状态）
+	defineExpose({
+		refresh
+	})
+
+	function handleTap(): void {
+		// 防重复入栈：当前已在站内信页时忽略点击
+		const pages = getCurrentPages()
+		if (pages.length > 0) {
+			const current = pages[pages.length - 1]
+			if (current.route == 'pages/user/messages') {
+				return
+			}
+		}
+		uni.navigateTo({ url: '/pages/user/messages' })
+	}
+</script>
+
+<style lang="scss">
+	.notice-button {
+		position: absolute;
+		left: 48rpx;
+		z-index: 10;
+		width: 80rpx;
+		height: 80rpx;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.notice-button__icon {
+		width: 46rpx;
+		height: 46rpx;
+	}
+</style>
