@@ -403,16 +403,19 @@
 	}
 
 	.register-page__canvas {
+		min-height: 100vh;
 		padding-left: 48rpx;
 		padding-right: 48rpx;
 		padding-bottom: 72rpx;
 		box-sizing: border-box;
 		flex-direction: column;
+		justify-content: center;
+		align-items: center;
 	}
 
 	/* ===== 白色卡片容器 ===== */
 	.register-page__card {
-		width: 100%;
+		width: 684rpx;
 		margin-top: 64rpx;
 		padding: 48rpx;
 		box-sizing: border-box;
@@ -513,7 +516,7 @@
 	}
 
 	.register-page__error-text {
-		margin-top: 8rpx;
+		margin-top: 16rpx;
 		color: $bai-negative;
 		font-size: 24rpx;
 		line-height: 32rpx;
@@ -567,7 +570,6 @@
 
 	/* ===== 协议勾选 ===== */
 	.register-page__agree {
-		margin-top: 16rpx;
 		padding-bottom: 16rpx;
 		flex-direction: row;
 		align-items: center;
@@ -576,7 +578,7 @@
 	.register-page__checkbox {
 		width: 32rpx;
 		height: 32rpx;
-		border-radius: $bai-rounded-sm;
+		border-radius: 8rpx;
 		background-color: $bai-canvas;
 		border: 1px solid $bai-neutral;
 		box-sizing: border-box;
@@ -615,7 +617,7 @@
 		padding: 24rpx 0;
 		box-sizing: border-box;
 		background-color: $bai-ink;
-		border-radius: $bai-rounded-xl;
+		border-radius: 48rpx;
 		flex-direction: row;
 		justify-content: center;
 		align-items: center;
@@ -646,6 +648,6 @@
 		color: $bai-ink;
 		font-size: 32rpx;
 		line-height: 48rpx;
-		font-weight: 600;
+		font-weight: 500;
 	}
 </style>

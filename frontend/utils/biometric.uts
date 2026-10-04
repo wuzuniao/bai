@@ -1,0 +1,147 @@
+// #ifdef APP
+/**
+ * 生物识别（指纹）登录工具（仅 App 端）
+ * --------------------------------------------------------------------------
+ * 与 yao 项目 useBiometric.js 同构：基于系统 Soter 三接口实现能力检测与指纹验证，
+ * 凭证（biometric_token）由 auth 后端在账号密码登录时下发（高熵随机串 + device_id 绑定），
+ * 直接存本地沙箱；开关状态独立持久化，关闭开关不清理凭证（重新开启无需重新登录）。
+ * - Android 端需在 manifest.json 勾选指纹权限；鸿蒙端 HBuilderX 4.31+ 原生支持
+ */
+
+const DEVICE_ID_KEY = 'biometricDeviceId'
+const TOKEN_KEY = 'biometricToken'
+const BIO_ENABLED_KEY = 'biometricEnabled'
+
+/** 生成或读取本地设备 UUID（首次调用时生成并持久化，登录/指纹登录时传给后端做绑定校验） */
+export function getDeviceId(): string {
+	let id = ''
+	try {
+		const stored = uni.getStorageSync(DEVICE_ID_KEY)
+		if (stored != null) {
+			id = stored as string
+		}
+	} catch (e) {
+		id = ''
+	}
+	if (id.length > 0) {
+		return id
+	}
+	// 简易 UUID v4 兜底生成（随机数质量对本场景足够：仅用于本机凭证绑定标识）
+	const hex = '0123456789abcdef'
+	let s = ''
+	for (let i = 0; i < 36; i++) {
+		if (i == 8 || i == 13 || i == 18 || i == 23) {
+			s += '-'
+		} else if (i == 14) {
+			s += '4'
+		} else {
+			const r = Math.floor(Math.random() * 16)
+			if (i == 19) {
+				s += hex[(r & 0x3) | 0x8]
+			} else {
+				s += hex[r]
+			}
+		}
+	}
+	try {
+		uni.setStorageSync(DEVICE_ID_KEY, s)
+	} catch (e) {
+		console.warn('保存设备标识失败', e)
+	}
+	return s
+}
+
+/** 检测设备是否支持且已录入指纹（不支持/未录入返回 false） */
+export function isBiometricAvailable(): Promise<boolean> {
+	return new Promise<boolean>((resolve) => {
+		uni.checkIsSupportSoterAuthentication({
+			success: (res) => {
+				const modes = res.supportMode
+				let ok = false
+				for (let i = 0; i < modes.length; i++) {
+					if (modes[i] == 'fingerPrint') {
+						ok = true
+						break
+					}
+				}
+				if (!ok) {
+					resolve(false)
+					return
+				}
+				uni.checkIsSoterEnrolledInDevice({
+					checkAuthMode: 'fingerPrint',
+					success: (r) => {
+						resolve(r.isEnrolled)
+					},
+					fail: (_err) => {
+						resolve(false)
+					}
+				})
+			},
+			fail: (_err) => {
+				resolve(false)
+			}
+		})
+	})
+}
+
+/** 发起系统级指纹验证（仅 App 端登录页指纹一键使用；用户取消/验证失败时 reject） */
+export function authenticate(): Promise<void> {
+	return new Promise<void>((resolve, reject) => {
+		uni.startSoterAuthentication({
+			requestAuthModes: ['fingerPrint'],
+			challenge: Date.now().toString(),
+			authContent: '指纹验证已登录',
+			success: (_res) => {
+				resolve()
+			},
+			fail: (err) => {
+				reject(err)
+			}
+		})
+	})
+}
+
+/** 读取指纹登录开关状态（默认关闭） */
+export function isBiometricEnabled(): boolean {
+	try {
+		return uni.getStorageSync(BIO_ENABLED_KEY) == true
+	} catch (e) {
+		return false
+	}
+}
+
+/** 写入指纹登录开关状态 */
+export function setBiometricEnabled(v: boolean): void {
+	try {
+		uni.setStorageSync(BIO_ENABLED_KEY, v)
+	} catch (e) {
+		console.warn('保存指纹开关状态失败', e)
+	}
+}
+
+/** 存储后端下发的 biometric_token（登录成功响应中携带时调用） */
+export function storeBiometricToken(token: string): void {
+	if (token.length == 0) {
+		return
+	}
+	try {
+		uni.setStorageSync(TOKEN_KEY, token)
+	} catch (e) {
+		console.warn('存储生物识别凭证失败', e)
+	}
+}
+
+/** 读取本地 biometric_token（无则返回空串） */
+export function getBiometricToken(): string {
+	try {
+		const v = uni.getStorageSync(TOKEN_KEY)
+		if (v == null) {
+			return ''
+		}
+		return v as string
+	} catch (e) {
+		return ''
+	}
+}
+// #endif

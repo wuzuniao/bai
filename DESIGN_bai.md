@@ -15,6 +15,7 @@ colors:
   mute: "#868685"
   canvas: "#ffffff"
   canvas-soft: "#f4f4f2"
+  surface-form: "#fafaf8"
   positive: "#1e40af"
   positive-deep: "#1e3a8a"
   warning: "#ffd11a"

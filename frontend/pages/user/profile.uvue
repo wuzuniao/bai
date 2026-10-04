@@ -258,7 +258,7 @@
 					</view>
 				</view>
 
-				<!-- 分组 1.5：偏好设置（语言，界面仅还原，翻译功能后续实现） -->
+				<!-- 分组 1.5：偏好设置（语言 / 指纹登录，独立成区） -->
 				<view class="profile-page__group">
 					<view class="profile-page__group-item">
 						<text class="profile-page__group-text">语言</text>
@@ -267,6 +267,20 @@
 							<text class="profile-page__lang-text">简体中文</text>
 						</view>
 					</view>
+
+					<!-- 指纹登录开关（仅 App 端：设备支持指纹且已登录时显示） -->
+					<!-- #ifdef APP -->
+					<view v-if="showBiometric" class="profile-page__group-item profile-page__group-item--bordered">
+						<text class="profile-page__group-text">指纹登录</text>
+						<!-- 纯 CSS 手写开关（uvue 不支持后代选择器，开态经动态组合类控制旋钮位移） -->
+						<view
+							:class="biometricEnabled ? 'profile-page__biometric-switch profile-page__biometric-switch--on' : 'profile-page__biometric-switch'"
+							@click="toggleBiometric"
+						>
+							<view :class="biometricEnabled ? 'profile-page__biometric-knob profile-page__biometric-knob--on' : 'profile-page__biometric-knob'"></view>
+						</view>
+					</view>
+					<!-- #endif -->
 				</view>
 
 				<!-- 分组 2：退出登录 + 删除账号（危险操作红色提示） -->
@@ -298,6 +312,9 @@
 	import { PLACEHOLDER_STYLE } from '@/utils/theme.uts'
 	import { useUserStore } from '@/stores/user.uts'
 	import { ApiResponse } from '@/utils/request.uts'
+	// #ifdef APP
+	import { isBiometricAvailable, isBiometricEnabled, setBiometricEnabled, getBiometricToken } from '@/utils/biometric.uts'
+	// #endif
 	import {
 		updateSignature,
 		changePassword,
@@ -849,8 +866,49 @@
 		uni.showToast({ title: '英文版即将上线，敬请期待', icon: 'none' })
 	}
 
+	// ===== App 端指纹登录开关（仅 App 端，与 yao 同构） =====
+	// #ifdef APP
+	const biometricSupported = ref(false)
+	const biometricEnabled = ref(false)
+	// 开关显示条件：设备支持指纹且当前已登录
+	const showBiometric = computed((): boolean => {
+		const info = userStore.userInfo
+		return biometricSupported.value && info != null && info.id > 0
+	})
+
+	/** 切换指纹登录：开启前提为本地已有登录时下发的凭证，否则提示先账号密码登录一次 */
+	function toggleBiometric() : void {
+		if (isDeletionScheduled.value) {
+			return
+		}
+		const next = !biometricEnabled.value
+		if (next) {
+			if (getBiometricToken().length == 0) {
+				biometricEnabled.value = false
+				uni.showToast({ title: '请先使用账号密码登录一次以生成指纹登录凭证', icon: 'none' })
+				return
+			}
+			setBiometricEnabled(true)
+			biometricEnabled.value = true
+		} else {
+			// 关闭：仅切换开关标记，不清理本地凭证（重新开启无需重新登录）
+			setBiometricEnabled(false)
+			biometricEnabled.value = false
+		}
+	}
+	// #endif
+
 	// ===== 页面加载：刷新最新用户信息（含 status/role） =====
 	onLoad(() => {
+		// App 端：检测指纹能力并读取本地开关状态
+		// #ifdef APP
+		isBiometricAvailable().then((ok: boolean) => {
+			biometricSupported.value = ok
+			if (ok) {
+				biometricEnabled.value = isBiometricEnabled()
+			}
+		})
+		// #endif
 		const info = userStore.userInfo
 		if (info != null && info.id > 0) {
 			getUserInfo().then((res: ApiResponse) => {
@@ -1024,7 +1082,35 @@
 
 	.profile-page__group-text--hint {
 		color: $bai-mute;
-		font-weight: 400;
+	}
+
+	/* 指纹登录开关：纯 CSS 手写开关（uvue 不支持后代选择器，开态经动态组合类控制） */
+	.profile-page__biometric-switch {
+		position: relative;
+		width: 88rpx;
+		height: 48rpx;
+		border-radius: 9999px;
+		background-color: $bai-pale;
+		flex-shrink: 0;
+	}
+
+	.profile-page__biometric-switch--on {
+		background-color: $bai-ink;
+	}
+
+	.profile-page__biometric-knob {
+		position: absolute;
+		top: 4rpx;
+		left: 4rpx;
+		width: 40rpx;
+		height: 40rpx;
+		border-radius: 50%;
+		background-color: $bai-canvas;
+	}
+
+	.profile-page__biometric-knob--on {
+		transform: translateX(40rpx);
+		background-color: $bai-on-primary;
 	}
 
 	/* 语言切换开关：纯 CSS 手写开关（当前仅简体中文，翻译功能后续实现） */
@@ -1066,7 +1152,7 @@
 	.profile-page__form-section {
 		padding: 24rpx 32rpx;
 		box-sizing: border-box;
-		background-color: $bai-canvas-soft;
+		background-color: $bai-surface-form;
 	}
 
 	.profile-page__form-field {
@@ -1087,7 +1173,7 @@
 		padding: 0 24rpx;
 		box-sizing: border-box;
 		background-color: $bai-canvas;
-		border-radius: $bai-rounded-md;
+		border-radius: 16rpx;
 		border: 1px solid $bai-ink;
 		color: $bai-ink;
 		font-size: 32rpx;
@@ -1104,7 +1190,7 @@
 		flex-direction: row;
 		align-items: stretch;
 		border: 1px solid $bai-ink;
-		border-radius: $bai-rounded-md;
+		border-radius: 16rpx;
 		background-color: $bai-canvas;
 	}
 
@@ -1116,7 +1202,7 @@
 		flex: 1;
 		border: none;
 		background-color: transparent;
-		border-radius: $bai-rounded-md 0 0 $bai-rounded-md;
+		border-radius: 16rpx 0 0 16rpx;
 		padding-right: 24rpx;
 	}
 
@@ -1125,7 +1211,7 @@
 		position: relative;
 		z-index: 2;
 		padding: 0 24rpx;
-		border-radius: 0 $bai-rounded-md $bai-rounded-md 0;
+		border-radius: 0 16rpx 16rpx 0;
 		flex-direction: row;
 		align-items: center;
 		justify-content: center;
@@ -1153,7 +1239,7 @@
 		height: 88rpx;
 		padding: 0 24rpx;
 		box-sizing: border-box;
-		border-radius: $bai-rounded-md;
+		border-radius: 16rpx;
 		border: 1px solid $bai-ink;
 		flex-direction: row;
 		justify-content: center;
@@ -1191,7 +1277,7 @@
 	}
 
 	.profile-page__btn--cancel {
-		background-color: $bai-pale;
+		background-color: $bai-canvas;
 	}
 
 	.profile-page__btn--submit {
@@ -1219,7 +1305,7 @@
 		margin-right: 32rpx;
 		width: 144rpx;
 		height: 144rpx;
-		border-radius: $bai-rounded-xl;
+		border-radius: 24rpx;
 		border: 2px solid transparent;
 		box-sizing: border-box;
 		flex-direction: row;

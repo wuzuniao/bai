@@ -45,7 +45,7 @@
 						</view>
 
 						<!-- 5. 其他权利 -->
-						<view class="delete-account-page__item">
+						<view class="delete-account-page__item delete-account-page__item--last">
 							<text class="delete-account-page__item-title">五、其他个人信息权利</text>
 							<text class="delete-account-page__item-text">除删除账号外，您还享有查阅、复制、更正、补充个人信息以及撤回同意等权利。如需通过邮件行使上述权利，请发送邮件至 xpg@wuzuniao.com，我们将在核验身份后于十五个工作日内响应。更多说明详见《隐私政策》与《服务协议》。</text>
 						</view>
@@ -112,6 +112,10 @@
 		flex-direction: column;
 	}
 
+	.delete-account-page__item--last {
+		margin-bottom: 0;
+	}
+
 	.delete-account-page__item-title {
 		margin-bottom: 16rpx;
 		color: $bai-ink;
@@ -128,7 +132,7 @@
 	}
 
 	.delete-account-page__sub {
-		margin-top: 8rpx;
+		margin-top: 16rpx;
 		padding-left: 8rpx;
 		flex-direction: column;
 	}
@@ -141,6 +145,7 @@
 	}
 
 	.delete-account-page__sub-text {
+		margin-top: 4rpx;
 		color: $bai-body;
 		font-size: 32rpx;
 		line-height: 48rpx;
@@ -149,7 +154,7 @@
 
 	/* 跳转登录按钮 */
 	.delete-account-page__btn {
-		margin-top: 8rpx;
+		margin-top: 24rpx;
 		align-self: flex-start;
 		height: 80rpx;
 		padding: 0 40rpx;

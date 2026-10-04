@@ -29,6 +29,30 @@
 				</view>
 				<!-- #endif -->
 
+				<!-- App 端指纹一键登录卡片（仅 App 端：设备支持指纹 + 本地存在凭证 + 已开启开关时展示） -->
+				<!-- #ifdef APP -->
+				<view v-if="loginMode === 'fingerprint' && biometricVisible" class="login-page__card">
+					<text class="login-page__title">一键登录</text>
+					<view class="login-page__wechat-btn" @click="handleFingerprintLogin">
+						<image class="login-page__wechat-icon" src="/static/icons/dl_fingerprint.png" mode="aspectFit" />
+					</view>
+					<!-- 指纹登录隐私勾选（与微信端对称，独立于账号密码登录的隐私勾选） -->
+					<view class="login-page__remember login-page__remember--center" @click="toggleFingerprintAgree">
+						<view :class="fingerprintAgree ? 'login-page__checkbox login-page__checkbox--checked' : 'login-page__checkbox'">
+							<view v-if="fingerprintAgree" class="login-page__checkmark"></view>
+						</view>
+						<text class="login-page__remember-text">查看并同意</text>
+						<text class="login-page__remember-text" @click.stop="goAgreement">《服务协议》</text>
+						<text class="login-page__remember-text">和</text>
+						<text class="login-page__remember-text" @click.stop="goPrivacy">《隐私政策》</text>
+					</view>
+					<!-- 切换到账号密码登录引导 -->
+					<view class="login-page__switch" @click="switchMode('normal')">
+						<text class="login-page__switch-text">账号密码登录</text>
+					</view>
+				</view>
+				<!-- #endif -->
+
 				<!-- 主登录卡片（账号密码登录；微信端切换或注册页跳转时展示） -->
 				<view v-if="loginMode === 'normal'" class="login-page__card">
 					<text class="login-page__title">欢迎回来</text>
@@ -95,7 +119,7 @@
 
 					<!-- 切换到微信一键登录引导（仅微信小程序端展示） -->
 					<!-- #ifdef MP-WEIXIN -->
-					<view class="login-page__switch login-page__switch--card" @click="switchMode('wechat')">
+					<view class="login-page__switch" @click="switchMode('wechat')">
 						<text class="login-page__switch-text">一键登录</text>
 					</view>
 					<!-- #endif -->
@@ -125,6 +149,11 @@
 	import { wechatLogin } from '@/api/user.uts'
 	// #endif
 
+	// #ifdef APP
+	import { getDeviceId, storeBiometricToken, getBiometricToken, isBiometricAvailable, isBiometricEnabled, authenticate } from '@/utils/biometric.uts'
+	import { biometricLogin } from '@/api/user.uts'
+	// #endif
+
 	const userStore = useUserStore()
 
 	/** 顶部留白：返回按钮（状态栏高度 + 40px）之下再留 12px */
@@ -148,6 +177,18 @@
 		}
 	})
 
+	// App 端：页面显示时检测指纹能力，决定是否默认展示指纹一键登录卡片
+	// 三者同时满足才默认指纹卡片：设备支持指纹 + 本地存在凭证 + 已开启指纹开关，否则账号密码登录
+	const biometricVisible = ref(false)
+	onShow(() => {
+		// #ifdef APP
+		isBiometricAvailable().then((ok: boolean) => {
+			biometricVisible.value = ok && getBiometricToken().length > 0 && isBiometricEnabled()
+			loginMode.value = biometricVisible.value ? 'fingerprint' : 'normal'
+		})
+		// #endif
+	})
+
 	/** 切换登录方式（互斥显示对应卡片） */
 	function switchMode(mode: string) : void {
 		loginMode.value = mode
@@ -162,6 +203,9 @@
 	const submitting = ref(false)
 	// #ifdef MP-WEIXIN
 	const wechatAgree = ref(false)
+	// #endif
+	// #ifdef APP
+	const fingerprintAgree = ref(false)
 	// #endif
 
 	function validateUsername(v: string) : string {
@@ -232,10 +276,21 @@
 			return
 		}
 		submitting.value = true
-		loginUser(usernameValue.value, passwordValue.value).then((res: ApiResponse) => {
+		// App 端携带设备标识，auth 登录成功时一并下发指纹登录凭证（biometric_token）
+		let deviceId = ''
+		// #ifdef APP
+		deviceId = getDeviceId()
+		// #endif
+		loginUser(usernameValue.value, passwordValue.value, deviceId).then((res: ApiResponse) => {
 			const d = res.data
 			if (d != null) {
 				userStore.setUser(d)
+				// #ifdef APP
+				const biometricToken = d.getString('biometric_token')
+				if (biometricToken != null && biometricToken.length > 0) {
+					storeBiometricToken(biometricToken)
+				}
+				// #endif
 			}
 			uni.showToast({ title: '登录成功', icon: 'success' })
 			setTimeout(() => {
@@ -257,6 +312,66 @@
 			}
 		})
 	}
+
+	// #ifdef APP
+	/** 指纹一键登录（仅 App 端）：隐私勾选确认 → 系统指纹验证 → 本地凭证调 auth 指纹登录 → 跳转 */
+	async function handleFingerprintLogin() : Promise<void> {
+		if (submitting.value) {
+			return
+		}
+		// 隐私协议勾选校验：未勾选时弹出确认对话框，确认后自动勾选并重入
+		if (!fingerprintAgree.value) {
+			uni.showModal({
+				title: '提示',
+				content: '查看并同意《服务协议》和《隐私政策》',
+				confirmText: '确定',
+				cancelText: '取消',
+				success: (res) => {
+					if (res.confirm) {
+						fingerprintAgree.value = true
+						handleFingerprintLogin()
+					}
+				}
+			})
+			return
+		}
+		const token = getBiometricToken()
+		if (token.length == 0) {
+			// 本地凭证缺失（如清缓存），回退账号密码登录
+			loginMode.value = 'normal'
+			return
+		}
+		submitting.value = true
+		uni.showLoading({ title: '指纹验证中...', mask: true })
+		try {
+			// 1. 系统级指纹验证（未通过不会返回成功）
+			await authenticate()
+			// 2. 本地凭证 + 设备标识调用 auth 指纹登录
+			const res = await biometricLogin(token, getDeviceId())
+			uni.hideLoading()
+			const d = res.data
+			if (d != null) {
+				userStore.setUser(d)
+			}
+			uni.showToast({ title: '登录成功', icon: 'success' })
+			setTimeout(() => {
+				uni.redirectTo({ url: '/pages/user/settings' })
+			}, 1500)
+		} catch (e) {
+			uni.hideLoading()
+			// 用户取消指纹验证不提示错误，其余提示
+			setTimeout(() => {
+				const err = e as UniError
+				const msg = err.errMsg != null ? err.errMsg : ''
+				if (!msg.includes('cancel') && !msg.includes('authenticate fail')) {
+					uni.showToast({ title: '指纹登录失败，请使用账号密码登录', icon: 'none' })
+				}
+			}, 200)
+		} finally {
+			submitting.value = false
+		}
+	}
+	// #endif
 
 	// #ifdef MP-WEIXIN
 	/** 微信一键登录：uni.login 获取 code → auth 服务换取令牌 → 写入状态 → 跳转 */
@@ -372,18 +487,21 @@
 	}
 
 	.login-page__canvas {
+		min-height: 100vh;
 		padding-left: 48rpx;
 		padding-right: 48rpx;
 		padding-bottom: 67rpx;
 		box-sizing: border-box;
 		flex-direction: column;
+		justify-content: center;
+		align-items: center;
 	}
 
 	/* ===== 登录卡片 ===== */
 	.login-page__card {
 		position: relative;
 		z-index: 1;
-		width: 100%;
+		width: 684rpx;
 		margin-top: 64rpx;
 		padding: 48rpx;
 		box-sizing: border-box;
@@ -402,7 +520,7 @@
 
 	/* ===== 表单 ===== */
 	.login-page__form {
-		margin-top: 16rpx;
+		margin-top: 48rpx;
 		flex-direction: column;
 	}
 
@@ -452,7 +570,7 @@
 		flex-direction: row;
 		align-items: stretch;
 		border: 1px solid $bai-ink;
-		border-radius: $bai-rounded-md;
+		border-radius: 16rpx;
 		background-color: $bai-canvas;
 	}
 
@@ -464,7 +582,7 @@
 		flex: 1;
 		border: none;
 		background-color: transparent;
-		border-radius: $bai-rounded-md 0 0 $bai-rounded-md;
+		border-radius: 16rpx 0 0 16rpx;
 		padding-right: 24rpx;
 		margin-top: 0;
 	}
@@ -474,7 +592,7 @@
 		position: relative;
 		z-index: 2;
 		padding: 0 24rpx;
-		border-radius: 0 $bai-rounded-md $bai-rounded-md 0;
+		border-radius: 0 16rpx 16rpx 0;
 		flex-direction: row;
 		align-items: center;
 		justify-content: center;
@@ -507,13 +625,13 @@
 
 	.login-page__remember--center {
 		justify-content: center;
-		margin-top: 8rpx;
+		margin-top: 32rpx;
 	}
 
 	.login-page__checkbox {
 		width: 32rpx;
 		height: 32rpx;
-		border-radius: $bai-rounded-sm;
+		border-radius: 8rpx;
 		background-color: $bai-canvas;
 		border: 1px solid $bai-neutral;
 		box-sizing: border-box;
@@ -549,7 +667,7 @@
 		padding: 24rpx 0;
 		box-sizing: border-box;
 		background-color: $bai-ink;
-		border-radius: $bai-rounded-xl;
+		border-radius: 48rpx;
 		flex-direction: row;
 		justify-content: center;
 		align-items: center;
@@ -580,18 +698,14 @@
 		color: $bai-ink;
 		font-size: 32rpx;
 		line-height: 48rpx;
-		font-weight: 600;
+		font-weight: 500;
 	}
 
 	/* ===== 登录方式切换引导 ===== */
 	.login-page__switch {
-		margin-top: 24rpx;
+		margin-top: 48rpx;
 		flex-direction: row;
 		justify-content: center;
-	}
-
-	.login-page__switch--card {
-		margin-top: 48rpx;
 	}
 
 	.login-page__switch-text {
@@ -605,7 +719,7 @@
 	.login-page__wechat-btn {
 		width: 96rpx;
 		height: 96rpx;
-		margin-top: 24rpx;
+		margin-top: 48rpx;
 		border-radius: 9999px;
 		flex-direction: row;
 		justify-content: center;

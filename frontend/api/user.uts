@@ -37,12 +37,15 @@ export function registerUser(username: string, password: string, email: string, 
 	return request(opts('/api/v1/users/register', 'POST', data, false))
 }
 
-/** 用户登录（username 支持用户名或邮箱） */
-export function loginUser(username: string, password: string) : Promise<ApiResponse> {
+/** 用户登录（username 支持用户名或邮箱；deviceId 仅 App 端传入，用于后端下发指纹登录凭证） */
+export function loginUser(username: string, password: string, deviceId: string = '') : Promise<ApiResponse> {
 	const data = {} as UTSJSONObject
 	data['username'] = username
 	data['password'] = password
 	data['client_id'] = AUTH_CLIENT_ID
+	if (deviceId.length > 0) {
+		data['device_id'] = deviceId
+	}
 	return request(opts('/api/v1/users/login', 'POST', data, false))
 }
 
@@ -51,6 +54,15 @@ export function sendResetCode(email: string) : Promise<ApiResponse> {
 	const data = {} as UTSJSONObject
 	data['email'] = email
 	return request(opts('/api/v1/users/send-reset-code', 'POST', data, false))
+}
+
+/** 生物识别（指纹）登录（仅 App 端：本地凭证 + 设备标识，与 yao 同款） */
+export function biometricLogin(token: string, deviceId: string) : Promise<ApiResponse> {
+	const data = {} as UTSJSONObject
+	data['token'] = token
+	data['device_id'] = deviceId
+	data['client_id'] = AUTH_CLIENT_ID
+	return request(opts('/api/v1/users/biometric-login', 'POST', data, false))
 }
 
 /** 重置密码（成功响应 data 含新令牌，直接写入登录态） */

@@ -58,10 +58,11 @@
 
 	/* ===== 单张 FAQ 卡片 ===== */
 	.help-page__card {
+		margin-bottom: 32rpx;
 		padding: 32rpx;
 		box-sizing: border-box;
 		background-color: $bai-canvas;
-		border-radius: $bai-rounded-xl;
+		border-radius: 24rpx;
 		flex-direction: column;
 	}
 

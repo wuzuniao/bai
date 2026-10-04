@@ -26,7 +26,7 @@
 						</view>
 
 						<!-- QQ群 -->
-						<view class="contact-page__item">
+						<view class="contact-page__item contact-page__item--last">
 							<text class="contact-page__item-label">QQ群</text>
 							<text class="contact-page__item-value">278634838</text>
 							<view class="contact-page__qr-bg">
@@ -89,7 +89,12 @@
 
 	/* ===== 单个联系项 ===== */
 	.contact-page__item {
+		margin-bottom: 48rpx;
 		flex-direction: column;
+	}
+
+	.contact-page__item--last {
+		margin-bottom: 0;
 	}
 
 	.contact-page__item-label {
@@ -109,8 +114,7 @@
 
 	/* ===== 二维码区 ===== */
 	.contact-page__qr-bg {
-		margin-top: 24rpx;
-		margin-bottom: 48rpx;
+		margin-top: 40rpx;
 		width: 150px;
 		height: 150px;
 		background-color: $bai-pale;

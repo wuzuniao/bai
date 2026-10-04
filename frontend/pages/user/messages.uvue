@@ -3,7 +3,7 @@
 		<!-- 顶部返回按钮 -->
 		<BackButton />
 
-		<view class="messages-page__canvas">
+		<view class="messages-page__canvas" :style="'padding-top:' + mainTop + 'px'">
 			<!-- 页面标题区 -->
 			<PageHeader title="站内信" desc="查看系统公告，点击未读公告可标记为已读。" />
 
@@ -87,6 +87,13 @@
 	import BackButton from '@/components/BackButton/BackButton.uvue'
 	import PageHeader from '@/components/PageHeader/PageHeader.uvue'
 	import { getAnnouncements, markAnnouncementRead, markAllAnnouncementsRead, AnnouncementItem, AnnouncementsPage } from '@/api/announcement.uts'
+
+	/** 顶部留白：返回按钮（状态栏高度 + 40px）之下再留 12px */
+	const mainTop = ref(96)
+	const win = uni.getWindowInfo()
+	if (win.statusBarHeight > 0) {
+		mainTop.value = win.statusBarHeight + 52
+	}
 
 	const announcements = ref<AnnouncementItem[]>([])
 	const loading = ref(false)
@@ -198,9 +205,11 @@
 		box-sizing: border-box;
 	}
 
-	/* ===== 主内容画布（结构与 help.uvue 一致）===== */
+	/* ===== 主内容画布（结构与 help.uvue 一致；顶部留白由内联动态值提供）===== */
 	.messages-page__canvas {
-		padding: 210rpx 48rpx 64rpx;
+		padding-left: 48rpx;
+		padding-right: 48rpx;
+		padding-bottom: 64rpx;
 		box-sizing: border-box;
 		min-height: 100vh;
 	}
@@ -261,7 +270,7 @@
 
 	/* ===== 公告卡片列表 ===== */
 	.messages-page__list {
-		margin-top: 32rpx;
+		margin-top: 64rpx;
 		flex-direction: column;
 	}
 
@@ -271,7 +280,7 @@
 		padding: 32rpx;
 		box-sizing: border-box;
 		background-color: $bai-canvas;
-		border-radius: 32rpx;
+		border-radius: 24rpx;
 		margin-bottom: 32rpx;
 		overflow: hidden;
 	}
@@ -306,16 +315,16 @@
 	.messages-page__card-meta {
 		color: $bai-body;
 		font-size: 24rpx;
-		line-height: 36rpx;
+		line-height: 32rpx;
 		margin-top: 8rpx;
 	}
 
 	.messages-page__card-text {
 		color: $bai-body;
-		font-size: 28rpx;
-		line-height: 48rpx;
+		font-size: 32rpx;
+		line-height: 52rpx;
 		font-weight: 400;
-		margin-top: 16rpx;
+		margin-top: 8rpx;
 	}
 
 	/* ===== 状态提示（加载中 / 空数据 / 加载失败 / 分页）===== */
