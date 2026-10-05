@@ -1,9 +1,9 @@
 <template>
 	<view class="page">
 		<scroll-view class="scroll" direction="vertical" :show-scrollbar="false">
-			<!-- 顶部导航：书架标题（含排序下拉）+ 内联搜索栏 + 搜索/添加按钮 -->
-			<view class="nav" :style="'padding-top:' + (statusBarInset + 14) + 'px'">
-				<view class="nav-inner">
+			<!-- 顶部导航：书架标题（含排序下拉）+ 内联搜索栏 + 搜索/添加按钮（小程序端与胶囊同行，右侧避让胶囊） -->
+			<view class="nav" :style="'padding-top:' + navTop + 'px' + (navRight > 0 ? ';padding-right:' + navRight + 'px' : '')">
+				<view class="nav-inner" :style="'height:' + navHeight + 'px'">
 					<!-- 书架标题（Stitch: 点击展开排序菜单，箭头旋转 180°） -->
 					<view class="nav-title-btn" @click="toggleMenu">
 						<text class="nav-title">书架</text>
@@ -51,7 +51,8 @@
 					<view class="stats-pill" @click="openReward">
 						<text class="stats-pill-text">再读 5 分钟</text>
 						<view class="stats-pill-dot"></view>
-						<text class="stats-pill-coin">领 1 铜币</text>
+						<text class="stats-pill-coin">领 1</text>
+						<image class="stats-pill-coin-icon" src="/static/icons/coin-copper.svg" />
 					</view>
 				</view>
 				<!-- 书架网格（3 列） -->
@@ -68,9 +69,10 @@
 									<text class="cover-author">{{ book.author }}</text>
 								</view>
 							</view>
-							<!-- 白封面：左上书名 -->
+							<!-- 白封面：左上书名 + 左下角导入格式水印 -->
 							<view v-else-if="book.kind === 'plain'" class="cover-plain">
 								<text class="cover-plain-title">{{ book.title }}</text>
+								<text class="cover-plain-format">{{ book.format }}</text>
 							</view>
 							<!-- 添加格 -->
 							<view v-else class="cover-add">
@@ -90,7 +92,7 @@
 		<!-- 浮层遮罩：菜单打开时覆盖全屏，点击外部关闭（Stitch: 全局点击 dismiss） -->
 		<view v-if="menuOpen || plusMenuOpen" class="menu-mask" @click="closeMenus" />
 		<!-- 排序下拉菜单（置于页面根、scroll-view 外，避免滚动容器裁剪；悬浮于标题下方 8px） -->
-		<view v-if="menuOpen" class="shelf-menu" :style="'top:' + (statusBarInset + 62) + 'px'">
+		<view v-if="menuOpen" class="shelf-menu" :style="'top:' + (navTop + navHeight + 8) + 'px'">
 			<view
 				v-for="(opt, oi) in sortOptions"
 				:key="oi"
@@ -98,11 +100,10 @@
 				@click="onSelectSort(opt)"
 			>
 				<text class="menu-item-text" :class="currentSort === opt ? 'menu-item-text-active' : ''">{{ opt }}</text>
-				<image v-if="currentSort === opt" class="menu-check" src="/static/icons/check.svg" />
 			</view>
 		</view>
 		<!-- 加号浮动菜单（Stitch: 导入书籍 / 编辑书架，右对齐悬浮） -->
-		<view v-if="plusMenuOpen" class="plus-menu" :style="'top:' + (statusBarInset + 62) + 'px'">
+		<view v-if="plusMenuOpen" class="plus-menu" :style="'top:' + (navTop + navHeight + 8) + 'px'">
 			<view class="plus-menu-item" @click="onPlusAction">
 				<text class="plus-menu-item-text">导入书籍</text>
 			</view>
@@ -133,29 +134,35 @@
 		badgeKind: string
 		/** 图封面底部作者署名 */
 		author: string
+		/** 导入文件格式（TXT/EPUB），白封面左下角水印展示 */
+		format: string
 	}
 
 	/** 书架内容（3 行 × 3 列，取自设计稿示例数据） */
 	const shelfRows = ref<BookItem[][]>([
 		[
-			{ key: 'xingyuan', kind: 'plain', title: '星渊行者', meta: '第 12 章 / 共 1420 章', badge: '', badgeKind: '', author: '' } as BookItem,
-			{ key: 'qinglan', kind: 'plain', title: '青岚志', meta: '第 128 章 / 共 128 章', badge: '', badgeKind: '', author: '' } as BookItem,
-			{ key: 'fusheng', kind: 'plain', title: '浮生微澜', meta: '未读', badge: '', badgeKind: '', author: '' } as BookItem
+			{ key: 'xingyuan', kind: 'plain', title: '星渊行者', meta: '第 12 章 / 共 1420 章', badge: '', badgeKind: '', author: '', format: 'TXT' } as BookItem,
+			{ key: 'qinglan', kind: 'plain', title: '青岚志', meta: '第 128 章 / 共 128 章', badge: '', badgeKind: '', author: '', format: 'EPUB' } as BookItem,
+			{ key: 'fusheng', kind: 'plain', title: '浮生微澜', meta: '未读', badge: '', badgeKind: '', author: '', format: 'TXT' } as BookItem
 		],
 		[
-			{ key: 'wanxiang', kind: 'plain', title: '万象织梦', meta: '第 42 章 / 共 5621 章', badge: '', badgeKind: '', author: '' } as BookItem,
-			{ key: 'jiuyu', kind: 'plain', title: '九域风雷', meta: '第 1 章 / 共 3210 章', badge: '', badgeKind: '', author: '' } as BookItem,
-			{ key: 'muxue', kind: 'plain', title: '暮雪归舟', meta: '未读', badge: '', badgeKind: '', author: '' } as BookItem
+			{ key: 'wanxiang', kind: 'plain', title: '万象织梦', meta: '第 42 章 / 共 5621 章', badge: '', badgeKind: '', author: '', format: 'EPUB' } as BookItem,
+			{ key: 'jiuyu', kind: 'plain', title: '九域风雷', meta: '第 1 章 / 共 3210 章', badge: '', badgeKind: '', author: '', format: 'TXT' } as BookItem,
+			{ key: 'muxue', kind: 'plain', title: '暮雪归舟', meta: '未读', badge: '', badgeKind: '', author: '', format: 'EPUB' } as BookItem
 		],
 		[
-			{ key: 'shanyu', kind: 'photo', title: '山海余晖', meta: '第 88 章 / 共 620 章', badge: '推荐', badgeKind: 'blue', author: '无足鸟 著' } as BookItem,
-			{ key: 'youming', kind: 'photo', title: '幽冥幻旅', meta: '未读', badge: '精选', badgeKind: 'orange', author: '蜜蜂 著' } as BookItem,
-			{ key: 'add', kind: 'add', title: '', meta: '', badge: '', badgeKind: '', author: '' } as BookItem
+			{ key: 'shanyu', kind: 'photo', title: '山海余晖', meta: '第 88 章 / 共 620 章', badge: '推荐', badgeKind: 'blue', author: '无足鸟 著', format: '' } as BookItem,
+			{ key: 'youming', kind: 'photo', title: '幽冥幻旅', meta: '未读', badge: '精选', badgeKind: 'orange', author: '蜜蜂 著', format: '' } as BookItem,
+			{ key: 'add', kind: 'add', title: '', meta: '', badge: '', badgeKind: '', author: '', format: '' } as BookItem
 		]
 	])
 
-	/** 状态栏高度（Web 端为 0，顶部导航自行下移） */
-	const statusBarInset = ref(0)
+	/** 顶部导航行顶部（px）：小程序端与右上角胶囊同行，Web/App 端为状态栏下 14px */
+	const navTop = ref(14)
+	/** 顶部导航行高（px）：小程序端取胶囊高度，其余端为 40px 设计值 */
+	const navHeight = ref(40)
+	/** 右侧胶囊避让边距（px）：操作按钮右缘置于胶囊左侧 8px；非小程序端 0（沿用样式默认 38rpx） */
+	const navRight = ref(0)
 
 	/** 排序下拉菜单（Stitch: 手动顺序/最近阅读/添加时间，默认手动顺序） */
 	const sortOptions = ref<string[]>(['手动顺序', '最近阅读', '添加时间'])
@@ -170,14 +177,20 @@
 
 	onLoad(() => {
 		const win = uni.getWindowInfo()
-		let inset = win.statusBarHeight
 		// #ifdef MP-WEIXIN
-		// 小程序端下移避让右上角胶囊按钮：导航内容区最终位于 状态栏 + 48px（胶囊底约在状态栏 + 40px）
-		if (win.statusBarHeight > 0) {
-			inset = win.statusBarHeight + 34
+		// 胶囊按钮矩形：导航行与胶囊同行（顶部/高度对齐），右侧按钮避让到胶囊左边 8px
+		const capsule = uni.getMenuButtonBoundingClientRect()
+		if (capsule.height > 0) {
+			navTop.value = capsule.top
+			navHeight.value = capsule.height
+			navRight.value = win.windowWidth - capsule.left + 8
+		} else if (win.statusBarHeight > 0) {
+			navTop.value = win.statusBarHeight + 14
 		}
 		// #endif
-		statusBarInset.value = inset
+		// #ifdef APP-ANDROID || APP-IOS
+		navTop.value = win.statusBarHeight + 14
+		// #endif
 	})
 
 	/** 关闭全部浮层（点击遮罩或底部导航触发） */
@@ -265,9 +278,8 @@
 		padding-bottom: 27rpx;
 	}
 
-	/* 高度固定 40px（设计值），浮层菜单 top 由此精确推导（状态栏 + 14 + 40 + 8） */
+	/* 行高内联绑定（小程序端对齐胶囊 32px，其余端 40px 设计值），浮层菜单 top 由此推导（navTop + navHeight + 8） */
 	.nav-inner {
-		height: 40px;
 		flex-direction: row;
 		align-items: center;
 		justify-content: space-between;
@@ -311,7 +323,6 @@
 	.shelf-menu {
 		position: absolute;
 		left: 38rpx;
-		width: 277rpx;
 		padding: 12rpx;
 		background-color: $bai-canvas;
 		border-radius: $bai-rounded-lg;
@@ -323,7 +334,6 @@
 	.menu-item {
 		flex-direction: row;
 		align-items: center;
-		justify-content: space-between;
 		padding: 15rpx 23rpx;
 		border-radius: $bai-rounded-md;
 	}
@@ -337,11 +347,6 @@
 	.menu-item-text-active {
 		font-weight: 700;
 		color: $bai-ink;
-	}
-
-	.menu-check {
-		width: 31rpx;
-		height: 31rpx;
 	}
 
 	/* 加号浮动菜单（Stitch: 宽 128px 白底 圆角 16px 边框 #E9E9E6 阴影 0 12 32 @12%，右对齐悬浮） */
@@ -453,7 +458,9 @@
 	.main {
 		padding-left: 38rpx;
 		padding-right: 38rpx;
-		padding-bottom: 246rpx;
+		/* 底部留白与首页一致（196rpx）：覆盖悬浮导航胶囊顶（约屏底上方 150rpx）+ 46rpx 间隙；
+		   固定值写在滚动内容上，内容增多出现滚动后间距不变 */
+		padding-bottom: 196rpx;
 		flex-direction: column;
 	}
 
@@ -534,6 +541,12 @@
 		color: $bai-warning-deep;
 	}
 
+	.stats-pill-coin-icon {
+		margin-left: 6rpx;
+		width: 27rpx;
+		height: 27rpx;
+	}
+
 	/* 书架网格（Stitch: 3 列，列间距 14px，行间距 20px，与统计卡间距 24px） */
 	.shelf-grid {
 		margin-top: 46rpx;
@@ -555,7 +568,7 @@
 		flex-direction: column;
 	}
 
-	/* 白封面（令牌 item-card: 白底 圆角 xl 24px 边框 浅灰 #E9E9E6 内边距 14px，左上书名 14px/500） */
+	/* 白封面（令牌 item-card: 白底 圆角 xl 24px 边框 浅灰 #E9E9E6 内边距 14px，左上书名 14px/500；上下两端分布承载左下角格式水印） */
 	.cover-plain {
 		height: 285rpx;
 		box-sizing: border-box;
@@ -563,6 +576,7 @@
 		background-color: $bai-canvas;
 		border-radius: $bai-rounded-xl;
 		border: 1px solid $bai-pale;
+		justify-content: space-between;
 	}
 
 	.cover-plain-title {
@@ -571,6 +585,15 @@
 		font-weight: 500;
 		letter-spacing: 1rpx;
 		color: $bai-ink;
+	}
+
+	/* 左下角导入格式水印（浅灰超大字，装饰性低对比；48rpx 保证 EPUB 四字符不溢出卡片内宽） */
+	.cover-plain-format {
+		font-size: 48rpx;
+		line-height: 56rpx;
+		font-weight: 700;
+		letter-spacing: 1rpx;
+		color: $bai-pale;
 	}
 
 	/* 图封面（Stitch: 圆角 12px；背景渐变底部并入黑色遮罩，承接白色书名/作者） */

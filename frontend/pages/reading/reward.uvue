@@ -1,18 +1,11 @@
 <template>
 	<view class="page">
-		<!-- 顶部导航（Stitch: 返回 + 居中标题"活动" + 规则按钮；top 由状态栏/胶囊动态计算） -->
-		<view class="nav" :style="'padding-top:' + navTop + 'px'">
-			<view class="round-btn" @click="onBackTap">
-				<image class="round-btn-icon" src="/static/icons/arrow-back.svg" />
-			</view>
-			<text class="nav-title">活动</text>
-			<view class="rules-btn" @click="showToast('活动规则即将上线')">
-				<text class="rules-btn-text">规则</text>
-			</view>
-		</view>
+		<!-- 顶部返回 + 页面标题（与用户子包次级页面统一：BackButton + PageHeader） -->
+		<BackButton />
 
 		<scroll-view class="scroll" direction="vertical" :show-scrollbar="false">
-			<view class="main">
+			<view class="main" :style="'padding-top:' + mainTop + 'px'">
+				<PageHeader title="活动" desc="每 100 铜币自动兑换 1 银币，每 100 银币自动兑换 1 金币" />
 				<!-- 资产总览卡（Stitch: 今日已获 + 总资产三项） -->
 				<view class="asset-card">
 					<view class="asset-top">
@@ -30,16 +23,16 @@
 					<view class="asset-total">
 						<text class="asset-total-label">总资产：</text>
 						<view class="coin-item">
+							<text class="coin-num">0</text>
 							<image class="coin-icon" src="/static/icons/coin-gold.svg" />
-							<text class="coin-num">0</text>
 						</view>
 						<view class="coin-item">
+							<text class="coin-num">0</text>
 							<image class="coin-icon" src="/static/icons/coin-silver.svg" />
-							<text class="coin-num">0</text>
 						</view>
 						<view class="coin-item">
-							<image class="coin-icon" src="/static/icons/coin-copper.svg" />
 							<text class="coin-num">42</text>
+							<image class="coin-icon" src="/static/icons/coin-copper.svg" />
 						</view>
 					</view>
 				</view>
@@ -61,7 +54,7 @@
 						<view class="day-cell day-checked">
 							<text class="day-week day-week-dim">周一</text>
 							<view class="day-circle day-circle-dim">
-								<image class="day-check-icon" src="/static/icons/check.svg" />
+								<image class="day-check-icon" src="/static/icons/check-warning.svg" />
 							</view>
 							<text class="day-state day-state-dim">已签</text>
 						</view>
@@ -222,6 +215,9 @@
 </template>
 
 <script setup lang="uts">
+	import BackButton from '@/components/BackButton/BackButton.uvue'
+	import PageHeader from '@/components/PageHeader/PageHeader.uvue'
+
 	type PendingDay = {
 		week: string
 		reward: number
@@ -235,24 +231,16 @@
 		{ week: '周六', reward: 10 } as PendingDay
 	])
 
-	/** 顶部导航内边距（px）：小程序端下移避让右上角胶囊，App 端状态栏下 1px，Web 端按设计值 48px */
-	const navTop = ref(48)
+	/** 顶部留白：返回按钮（状态栏高度 + 40px）之下再留 12px */
+	const mainTop = ref(96)
+	const win = uni.getWindowInfo()
+	if (win.statusBarHeight > 0) {
+		mainTop.value = win.statusBarHeight + 52
+	}
 
 	const toastVisible = ref(false)
 	const toastMsg = ref('')
 	let toastTimer = -1
-
-	onLoad(() => {
-		const win = uni.getWindowInfo()
-		// #ifdef MP-WEIXIN
-		if (win.statusBarHeight > 0) {
-			navTop.value = win.statusBarHeight + 48
-		}
-		// #endif
-		// #ifdef APP-ANDROID || APP-IOS
-		navTop.value = win.statusBarHeight + 1
-		// #endif
-	})
 
 	function showToast(msg: string) : void {
 		toastMsg.value = msg
@@ -263,10 +251,6 @@
 		toastTimer = setTimeout(() => {
 			toastVisible.value = false
 		}, 1500)
-	}
-
-	function onBackTap() : void {
-		uni.navigateBack()
 	}
 
 	/** "去阅读"：进入阅读正文页继续累计时长 */
@@ -287,47 +271,6 @@
 		flex: 1;
 	}
 
-	/* 顶部导航（Stitch: 返回钮 40px + 居中标题 16px/600 + 规则胶囊） */
-	.nav {
-		padding: 15rpx 38rpx;
-		flex-direction: row;
-		align-items: center;
-		justify-content: space-between;
-	}
-
-	.round-btn {
-		width: 77rpx;
-		height: 77rpx;
-		border-radius: $bai-rounded-pill;
-		flex-direction: row;
-		align-items: center;
-		justify-content: center;
-	}
-
-	.round-btn-icon {
-		width: 38rpx;
-		height: 38rpx;
-	}
-
-	.nav-title {
-		font-size: 31rpx;
-		font-weight: 600;
-		color: $bai-ink;
-	}
-
-	.rules-btn {
-		padding: 12rpx 23rpx;
-		border-radius: $bai-rounded-pill;
-		background-color: $bai-canvas;
-		border: 1px solid $bai-pale;
-	}
-
-	.rules-btn-text {
-		font-size: 23rpx;
-		font-weight: 500;
-		color: $bai-mute;
-	}
-
 	/* 主内容（Stitch: 左右 20px、顶部间距 24px、卡片间距 24px） */
 	.main {
 		padding: 46rpx 38rpx 60rpx 38rpx;
@@ -335,8 +278,10 @@
 		gap: 46rpx;
 	}
 
-	/* 资产总览卡（令牌 card-content: 白底 圆角 xl 24px 内边距 24px；层级 2 表层对比承载高度，无边框无阴影） */
+	/* 资产总览卡（令牌 card-content: 白底 圆角 xl 24px 内边距 24px；层级 2 表层对比承载高度，无边框无阴影）
+	   margin-top 18rpx：叠加父级 gap 46rpx，标题区到首卡间距 64rpx，对齐帮助子页节奏 */
 	.asset-card {
+		margin-top: 18rpx;
 		border-radius: $bai-rounded-xl;
 		padding: 46rpx;
 		background-color: $bai-canvas;
