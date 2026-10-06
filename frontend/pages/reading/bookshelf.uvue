@@ -1,6 +1,6 @@
 <template>
 	<view class="page">
-		<scroll-view class="scroll" direction="vertical" :show-scrollbar="false">
+		<scroll-view class="scroll" :direction="dragIndex >= 0 ? 'none' : 'vertical'" :show-scrollbar="false">
 			<!-- 顶部导航：书架标题（含排序下拉）+ 内联搜索栏 + 搜索/添加按钮（小程序端与胶囊同行，右侧避让胶囊） -->
 			<view class="nav" :style="'padding-top:' + navTop + 'px' + (navRight > 0 ? ';padding-right:' + navRight + 'px' : '')">
 				<view class="nav-inner" :style="'height:' + navHeight + 'px'">
@@ -26,8 +26,11 @@
 						</view>
 						<text class="search-cancel" @click="closeSearch">取消</text>
 					</view>
-					<!-- 右侧操作按钮（Stitch: 搜索书籍 / 添加与更多） -->
-					<view class="nav-actions">
+					<!-- 编辑模式：完成按钮；其余：搜索 / 添加按钮 -->
+					<view v-if="editMode" class="nav-finish" @click="finishEdit">
+						<text class="nav-finish-text">完成</text>
+					</view>
+					<view v-else class="nav-actions">
 						<view v-if="!searchOpen" class="nav-action-btn" @click="openSearch">
 							<image class="nav-action-search" src="/static/icons/search.svg" />
 						</view>
@@ -55,31 +58,68 @@
 						<image class="stats-pill-coin-icon" src="/static/icons/coin-copper.svg" />
 					</view>
 				</view>
-				<!-- 书架网格（3 列） -->
+				<!-- 编辑工具行：卡片样式选择 + 批量删除 -->
+				<view v-if="editMode" class="edit-tools">
+					<view class="edit-styles">
+						<view class="style-btn" :class="shelfStyle === 'plain' ? 'style-btn-on' : ''" @click="setStyle('plain')">
+							<view class="style-dot style-dot-light"></view>
+							<text class="style-btn-text" :class="shelfStyle === 'plain' ? 'style-btn-text-on' : ''">白卡</text>
+						</view>
+						<view class="style-btn" :class="shelfStyle === 'photo' ? 'style-btn-on' : ''" @click="setStyle('photo')">
+							<view class="style-dot style-dot-dark"></view>
+							<text class="style-btn-text" :class="shelfStyle === 'photo' ? 'style-btn-text-on' : ''">深灰</text>
+						</view>
+					</view>
+					<view v-if="selectedKeys.length > 0" class="edit-delete" @click="deleteSelected">
+						<text class="edit-delete-text">删除 {{ selectedKeys.length }} 本</text>
+					</view>
+				</view>
+				<!-- 书架网格（3 列，编辑模式可选可拖拽） -->
 				<view class="shelf-grid">
 					<view v-for="(row, ri) in shelfRows" :key="ri" class="shelf-row" :class="ri > 0 ? 'shelf-row-gap' : ''">
-						<view v-for="(book, bi) in row" :key="bi" class="book-item" @click="openBook(book)">
-							<!-- 图封面：徽章 + 底部书名/作者 -->
-							<view v-if="book.kind === 'photo'" class="cover-photo" :class="'cover-photo-' + book.key">
-								<view class="cover-badge" :class="book.badgeKind === 'blue' ? 'cover-badge-blue' : 'cover-badge-orange'">
-									<text class="cover-badge-text">{{ book.badge }}</text>
-								</view>
-								<view class="cover-info">
-									<text class="cover-title">{{ book.title }}</text>
-									<text class="cover-author">{{ book.author }}</text>
-								</view>
-							</view>
-							<!-- 白封面：左上书名 + 左下角导入格式水印 -->
-							<view v-else-if="book.kind === 'plain'" class="cover-plain">
-								<text class="cover-plain-title">{{ book.title }}</text>
-								<text class="cover-plain-format">{{ book.format }}</text>
-							</view>
-							<!-- 添加格 -->
-							<view v-else class="cover-add">
+						<view
+							v-for="(book, bi) in row"
+							:key="book.key"
+							class="book-item"
+							:class="cardClass(ri * 3 + bi, book)"
+							:id="book.key === 'add' ? 'book-card-add' : 'book-card-' + (ri * 3 + bi)"
+							:style="cardStyle(ri * 3 + bi)"
+							@click="onCardTap(book)"
+							@touchstart="onCardTouchStart($event, ri * 3 + bi)"
+							@touchmove="onCardTouchMove($event, ri * 3 + bi)"
+							@touchend="onCardTouchEnd"
+						>
+							<!-- 添加格（固定末尾） -->
+							<view v-if="book.key === 'add'" class="cover-add">
 								<image class="cover-add-icon" src="/static/icons/plus-large.svg" />
 							</view>
+							<!-- 书籍封面（包装层承载右下角勾选点） -->
+							<view v-else class="cover-wrap">
+								<!-- 白卡样式 -->
+								<view v-if="shelfStyle === 'plain'" class="cover-plain">
+									<text class="cover-plain-title">{{ book.title }}</text>
+									<text class="cover-plain-format">{{ book.format }}</text>
+								</view>
+								<!-- 深灰卡样式 -->
+								<view v-else class="cover-photo">
+									<text class="cover-photo-format">{{ book.format }}</text>
+									<view class="cover-info">
+										<text class="cover-title">{{ book.title }}</text>
+										<text class="cover-author">{{ book.author }}</text>
+									</view>
+								</view>
+								<!-- 编辑勾选点（封面右下角） -->
+								<view
+									v-if="editMode"
+									class="card-check"
+									:class="isSelected(book) ? 'card-check-on' : ''"
+									@click="onCheckTap(book, $event)"
+								>
+									<text v-if="isSelected(book)" class="card-check-icon">✓</text>
+								</view>
+							</view>
 							<!-- 书名与阅读进度（添加格不显示） -->
-							<view v-if="book.kind !== 'add'" class="book-text">
+							<view v-if="book.key !== 'add'" class="book-text">
 								<text class="book-title">{{ book.title }}</text>
 								<text class="book-meta">{{ book.meta }}</text>
 							</view>
@@ -103,11 +143,11 @@
 			</view>
 		</view>
 		<!-- 加号浮动菜单（Stitch: 导入书籍 / 编辑书架，右对齐悬浮） -->
-		<view v-if="plusMenuOpen" class="plus-menu" :style="'top:' + (navTop + navHeight + 8) + 'px'">
-			<view class="plus-menu-item" @click="onPlusAction">
+		<view v-if="plusMenuOpen" class="plus-menu" :style="'left:' + plusMenuLeft + 'px;top:' + (navTop + navHeight + 8) + 'px'">
+			<view class="plus-menu-item" @click="onImportTap">
 				<text class="plus-menu-item-text">导入书籍</text>
 			</view>
-			<view class="plus-menu-item" @click="onPlusAction">
+			<view class="plus-menu-item" @click="enterEdit">
 				<text class="plus-menu-item-text">编辑书架</text>
 			</view>
 		</view>
@@ -121,41 +161,88 @@
 	import { PLACEHOLDER_STYLE } from '@/utils/theme.uts'
 
 	type BookItem = {
-		/** 唯一标识（同时用于图封面渐变样式类名） */
+		/** 唯一标识（add 为固定末尾的添加格占位） */
 		key: string
-		/** 封面类型：plain 白封面 / photo 图封面 / add 添加格 */
-		kind: string
 		title: string
 		/** 阅读进度或"未读" */
 		meta: string
-		/** 图封面左上角徽章文字 */
-		badge: string
-		/** 徽章配色：blue 推荐 / orange 精选 */
-		badgeKind: string
-		/** 图封面底部作者署名 */
+		/** 作者署名（深灰卡底部展示） */
 		author: string
-		/** 导入文件格式（TXT/EPUB），白封面左下角水印展示 */
+		/** 导入文件格式（TXT/EPUB），封面角落水印展示 */
 		format: string
 	}
 
-	/** 书架内容（3 行 × 3 列，取自设计稿示例数据） */
-	const shelfRows = ref<BookItem[][]>([
-		[
-			{ key: 'xingyuan', kind: 'plain', title: '星渊行者', meta: '第 12 章 / 共 1420 章', badge: '', badgeKind: '', author: '', format: 'TXT' } as BookItem,
-			{ key: 'qinglan', kind: 'plain', title: '青岚志', meta: '第 128 章 / 共 128 章', badge: '', badgeKind: '', author: '', format: 'EPUB' } as BookItem,
-			{ key: 'fusheng', kind: 'plain', title: '浮生微澜', meta: '未读', badge: '', badgeKind: '', author: '', format: 'TXT' } as BookItem
-		],
-		[
-			{ key: 'wanxiang', kind: 'plain', title: '万象织梦', meta: '第 42 章 / 共 5621 章', badge: '', badgeKind: '', author: '', format: 'EPUB' } as BookItem,
-			{ key: 'jiuyu', kind: 'plain', title: '九域风雷', meta: '第 1 章 / 共 3210 章', badge: '', badgeKind: '', author: '', format: 'TXT' } as BookItem,
-			{ key: 'muxue', kind: 'plain', title: '暮雪归舟', meta: '未读', badge: '', badgeKind: '', author: '', format: 'EPUB' } as BookItem
-		],
-		[
-			{ key: 'shanyu', kind: 'photo', title: '山海余晖', meta: '第 88 章 / 共 620 章', badge: '推荐', badgeKind: 'blue', author: '无足鸟 著', format: '' } as BookItem,
-			{ key: 'youming', kind: 'photo', title: '幽冥幻旅', meta: '未读', badge: '精选', badgeKind: 'orange', author: '蜜蜂 著', format: '' } as BookItem,
-			{ key: 'add', kind: 'add', title: '', meta: '', badge: '', badgeKind: '', author: '', format: '' } as BookItem
+	/** 本地存储键：书籍顺序 / 卡片样式 */
+	const STORAGE_BOOKS = 'bookshelf_books'
+	const STORAGE_STYLE = 'bookshelf_style'
+
+	/** 添加格占位数据（固定网格末尾，不参与排序与删除） */
+	const ADD_CELL : BookItem = { key: 'add', title: '', meta: '', author: '', format: '' } as BookItem
+
+	/** 默认书架（示例数据） */
+	function defaultBooks() : BookItem[] {
+		return [
+			{ key: 'xingyuan', title: '星渊行者', meta: '第 12 章 / 共 1420 章', author: '', format: 'TXT' } as BookItem,
+			{ key: 'qinglan', title: '青岚志', meta: '第 128 章 / 共 128 章', author: '', format: 'EPUB' } as BookItem,
+			{ key: 'fusheng', title: '浮生微澜', meta: '未读', author: '', format: 'TXT' } as BookItem,
+			{ key: 'wanxiang', title: '万象织梦', meta: '第 42 章 / 共 5621 章', author: '', format: 'EPUB' } as BookItem,
+			{ key: 'jiuyu', title: '九域风雷', meta: '第 1 章 / 共 3210 章', author: '', format: 'TXT' } as BookItem,
+			{ key: 'muxue', title: '暮雪归舟', meta: '未读', author: '', format: 'EPUB' } as BookItem,
+			{ key: 'shanyu', title: '山海余晖', meta: '第 88 章 / 共 620 章', author: '无足鸟 著', format: 'TXT' } as BookItem,
+			{ key: 'youming', title: '幽冥幻旅', meta: '未读', author: '蜜蜂 著', format: 'EPUB' } as BookItem
 		]
-	])
+	}
+
+	/** 书架书籍（扁平有序列表，拖拽调整后本地持久化） */
+	const books = ref<BookItem[]>(defaultBooks())
+	/** 书架卡片统一样式：plain 白卡 / photo 深灰卡 */
+	const shelfStyle = ref('plain')
+
+	/** 网格分行（每行 3 本），添加格固定末尾占位 */
+	const shelfRows = computed<BookItem[][]>(() : BookItem[][] => {
+		const rows : BookItem[][] = []
+		const list = books.value
+		const n = list.length
+		const rowCount = Math.ceil((n + 1) / 3)
+		for (let r = 0; r < rowCount; r++) {
+			const row : BookItem[] = list.slice(r * 3, Math.min(n, r * 3 + 3))
+			if (r == rowCount - 1 && row.length < 3) {
+				row.push(ADD_CELL)
+			}
+			rows.push(row)
+		}
+		return rows
+	})
+
+	/** 读取本地保存的书架（顺序与样式）；无数据或解析失败时用默认示例 */
+	function loadShelf() : void {
+		const stored : any = uni.getStorageSync(STORAGE_BOOKS)
+		if (typeof stored == 'string' && (stored as string).length > 0) {
+			const list = JSON.parse<Array<BookItem>>(stored as string)
+			if (list != null && list.length > 0) {
+				books.value = list
+			}
+		}
+		const storedStyle : any = uni.getStorageSync(STORAGE_STYLE)
+		if (typeof storedStyle == 'string' && ((storedStyle as string) == 'plain' || (storedStyle as string) == 'photo')) {
+			shelfStyle.value = storedStyle as string
+		}
+	}
+
+	/** 书架顺序与样式本地持久化 */
+	function saveShelf() : void {
+		uni.setStorageSync(STORAGE_BOOKS, JSON.stringify(books.value))
+		uni.setStorageSync(STORAGE_STYLE, shelfStyle.value)
+	}
+
+	/** 切换书架卡片统一样式并保存 */
+	function setStyle(style : string) : void {
+		if (shelfStyle.value == style) {
+			return
+		}
+		shelfStyle.value = style
+		saveShelf()
+	}
 
 	/** 顶部导航行顶部（px）：小程序端与右上角胶囊同行，Web/App 端为状态栏下 14px */
 	const navTop = ref(14)
@@ -163,6 +250,190 @@
 	const navHeight = ref(40)
 	/** 右侧胶囊避让边距（px）：操作按钮右缘置于胶囊左侧 8px；非小程序端 0（沿用样式默认 38rpx） */
 	const navRight = ref(0)
+
+	/** 加号弹窗左缘（px）：与 + 号按钮左缘齐平——+ 号为按钮组末位元素，左缘即行右缘（避让后）减按钮自身宽 77rpx */
+	const plusMenuLeft = computed(() : number => {
+		const win = uni.getWindowInfo()
+		const rowRight = navRight.value > 0 ? win.windowWidth - navRight.value : win.windowWidth - uni.upx2px(38)
+		return rowRight - uni.upx2px(77)
+	})
+
+	/** 编辑模式：卡片可勾选删除、可拖拽调序 */
+	const editMode = ref(false)
+	/** 编辑模式选中的书籍 key 集合 */
+	const selectedKeys = ref<string[]>([])
+
+	function isSelected(book : BookItem) : boolean {
+		return selectedKeys.value.indexOf(book.key) >= 0
+	}
+
+	function toggleSelect(book : BookItem) : void {
+		const i = selectedKeys.value.indexOf(book.key)
+		if (i >= 0) {
+			selectedKeys.value.splice(i, 1)
+		} else {
+			selectedKeys.value.push(book.key)
+		}
+	}
+
+	/** 进入编辑模式（+ 菜单「编辑书架」） */
+	function enterEdit() : void {
+		editMode.value = true
+		selectedKeys.value = []
+		plusMenuOpen.value = false
+		closeMenus()
+	}
+
+	/** 完成编辑并保存 */
+	function finishEdit() : void {
+		editMode.value = false
+		selectedKeys.value = []
+		saveShelf()
+	}
+
+	/** 删除选中书籍并保存 */
+	function deleteSelected() : void {
+		if (selectedKeys.value.length == 0) {
+			return
+		}
+		books.value = books.value.filter((b : BookItem) : boolean => selectedKeys.value.indexOf(b.key) < 0)
+		selectedKeys.value = []
+		saveShelf()
+	}
+
+	/** ===== 拖拽排序（编辑模式，长按按住即拖） ===== */
+	/** 拖拽中的书籍全局索引；-1 为未拖拽 */
+	const dragIndex = ref(-1)
+	/** 拖拽位移（px，相对卡片当前布局位） */
+	const dragX = ref(0)
+	const dragY = ref(0)
+	/** 触摸是否已判定为拖动（区分点击选中；拖后拦截误触 click） */
+	let dragMoved = false
+	let dragStartX = 0
+	let dragStartY = 0
+	/** 拖拽卡片的初始布局位（视口坐标，touchstart 时经 SelectorQuery 异步取得） */
+	let dragOriginX = 0
+	let dragOriginY = 0
+	/** 布局基准是否已就位（rect 异步回调返回前不响应拖动） */
+	let dragOriginReady = false
+
+	/** 勾选点点击：阻止冒泡后切换选中（避免触发卡片自身点击） */
+	function onCheckTap(book : BookItem, e : UniPointerEvent) : void {
+		e.stopPropagation()
+		if (!editMode.value) {
+			return
+		}
+		toggleSelect(book)
+	}
+
+	/** 卡片动态 class：编辑模式的暗显/选中/拖拽态 */
+	function cardClass(gi : number, book : BookItem) : string {
+		if (!editMode.value) {
+			return ''
+		}
+		if (dragIndex.value == gi) {
+			return 'book-item-dragging'
+		}
+		return isSelected(book) ? 'book-item-selected' : 'book-item-dim'
+	}
+
+	/** 拖拽卡片的位移内联样式（px） */
+	function cardStyle(gi : number) : string {
+		if (dragIndex.value != gi) {
+			return ''
+		}
+		return 'transform:translate(' + dragX.value + 'px,' + dragY.value + 'px)'
+	}
+
+	function onCardTouchStart(e : UniTouchEvent, gi : number) : void {
+		if (!editMode.value || dragIndex.value != -1 || e.touches.length == 0) {
+			return
+		}
+		if (gi >= books.value.length) {
+			return
+		}
+		dragMoved = false
+		dragOriginReady = false
+		dragStartX = e.touches[0].clientX
+		dragStartY = e.touches[0].clientY
+		dragIndex.value = gi
+		dragX.value = 0
+		dragY.value = 0
+		// 异步取卡片当前布局位置作为拖拽基准
+		uni.createSelectorQuery().select('#book-card-' + gi).boundingClientRect((rect : NodeInfo | null) : void => {
+			if (rect != null && dragIndex.value == gi) {
+				dragOriginX = rect.left
+				dragOriginY = rect.top
+				dragOriginReady = true
+			}
+		}).exec()
+	}
+
+	function onCardTouchMove(e : UniTouchEvent, gi : number) : void {
+		if (dragIndex.value != gi || e.touches.length == 0 || !dragOriginReady) {
+			return
+		}
+		const dx = e.touches[0].clientX - dragStartX
+		const dy = e.touches[0].clientY - dragStartY
+		if (!dragMoved && Math.abs(dx) + Math.abs(dy) <= 6) {
+			return
+		}
+		dragMoved = true
+		// 网格几何（px）：卡宽 206 / 卡高 360（封面 285 + 文字 75）/ 列距 28 / 行距 38 / 内容左缘 38（rpx）
+		const cellW = uni.upx2px(206)
+		const cellH = uni.upx2px(360)
+		const gapX = uni.upx2px(28)
+		const gapY = uni.upx2px(38)
+		dragX.value = dx
+		dragY.value = dy
+		// 由浮动卡片中心计算目标格位（浮点卡左上角 = 原点 + 位移；格位序号 = 中心相对网格首行左缘的步距取整），实时重排让位
+		const rowCount = Math.ceil(books.value.length / 3)
+		const col = Math.max(0, Math.min(2, Math.round((dragOriginX + dx - uni.upx2px(38)) / (cellW + gapX))))
+		const row0 = Math.floor(gi / 3)
+		const row0Top = dragOriginY - row0 * (cellH + gapY)
+		const row = Math.max(0, Math.min(rowCount - 1, Math.round((dragOriginY + dy - row0Top) / (cellH + gapY))))
+		const target = Math.max(0, Math.min(books.value.length - 1, row * 3 + col))
+		if (target == gi) {
+			return
+		}
+		const item = books.value[gi]
+		books.value.splice(gi, 1)
+		books.value.splice(target, 0, item)
+		// 布局原点随重排跳变，触摸基准同步补偿，保持卡片屏幕位置连续
+		dragStartX += (target % 3 - gi % 3) * (cellW + gapX)
+		dragStartY += (Math.floor(target / 3) - row0) * (cellH + gapY)
+		dragIndex.value = target
+		dragX.value = e.touches[0].clientX - dragStartX
+		dragY.value = e.touches[0].clientY - dragStartY
+	}
+
+	function onCardTouchEnd() : void {
+		if (dragIndex.value == -1) {
+			return
+		}
+		dragIndex.value = -1
+		dragX.value = 0
+		dragY.value = 0
+		if (dragMoved) {
+			saveShelf()
+		}
+	}
+
+	/** 卡片点击：编辑模式切换选中（拦截拖拽后误触），非编辑模式进入阅读（添加格无动作） */
+	function onCardTap(book : BookItem) : void {
+		if (book.key == 'add') {
+			return
+		}
+		if (dragMoved) {
+			dragMoved = false
+			return
+		}
+		if (!editMode.value) {
+			openBook(book)
+			return
+		}
+		toggleSelect(book)
+	}
 
 	/** 排序下拉菜单（Stitch: 手动顺序/最近阅读/添加时间，默认手动顺序） */
 	const sortOptions = ref<string[]>(['手动顺序', '最近阅读', '添加时间'])
@@ -176,6 +447,7 @@
 	const searchFocused = ref(false)
 
 	onLoad(() => {
+		loadShelf()
 		const win = uni.getWindowInfo()
 		// #ifdef MP-WEIXIN
 		// 胶囊按钮矩形：导航行与胶囊同行（顶部/高度对齐），右侧按钮避让到胶囊左边 8px
@@ -214,8 +486,8 @@
 		menuOpen.value = false
 	}
 
-	/** Stitch: 点击加号菜单项仅收起菜单 */
-	function onPlusAction() : void {
+	/** 加号菜单「导入书籍」：收起菜单（导入功能占位） */
+	function onImportTap() : void {
 		plusMenuOpen.value = false
 	}
 
@@ -242,18 +514,18 @@
 		searchFocused.value = false
 	}
 
-	/** 点击书籍进入阅读正文页（添加格无动作） */
+	/** 点击书籍进入阅读正文页 */
 	function openBook(book: BookItem) : void {
-		if (book.kind === 'add') {
-			return
-		}
 		uni.navigateTo({
 			url: '/pages/reading/reader'
 		})
 	}
 
-	/** 点击"领 1 铜币"进入赠币福利页 */
+	/** 点击"领 1 铜币"进入赠币福利页（编辑模式禁用） */
 	function openReward() : void {
+		if (editMode.value) {
+			return
+		}
 		uni.navigateTo({
 			url: '/pages/reading/reward'
 		})
@@ -352,8 +624,7 @@
 	/* 加号浮动菜单（Stitch: 宽 128px 白底 圆角 16px 边框 #E9E9E6 阴影 0 12 32 @12%，右对齐悬浮） */
 	.plus-menu {
 		position: absolute;
-		right: 38rpx;
-		width: 246rpx;
+		/* left 由内联绑定（+ 号左缘），宽度随菜单文字自适应 */
 		padding: 12rpx;
 		background-color: $bai-canvas;
 		border-radius: $bai-rounded-lg;
@@ -553,10 +824,11 @@
 		flex-direction: column;
 	}
 
+	/* 列间距 28rpx 与三本满行时 space-between 等效；不满行时卡片紧挨补位，不再两端分布 */
 	.shelf-row {
 		flex-direction: row;
 		align-items: flex-start;
-		justify-content: space-between;
+		gap: 28rpx;
 	}
 
 	.shelf-row-gap {
@@ -566,6 +838,7 @@
 	.book-item {
 		width: 206rpx;
 		flex-direction: column;
+		position: relative;
 	}
 
 	/* 白封面（令牌 item-card: 白底 圆角 xl 24px 边框 浅灰 #E9E9E6 内边距 14px，左上书名 14px/500；上下两端分布承载左下角格式水印） */
@@ -596,53 +869,32 @@
 		color: $bai-pale;
 	}
 
-	/* 图封面（Stitch: 圆角 12px；背景渐变底部并入黑色遮罩，承接白色书名/作者） */
+	/* 图封面（中性灰底白字样式：mute #868685 为墨到白灰阶中值；圆角与其他书籍卡片一致 xl 24px，接入真实数据时替换为 image 封面） */
 	.cover-photo {
 		height: 285rpx;
 		box-sizing: border-box;
 		position: relative;
 		overflow: hidden;
-		border-radius: $bai-rounded-md;
+		border-radius: $bai-rounded-xl;
+		background-color: $bai-mute;
 		flex-direction: column;
 		justify-content: flex-end;
 		padding: 15rpx;
 	}
 
-	/* 封面示意渐变：设计稿封面为示例图片素材，此处以同色调渐变占位（底部并入 Stitch 的黑色渐变遮罩），接入真实数据时替换为 image 封面 */
-	.cover-photo-shanyu {
-		background-image: linear-gradient(180deg, #a9b6b1 0%, #6e7f78 40%, #1c211f 100%);
-	}
-
-	.cover-photo-youming {
-		background-image: linear-gradient(180deg, #40151a 0%, #8c2626 45%, #120a0b 100%);
-	}
-
-	/* 封面徽章（令牌 badge: 推荐 正向深蓝 #1E3A8A/90% / 精选 警示深 #B86700/90%，右下圆角 sm 8px，文字 9px/700 加宽字距） */
-	.cover-badge {
+	/* 右上角文件格式水印（与白封面左下角水印对应：同 48rpx/700/字距 1rpx，深底上弱白低对比） */
+	.cover-photo-format {
 		position: absolute;
-		left: 0;
-		top: 0;
-		padding: 4rpx 12rpx;
-		border-radius: 0 0 $bai-rounded-sm 0;
-	}
-
-	.cover-badge-blue {
-		background-color: rgba($bai-positive-deep, 0.9);
-	}
-
-	.cover-badge-orange {
-		background-color: rgba($bai-warning-deep, 0.9);
-	}
-
-	.cover-badge-text {
-		font-size: 17rpx;
-		line-height: 26rpx;
+		right: 15rpx;
+		top: 15rpx;
+		font-size: 48rpx;
+		line-height: 56rpx;
 		font-weight: 700;
 		letter-spacing: 1rpx;
-		color: $bai-on-primary;
+		color: rgba($bai-on-primary, 0.3);
 	}
 
-	/* 封面底部信息（Stitch: 内边距 8px 底对齐；书名 14px/900 白、作者 8px 白 70%） */
+	/* 封面底部信息（Stitch: 内边距 8px 底对齐；黑底上白书名、作者白 70%） */
 	.cover-info {
 		flex-direction: column;
 	}
@@ -694,5 +946,137 @@
 		line-height: 29rpx;
 		font-weight: 500;
 		color: $bai-mute;
+	}
+
+	/* ===== 编辑模式 ===== */
+	/* 完成按钮（导航行右缘，替换搜索/添加按钮组） */
+	.nav-finish {
+		padding: 12rpx 31rpx;
+		border-radius: $bai-rounded-pill;
+		background-color: $bai-ink;
+	}
+
+	.nav-finish-text {
+		font-size: 23rpx;
+		line-height: 23rpx;
+		font-weight: 600;
+		color: $bai-on-primary;
+	}
+
+	/* 编辑工具行：样式选择 + 批量删除（网格上方） */
+	.edit-tools {
+		margin-top: 34rpx;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+	}
+
+	.edit-styles {
+		flex-direction: row;
+		align-items: center;
+		gap: 15rpx;
+	}
+
+	.style-btn {
+		flex-direction: row;
+		align-items: center;
+		padding: 12rpx 23rpx;
+		border-radius: $bai-rounded-pill;
+		background-color: $bai-canvas;
+		border: 1px solid $bai-pale;
+	}
+
+	.style-btn-on {
+		background-color: $bai-ink;
+		border-color: $bai-ink;
+	}
+
+	.style-dot {
+		width: 23rpx;
+		height: 23rpx;
+		border-radius: $bai-rounded-pill;
+	}
+
+	.style-dot-light {
+		background-color: $bai-canvas;
+		border: 1px solid $bai-pale;
+	}
+
+	.style-dot-dark {
+		background-color: $bai-mute;
+	}
+
+	.style-btn-text {
+		margin-left: 8rpx;
+		font-size: 23rpx;
+		line-height: 23rpx;
+		font-weight: 500;
+		color: $bai-body;
+	}
+
+	.style-btn-text-on {
+		color: $bai-on-primary;
+	}
+
+	.edit-delete {
+		padding: 12rpx 27rpx;
+		border-radius: $bai-rounded-pill;
+		background-color: rgba($bai-negative, 0.1);
+	}
+
+	.edit-delete-text {
+		font-size: 23rpx;
+		line-height: 23rpx;
+		font-weight: 600;
+		color: $bai-negative;
+	}
+
+	/* 卡片编辑态：未选中暗显 / 选中恢复 / 拖拽置顶加影 */
+	.book-item-dim {
+		opacity: 0.7;
+	}
+
+	.book-item-selected {
+		opacity: 1;
+	}
+
+	.book-item-dragging {
+		position: relative;
+		z-index: 30;
+		opacity: 1;
+		box-shadow: $bai-shadow-dropdown;
+		border-radius: $bai-rounded-xl;
+	}
+
+	/* 封面包装层：承载右下角勾选点定位 */
+	.cover-wrap {
+		position: relative;
+	}
+
+	/* 勾选点（封面右下角，距边界 12rpx） */
+	.card-check {
+		position: absolute;
+		right: 12rpx;
+		bottom: 12rpx;
+		width: 40rpx;
+		height: 40rpx;
+		border-radius: $bai-rounded-pill;
+		background-color: $bai-canvas;
+		border: 1px solid $bai-mute;
+		align-items: center;
+		justify-content: center;
+		z-index: 5;
+	}
+
+	.card-check-on {
+		background-color: $bai-ink;
+		border-color: $bai-ink;
+	}
+
+	.card-check-icon {
+		font-size: 24rpx;
+		line-height: 38rpx;
+		font-weight: 900;
+		color: $bai-on-primary;
 	}
 </style>

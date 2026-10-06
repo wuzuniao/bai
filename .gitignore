@@ -48,3 +48,6 @@ logs/
 *.bak
 *_output.txt
 *_out.txt
+
+# 参考目录（本地参考资料，不入库）
+参考目录/

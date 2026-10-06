@@ -1,7 +1,15 @@
 <template>
 	<view class="page" :style="'background-color:' + readerBg">
 		<!-- 阅读内容区：点击空白切换菜单显隐 / 清除划词 / 收起设置；左右滑动翻页（切换章节） -->
-		<view class="content" @click="onContentTap" @touchstart="onContentTouchStart" @touchend="onContentTouchEnd">
+		<view
+		class="content"
+		:class="pullSettling ? 'content-settle' : ''"
+		:style="'transform:translateY(' + pullOffset + 'px)'"
+		@click="onContentTap"
+		@touchstart="onContentTouchStart"
+		@touchmove="onContentTouchMove"
+		@touchend="onContentTouchEnd"
+	>
 			<view class="content-inner">
 				<!-- 章节头部（Stitch: 标签行 + 36px/900 大标题 + 分隔条） -->
 				<view class="chapter-header">
@@ -66,23 +74,19 @@
 			</view>
 		</view>
 
-		<!-- 顶部导航菜单（Stitch: 返回/书名/书签，呼出态从顶部滑入） -->
+		<!-- 顶部导航菜单（Stitch: 返回/书名，呼出态从顶部滑入；内容行与小程序胶囊同行） -->
 		<view
 			class="menu-top"
 			:class="menuVisible && !settingsOpen ? '' : 'menu-top-hidden'"
-			:style="'background-color:' + menuTopBg + ';border-color:' + menuBorderColor"
+			:style="'background-color:' + menuTopBg + ';border-color:' + menuBorderColor + ';padding-top:' + navTop + 'px'"
 		>
-			<view class="menu-top-left">
-				<view class="round-btn" @click="onBackTap">
-					<image class="round-btn-icon" :src="themeIcon('arrow-back')" />
-				</view>
-				<view class="menu-top-title">
+			<view class="menu-top-inner" :style="'height:' + navHeight + 'px'">
+				<view class="menu-top-left">
+					<view class="round-btn" @click="onBackTap">
+						<image class="round-btn-icon" :src="themeIcon('arrow-back')" />
+					</view>
 					<text class="book-name" :style="'color:' + titleColor">星渊行者</text>
-					<text class="book-sub" :style="'color:' + mutedColor">连载中 · 每日更新</text>
 				</view>
-			</view>
-			<view class="round-btn" @click="showToast('已添加书签')">
-				<image class="round-btn-icon" :src="themeIcon('reader-bookmark')" />
 			</view>
 		</view>
 
@@ -179,22 +183,42 @@
 			:style="'background-color:' + drawerBg"
 		>
 			<view class="drawer-header">
-				<view class="drawer-tab-active" @click="toggleOrder">
-					<text class="drawer-tab-title">目录</text>
-					<text class="drawer-tab-sort">{{ orderDesc ? '↓↑' : '⇅' }}</text>
+				<view :class="drawerTab === 'catalog' ? 'drawer-tab-active' : 'drawer-tab-plain'" @click="switchDrawerTab('catalog')">
+					<text :class="drawerTab === 'catalog' ? 'drawer-tab-title' : 'drawer-tab-plain'">目录</text>
+					<text v-if="drawerTab === 'catalog'" class="drawer-tab-sort" @click="onSortTap($event)">{{ orderDesc ? '↓↑' : '⇅' }}</text>
 				</view>
 				<text class="drawer-tab-plain" @click="showToast('暂无想法与划线记录')">想法/划线</text>
-				<text class="drawer-tab-plain" @click="showToast('书签列表为空')">书签</text>
+				<view :class="drawerTab === 'bookmark' ? 'drawer-tab-active' : 'drawer-tab-plain'" @click="switchDrawerTab('bookmark')">
+					<text :class="drawerTab === 'bookmark' ? 'drawer-tab-title' : 'drawer-tab-plain'">书签</text>
+				</view>
 			</view>
 			<scroll-view class="drawer-list" direction="vertical" :show-scrollbar="false">
-				<view
-					v-for="(ch, ci) in displayChapters"
-					:key="ch.id"
-					class="chapter-item"
-					@click="selectChapter(ch)"
-				>
-					<text class="chapter-item-text" :class="ch.active ? 'chapter-item-text-active' : ''" :style="'color:' + (ch.active ? activeBlue : chapterTextColor)">{{ ch.title }}</text>
-				</view>
+				<!-- 目录页 -->
+				<template v-if="drawerTab === 'catalog'">
+					<view
+						v-for="(ch, ci) in displayChapters"
+						:key="ch.id"
+						class="chapter-item"
+						@click="selectChapter(ch)"
+					>
+						<text class="chapter-item-text" :class="ch.active ? 'chapter-item-text-active' : ''" :style="'color:' + (ch.active ? activeBlue : chapterTextColor)">{{ ch.title }}</text>
+					</view>
+				</template>
+				<!-- 书签页 -->
+				<template v-else>
+					<view v-if="bookmarks.length == 0" class="bookmark-empty">
+						<text class="bookmark-empty-text" :style="'color:' + mutedColor">书签列表为空，正文下滑即可添加书签</text>
+					</view>
+					<view
+						v-for="(bm, bi) in bookmarks"
+						:key="bi"
+						class="bookmark-item"
+						@click="goToBookmark(bm)"
+					>
+						<image class="bookmark-item-icon" :src="themeIcon('reader-bookmark-active')" />
+						<text class="bookmark-item-text" :style="'color:' + chapterTextColor">{{ bookmarkLabel(bm) }}</text>
+					</view>
+				</template>
 			</scroll-view>
 			<view class="drawer-bottom">
 				<view class="bottom-nav-btn" @click="closeDrawer">
@@ -211,6 +235,22 @@
 				</view>
 			</view>
 		</view>
+
+		<!-- 书签下拉/移除遮罩（顶部半透明提示条：高度即内容位移量，填补内容下移留出的空白；书签图标在遮罩内右上角随动作变化） -->
+			<view
+				v-if="pullState != 'none' || pullSettling"
+				class="bookmark-mask"
+				:class="pullSettling ? 'bookmark-mask-settle' : ''"
+				:style="'height:' + maskHeight + 'px'"
+			>
+				<image
+					class="bookmark-mask-icon"
+					:src="pullState == 'removing' ? themeIcon('reader-bookmark-active') : themeIcon('reader-bookmark')"
+				/>
+				<view class="bookmark-mask-row">
+					<text class="bookmark-mask-text">{{ maskText }}</text>
+				</view>
+			</view>
 
 		<!-- 自定义 Toast（Stitch: 顶部 96px 黑底圆角胶囊，1.5s 自动消失） -->
 		<view v-if="toastVisible" class="reader-toast">
@@ -367,6 +407,120 @@
 	const settingsOpen = ref(false)
 	const drawerOpen = ref(false)
 	const orderDesc = ref(false)
+	/** 抽屉当前页签：catalog 目录 / bookmark 书签 */
+	const drawerTab = ref('catalog')
+
+	/** 顶部导航内容行（px）：与小程序胶囊同行对齐（同子页 BackButton 口径：状态栏高度起、行高 40px） */
+	const navTop = ref(44)
+	const navHeight = ref(40)
+	{
+		const win = uni.getWindowInfo()
+		if (win.statusBarHeight > 0) {
+			navTop.value = win.statusBarHeight
+		}
+	}
+
+	/** ===== 书签（正文下滑切换：无书签时添加、有书签时删除；本地持久化） ===== */
+	type Bookmark = {
+		chapterId: number
+		/** 章内页码（0-based） */
+		pageIndex: number
+	}
+
+	const STORAGE_BOOKMARKS = 'reader_bookmarks'
+
+	const bookmarks = ref<Bookmark[]>([])
+
+	/** 读取本地书签 */
+	{
+		const stored : any = uni.getStorageSync(STORAGE_BOOKMARKS)
+		if (typeof stored == 'string' && (stored as string).length > 0) {
+			const list = JSON.parse<Array<Bookmark>>(stored as string)
+			if (list != null) {
+				bookmarks.value = list
+			}
+		}
+	}
+
+	/** 当前页是否已有书签 */
+	function indexOfBookmark() : number {
+		for (let i = 0; i < bookmarks.value.length; i++) {
+			const b = bookmarks.value[i]
+			if (b.chapterId == currentChapterId.value && b.pageIndex == pageIndex.value) {
+				return i
+			}
+		}
+		return -1
+	}
+
+	/** 书签标记（右上角旗帜）是否展示：当前章节页已有书签 */
+	const bookmarkFlagVisible = computed(() : boolean => {
+		return indexOfBookmark() >= 0
+	})
+
+	/** 下拉添加进行中：正文纵向下拉超阈值时顶部出现「下拉添加书签」遮罩，松手落定 */
+	const pullState = ref('none')
+	/** 下拉位移量（px，阻尼映射）：正文内容跟手下移，顶部遮罩同步增高填补空白 */
+	const pullOffset = ref(0)
+	/** 松手回弹中：位移与遮罩高度以过渡动画归零（添加落定或取消取消均回弹归位） */
+	const pullSettling = ref(false)
+	/** 遮罩总高（px）：等于内容位移量（遮罩从 0 随下拉长出，内容顶贴遮罩底缘） */
+	const maskHeight = computed(() : number => {
+		return pullOffset.value
+	})
+
+	/** 遮罩提示文案（随添加/移除态切换） */
+	const maskText = computed(() : string => {
+		if (pullState.value == 'removing') {
+			return '↑ 松手移除书签'
+		}
+		return '↓ 下拉添加书签'
+	})
+
+	function saveBookmarks() : void {
+		uni.setStorageSync(STORAGE_BOOKMARKS, JSON.stringify(bookmarks.value))
+	}
+
+	function addBookmark() : void {
+		if (indexOfBookmark() >= 0) {
+			return
+		}
+		bookmarks.value.push({ chapterId: currentChapterId.value, pageIndex: pageIndex.value } as Bookmark)
+		saveBookmarks()
+	}
+
+	function removeBookmark() : void {
+		const i = indexOfBookmark()
+		if (i < 0) {
+			return
+		}
+		bookmarks.value.splice(i, 1)
+		saveBookmarks()
+	}
+
+	/** 书签条目文案（章节标签 · 第 N 页，页码 1-based 展示） */
+	function bookmarkLabel(bm : Bookmark) : string {
+		const ch = bm.chapterId >= 0 && bm.chapterId < chapters.value.length ? chapters.value[bm.chapterId] : chapters.value[0]
+		return ch.label + ' · 第 ' + (bm.pageIndex + 1) + ' 页'
+	}
+
+	/** 跳转到书签所在章节页并关闭抽屉 */
+	function goToBookmark(bm : Bookmark) : void {
+		goToChapter(bm.chapterId, false)
+		pageIndex.value = bm.pageIndex
+		drawerOpen.value = false
+	}
+
+	/** 抽屉页签切换（进入目录页签时恢复正序浏览态由 orderDesc 独立控制） */
+	function switchDrawerTab(tab : string) : void {
+		drawerTab.value = tab
+	}
+
+	/** 目录页签排序箭头：阻止冒泡后切换正/倒序 */
+	function onSortTap(e : UniPointerEvent) : void {
+		e.stopPropagation()
+		toggleOrder()
+	}
 
 	/** 划词状态（Stitch: 长按选中段落 22%-72% 区间） */
 	const selectedIdx = ref(-1)
@@ -412,17 +566,74 @@
 	let touchStartX = 0
 	let touchStartY = 0
 
-	function onContentTouchStart(e: TouchEvent) : void {
+	function onContentTouchStart(e: UniTouchEvent) : void {
+		pullSettling.value = false
 		touchStartX = e.touches[0].clientX
 		touchStartY = e.touches[0].clientY
 	}
 
-	function onContentTouchEnd(e: TouchEvent) : void {
+	function onContentTouchMove(e: UniTouchEvent) : void {
+		if (e.touches.length == 0) {
+			return
+		}
+		const dx = e.touches[0].clientX - touchStartX
+		const dy = e.touches[0].clientY - touchStartY
+		// 无书签：下拉进入「添加」提示态；有书签：下拉进入「移除」提示态——位移均跟手（阻尼映射）
+		const vertical = dy > 40 && dy > Math.abs(dx) * 1.5
+		if (bookmarkFlagVisible.value) {
+			if (vertical) {
+				pullOffset.value = Math.min((dy - 40) * 0.6, 240)
+				pullState.value = 'removing'
+			} else if (pullState.value == 'removing') {
+				pullOffset.value = 0
+				pullState.value = 'none'
+			}
+			return
+		}
+		if (vertical) {
+			pullOffset.value = Math.min((dy - 40) * 0.6, 240)
+			pullState.value = 'adding'
+		} else if (pullState.value == 'adding') {
+			// 拖回阈值内：位移跟手收回，松手即取消
+			pullOffset.value = 0
+			pullState.value = 'none'
+		}
+	}
+
+	function onContentTouchEnd(e: UniTouchEvent) : void {
 		const dx = e.changedTouches[0].clientX - touchStartX
 		const dy = e.changedTouches[0].clientY - touchStartY
 		if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 2) {
 			flipPage(dx < 0 ? 1 : -1)
+			settlePull()
+			return
 		}
+		const vertical = dy > 40 && dy > Math.abs(dx) * 1.5
+		// 下拉态松手：仍拉起则落定（添加/移除书签），否则为取消——两者均回弹归位
+		if (pullState.value == 'adding') {
+			if (vertical) {
+				addBookmark()
+			}
+			settlePull()
+		} else if (pullState.value == 'removing') {
+			if (vertical) {
+				removeBookmark()
+			}
+			settlePull()
+		}
+	}
+
+	/** 回弹归位：内容位移与遮罩高度以过渡动画归零（松手后触发，触摸重新按下时立即恢复跟手） */
+	function settlePull() : void {
+		if (pullOffset.value == 0 && pullState.value == 'none') {
+			return
+		}
+		pullSettling.value = true
+		pullOffset.value = 0
+		pullState.value = 'none'
+		setTimeout(() => {
+			pullSettling.value = false
+		}, 350)
 	}
 
 	/** 翻页（左滑下一页、右滑上一页；章首/章尾越界时切换上一章末页/下一章首页，Stitch 边界 toast 提示） */
@@ -597,6 +808,7 @@
 
 	/** 目录抽屉（Stitch: 遮罩渐显 + 抽屉顶部下滑 0.32s） */
 	function openDrawer() : void {
+		drawerTab.value = 'catalog'
 		drawerOpen.value = true
 	}
 
@@ -768,10 +980,10 @@
 		left: 0;
 		right: 0;
 		top: 0;
-		flex-direction: row;
-		align-items: center;
-		justify-content: space-between;
-		padding: 23rpx 38rpx 27rpx 38rpx;
+		/* 内容行高与顶部内边距由内联绑定（状态栏起 40px 行，与胶囊垂直居中对齐） */
+		padding-left: 38rpx;
+		padding-right: 38rpx;
+		padding-bottom: 27rpx;
 		border-bottom-width: 1px;
 		border-bottom-style: solid;
 		border-bottom-left-radius: $bai-rounded-lg;
@@ -785,28 +997,29 @@
 		opacity: 0;
 	}
 
+	.menu-top-inner {
+		flex-direction: row;
+		align-items: center;
+	}
+
 	.menu-top-left {
 		flex-direction: row;
 		align-items: center;
 		gap: 23rpx;
 	}
 
+	/* 返回按钮与其他子页统一：图标 80rpx */
 	.round-btn {
-		width: 69rpx;
-		height: 69rpx;
-		border-radius: 9999px;
+		width: 80rpx;
+		height: 80rpx;
 		flex-direction: row;
 		align-items: center;
 		justify-content: center;
 	}
 
 	.round-btn-icon {
-		width: 38rpx;
-		height: 38rpx;
-	}
-
-	.menu-top-title {
-		flex-direction: column;
+		width: 80rpx;
+		height: 80rpx;
 	}
 
 	.book-name {
@@ -814,9 +1027,78 @@
 		font-weight: 600;
 	}
 
-	.book-sub {
-		font-size: 19rpx;
-		margin-top: 2rpx;
+	/* 书签列表（抽屉书签页签） */
+	.bookmark-empty {
+		padding: 64rpx 38rpx;
+		align-items: center;
+	}
+
+	.bookmark-empty-text {
+		font-size: 27rpx;
+		text-align: center;
+	}
+
+	.bookmark-item {
+		flex-direction: row;
+		align-items: center;
+		padding: 27rpx 38rpx;
+	}
+
+	.bookmark-item-icon {
+		width: 38rpx;
+		height: 38rpx;
+	}
+
+	.bookmark-item-text {
+		margin-left: 23rpx;
+		font-size: 27rpx;
+		font-weight: 500;
+	}
+
+	/* 书签下拉/移除遮罩（顶部半透明提示条：高度内联绑定，随下拉从 0 长出，书签图标在遮罩内右上角随动作变化） */
+	.bookmark-mask {
+		position: absolute;
+		left: 0;
+		right: 0;
+		top: 0;
+		overflow: hidden;
+		background-color: rgba($bai-ink, 0.65);
+		z-index: 50;
+	}
+
+	.bookmark-mask-row {
+		position: absolute;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		height: 90rpx;
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+	}
+
+	/* 松手回弹：位移与遮罩高度以过渡动画归零（添加落定 / 取消均回弹归位） */
+	.content-settle {
+		transition: transform 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+	}
+
+	.bookmark-mask-settle {
+		transition: height 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+	}
+
+	/* 书签图标（固定于遮罩右上角，不随遮罩高度增长移动；随添加/移除动作切换普通/红色激活形态） */
+	.bookmark-mask-icon {
+		position: absolute;
+		right: 38rpx;
+		top: 3rpx;
+		width: 56rpx;
+		height: 84rpx;
+	}
+
+	.bookmark-mask-text {
+		font-size: 27rpx;
+		font-weight: 600;
+		color: $bai-on-primary;
 	}
 
 	/* 底部控制面板（令牌: 顶部圆角 xl 24px、毛玻璃、浮层提升阴影，呼出/隐藏滑移动效） */
