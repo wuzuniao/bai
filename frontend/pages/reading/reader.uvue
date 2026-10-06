@@ -65,7 +65,7 @@
 				<!-- 当前页层 -->
 				<view class="page-layer" :class="flipSettling ? 'page-layer-settle' : ''" :style="currentLayerStyle">
 					<view class="content-inner">
-						<view v-if="pageIndex === 0" class="chapter-header" :style="paragraphCurlStyle(0, curlTotal)">
+						<view v-if="pageIndex === 0" class="chapter-header">
 							<view class="chapter-label-row">
 								<view class="chapter-label-dot"></view>
 								<text class="chapter-label" :style="'color:' + labelColor">{{ chapterLabel }}</text>
@@ -78,7 +78,6 @@
 								v-for="(item, vi) in currentPageItems"
 								:key="item.origin"
 								class="novel-paragraph"
-								:style="paragraphCurlStyle((pageIndex === 0 ? 1 : 0) + vi, curlTotal)"
 								@longpress="onLongPress(item.origin)"
 							>
 								<text class="novel-text">
@@ -93,12 +92,14 @@
 							</view>
 						</view>
 					</view>
-					<view v-if="pageTurn === '仿真' && flipDir == -1 && flipOffset > 0" class="page-layer-shadow"></view>
-				</view>
 				<!-- 目标页层（跟手翻页时从页外滑入） -->
-				<view v-if="flipTargetIndex >= 0" class="page-layer" :style="targetLayerStyle">
-						<view v-if="pageTurn === '仿真' && flipDir == 1 && flipOffset > 0" class="page-curl-shadow" :style="curlShadowStyle"></view>
-						<view class="content-inner">
+				<view v-if="flipTargetIndex >= 0" class="page-layer" :class="flipSettling ? 'page-layer-settle' : ''" :style="targetLayerStyle">
+					<!-- #ifdef APP -->
+					<!-- 仿真卷曲（APP 端真实实现）：目标页自页外滑入覆盖，前缘为卷起纸筒弧面 + 落在下层的投影 -->
+					<view v-if="pageTurn === '仿真' && flipDir != 0 && flipOffset > 0" class="page-curl-roller" :class="flipDir == 1 ? 'page-curl-roller-left' : 'page-curl-roller-right'"></view>
+					<view v-if="pageTurn === '仿真' && flipDir != 0 && flipOffset > 0" class="page-curl-shadow" :class="flipDir == 1 ? 'page-curl-shadow-left' : 'page-curl-shadow-right'"></view>
+					<!-- #endif -->
+					<view class="content-inner">
 						<view v-if="flipTargetIndex === 0" class="chapter-header">
 							<view class="chapter-label-row">
 								<view class="chapter-label-dot"></view>
@@ -117,7 +118,6 @@
 							</view>
 						</view>
 					</view>
-					<view v-if="pageTurn === '仿真' && flipDir == 1" class="page-layer-shadow"></view>
 				</view>
 			</view>
 			<!-- 底部进度（Stitch: 时间 + 章节进度 + 百分比标签） -->
@@ -165,7 +165,7 @@
 					<view class="round-btn" @click="onBackTap">
 						<image class="round-btn-icon" :src="themeIcon('arrow-back')" />
 					</view>
-					<text class="book-name" :style="'color:' + titleColor">星渊行者</text>
+					<text class="book-name" :style="'color:' + titleColor">{{ BOOK_TITLE }}</text>
 				</view>
 			</view>
 		</view>
@@ -484,8 +484,13 @@
 	/** 滚动锚点：前插上一章后定位回原首章顶部，视口保持不跳 */
 	const scrollIntoView = ref('')
 
-	/** ===== 阅读进度（章节/页码/滚动位置）本地持久化 ===== */
+	/** ===== 阅读进度（书名/章节/页码/滚动位置）本地持久化 ===== */
+	/** 当前书籍名（进度存储与顶栏展示唯一定义处；后续接入真实书籍数据时由数据驱动） */
+	const BOOK_TITLE = '星渊行者'
+
 	type ReaderProgress = {
+		/** 书名：恢复进度时校验，避免不同书之间串用进度 */
+		bookTitle: string
 		chapterId: number
 		pageIndex: number
 		scrollTop: number
@@ -494,7 +499,7 @@
 	const STORAGE_PROGRESS = 'reader_progress'
 
 	function saveProgress() : void {
-		const p = { chapterId: currentChapterId.value, pageIndex: pageIndex.value, scrollTop: scrollModePos.value } as ReaderProgress
+		const p = { bookTitle: BOOK_TITLE, chapterId: currentChapterId.value, pageIndex: pageIndex.value, scrollTop: scrollModePos.value } as ReaderProgress
 		uni.setStorageSync(STORAGE_PROGRESS, JSON.stringify(p))
 	}
 
@@ -503,12 +508,12 @@
 		scrollModePos.value = e.detail.scrollTop
 	}
 
-	/** 启动恢复上次阅读进度（章节/页码/滚动位置） */
+	/** 启动恢复上次阅读进度（书名匹配才恢复，避免不同书之间串用；章节/页码/滚动位置） */
 	{
 		const stored : any = uni.getStorageSync(STORAGE_PROGRESS)
 		if (typeof stored == 'string' && (stored as string).length > 0) {
 			const p = JSON.parse<ReaderProgress>(stored as string)
-			if (p != null && p.chapterId >= 0 && p.chapterId < chapters.value.length) {
+			if (p != null && p.bookTitle == BOOK_TITLE && p.chapterId >= 0 && p.chapterId < chapters.value.length) {
 				currentChapterId.value = p.chapterId
 				if (p.pageIndex >= 0 && p.pageIndex < pageBreaks.value.length) {
 					pageIndex.value = p.pageIndex
@@ -571,8 +576,6 @@
 	/** 跟手位移（px，0 至页宽/页高） */
 	const flipOffset = ref(0)
 	const flipSettling = ref(false)
-	/** 仿真卷曲旋转轴纵向位置（触点 Y 百分比） */
-	const curlOriginY = ref(100)
 
 	/** 跟手目标页索引（仅章内有效；越章界为 -1，目标层不渲染，松手走 flipPage 边界逻辑） */
 	const flipTargetIndex = computed(() : number => {
@@ -605,17 +608,12 @@
 		if (mode == '平移') {
 			return 'transform:translateX(' + (d * o * -1) + 'px);z-index:1'
 		}
+		// #ifdef APP
 		if (mode == '仿真') {
-			if (d == 1) {
-				// 前翻：整层静置（波次卷曲由页内各段落分别变换），左缘投影随卷曲层
-				return 'z-index:2;box-shadow:-10px 0 30px rgba(0, 0, 0, 0.3)'
-			}
-			if (d == -1) {
-				// 回翻：当前页向右滑出露出下层旧页
-				return 'transform:translateX(' + o + 'px);z-index:2'
-			}
+			// 仿真（APP 端专属实现）：当前页静置下层，目标页连同卷筒/投影自页外滑入覆盖
 			return 'z-index:1'
 		}
+		// #endif
 		if (mode == '覆盖') {
 			if (d == -1) {
 				return 'transform:translateX(' + o + 'px);z-index:2'
@@ -644,39 +642,14 @@
 			}
 			return 'z-index:1'
 		}
+		// #ifdef APP
 		if (mode == '仿真') {
-			// 仿真：目标页静置下层，被卷起的当前页覆盖其上
-			return 'z-index:1'
+			// 仿真（APP 端专属实现）：目标页连同卷筒/投影滑入覆盖——前翻自右缘向左、回翻自左缘向右
+			const o = flipOffset.value
+			return 'transform:translateX(' + (d == 1 ? pageW.value - o : o - pageW.value) + 'px);z-index:2'
 		}
+		// #endif
 		return ''
-	})
-
-	/** 当前页卷曲波次行数（章节头 + 段落数） */
-	const curlTotal = computed(() : number => {
-		return currentPageItems.value.length + (pageIndex.value === 0 ? 1 : 0)
-	})
-
-	/** 仿真卷曲：段落波次变换（页尾先卷起，向前传播；j=0 为章节头） */
-	function paragraphCurlStyle(j : number, total : number) : string {
-		if (pageTurn.value != '仿真' || flipDir.value != 1 || !flipActive.value) {
-			return ''
-		}
-		const p = pageW.value > 0 ? flipOffset.value / pageW.value : 0
-		const pj = Math.max(0, Math.min(1, p * total - (total - 1 - j)))
-		if (pj <= 0) {
-			return ''
-		}
-		return 'transform:translateX(' + (-60 * pj) + 'px);opacity:' + (1 - 0.4 * pj).toFixed(2)
-	}
-
-	/** 仿真投影样式：跟随卷曲前缘落在下层页面上 */
-	const curlShadowStyle = computed(() : string => {
-		if (pageTurn.value != '仿真' || flipDir.value != 1) {
-			return ''
-		}
-		const p = pageW.value > 0 ? flipOffset.value / pageW.value : 0
-		const frontX = pageW.value * (1 - p)
-		return 'left:' + Math.max(0, frontX - 60) + 'px;opacity:' + Math.min(1, p * 2).toFixed(2)
 	})
 
 	/** 主题状态（色值唯一定义于 utils/theme.uts：日间=画布令牌，夜间/纸张为阅读专用主题） */
@@ -707,8 +680,14 @@
 	/** 阅读设置（Stitch: 字号 12-36、背景色板、翻页模式） */
 	const fontSize = ref(18)
 	const selectedBg = ref(READER_THEME_LIGHT.readerBg)
-	const pageTurnModes = ref<string[]>(['仿真', '覆盖', '平移', '滚动'])
-	const pageTurn = ref('仿真')
+	// #ifdef APP
+	/** 仿真翻页仅 APP 端提供（原生层实现真实卷曲），小程序/Web 端不出现该选项 */
+	const pageTurnModes = ref<string[]>(['滚动', '仿真', '覆盖', '平移'])
+	// #endif
+	// #ifndef APP
+	const pageTurnModes = ref<string[]>(['滚动', '覆盖', '平移'])
+	// #endif
+	const pageTurn = ref('滚动')
 	/** 当前主题 key：light / night / paper */
 	const themeKey = ref('light')
 
@@ -958,6 +937,10 @@
 				if (s.pageTurn == '仿真' || s.pageTurn == '覆盖' || s.pageTurn == '平移' || s.pageTurn == '滚动') {
 					pageTurn.value = s.pageTurn
 				}
+				// 存储值不在当前端可选列表内（如非 APP 端的历史"仿真"设置）时回退默认，避免选中无按钮模式
+				if (pageTurnModes.value.indexOf(pageTurn.value) < 0) {
+					pageTurn.value = pageTurnModes.value[0]
+				}
 				if (s.theme == 'night' || s.theme == 'paper') {
 					applyReaderTheme(s.theme)
 				}
@@ -1029,16 +1012,20 @@
 			flipDir.value = dir
 			// 翻页跟手开始：默认隐藏上下控制项（落定后保持正文全屏，点击正文重新呼出）
 			menuVisible.value = false
-			if (pageTurn.value == '仿真' && dir == 1 && !verticalMode) {
-				// 仿真前翻：卷曲进度与旋转轴跟随触点绝对位置（手指位置即卷曲位置）
-				const relX = e.touches[0].clientX - uni.upx2px(62)
-				flipOffset.value = Math.max(0, Math.min(pageW.value, pageW.value - relX))
-				curlOriginY.value = Math.max(20, Math.min(100, e.touches[0].clientY / pageH.value * 100))
+			// #ifdef APP
+			if (pageTurn.value == '仿真') {
+				// 仿真跟手：触点横向绝对位置即卷曲前缘（前翻自右缘向左卷、回翻自左缘向右展开）
+				const relX = Math.max(0, Math.min(pageW.value, e.touches[0].clientX - uni.upx2px(62)))
+				flipOffset.value = dir == 1 ? pageW.value - relX : relX
 			} else {
-				// 回翻/其他模式：按手势位移映射
 				const span = verticalMode ? pageH.value : pageW.value
 				flipOffset.value = Math.min(Math.abs(primary), span)
 			}
+			// #endif
+			// #ifndef APP
+			const span = verticalMode ? pageH.value : pageW.value
+			flipOffset.value = Math.min(Math.abs(primary), span)
+			// #endif
 			return
 		}
 		// 无书签：下拉进入「添加」提示态；有书签：下拉进入「移除」提示态——位移均跟手（阻尼映射）
@@ -1441,24 +1428,43 @@
 		transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
 	}
 
-	/* 仿真模式阴影条：跟随移动页前缘模拟纸张翻起的投影 */
-	.page-layer-shadow {
+	/* #ifdef APP */
+	/* 仿真卷曲（APP 端真实实现）：前缘卷起纸筒弧面，横跨页面全高，左右缘随翻页方向切换 */
+	.page-curl-roller {
 		position: absolute;
-		left: 0;
 		top: 0;
 		bottom: 0;
-		width: 40rpx;
-		background-image: linear-gradient(90deg, rgba(0, 0, 0, 0.25), rgba(0, 0, 0, 0));
+		width: 34px;
+		background-image: linear-gradient(90deg, rgba(0, 0, 0, 0.4), rgba(255, 255, 255, 0.22) 32%, rgba(0, 0, 0, 0.06) 62%, rgba(0, 0, 0, 0.28));
 	}
 
-	/* 仿真卷曲投影：落在下层页面上、跟随卷曲前缘的横向渐变暗带 */
+	.page-curl-roller-left {
+		left: 0;
+	}
+
+	.page-curl-roller-right {
+		right: 0;
+		background-image: linear-gradient(270deg, rgba(0, 0, 0, 0.4), rgba(255, 255, 255, 0.22) 32%, rgba(0, 0, 0, 0.06) 62%, rgba(0, 0, 0, 0.28));
+	}
+
+	/* 仿真卷曲投影：落在下层页面上、贴卷曲前缘的横向渐变暗带（左向/右向随翻页方向切换） */
 	.page-curl-shadow {
 		position: absolute;
 		top: 0;
 		bottom: 0;
-		width: 60px;
+		width: 44px;
+	}
+
+	.page-curl-shadow-left {
+		left: -44px;
 		background-image: linear-gradient(90deg, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.35));
 	}
+
+	.page-curl-shadow-right {
+		right: -44px;
+		background-image: linear-gradient(90deg, rgba(0, 0, 0, 0.35), rgba(0, 0, 0, 0));
+	}
+	/* #endif */
 
 	/* 章节头部（Stitch: 标签行 + 大标题 + 分隔条，与正文间距 56px） */
 	.chapter-header {
