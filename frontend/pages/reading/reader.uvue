@@ -10,34 +10,114 @@
 		@touchmove="onContentTouchMove"
 		@touchend="onContentTouchEnd"
 	>
-			<view class="content-inner">
-				<!-- 章节头部（Stitch: 标签行 + 36px/900 大标题 + 分隔条） -->
-				<view class="chapter-header">
-					<view class="chapter-label-row">
-						<view class="chapter-label-dot"></view>
-						<text class="chapter-label" :style="'color:' + labelColor">{{ chapterLabel }}</text>
+			<!-- 上下滚动模式：整章连续滚动（滚轮/触摸拖拽，滚动多少显示多少） -->
+			<scroll-view
+					v-if="pageTurn === '滚动'"
+					class="scroll-mode"
+					direction="vertical"
+					:show-scrollbar="false"
+					:scroll-top="scrollModeTop"
+					:scroll-into-view="scrollIntoView"
+					@scroll="onScrollModeScroll"
+					@scrolltolower="onScrollToLower"
+					@scrolltoupper="onScrollToUpper"
+				>
+					<view class="scroll-mode-inner">
+						<!-- 章前间距锚点：前插上一章后 scroll-into-view 锚定此锚点，视口完整呈现「上一章尾部 → 间距 → 标题」 -->
+						<view
+							v-for="(cid, ci) in scrollChapters"
+							:key="cid"
+							class="scroll-chapter"
+							:id="'scroll-ch-' + cid"
+						>
+							<view :id="'scroll-gap-' + cid" class="scroll-chapter-anchor" :style="ci > 0 ? 'height:140rpx' : ''"></view>
+							<view class="chapter-header">
+								<view class="chapter-label-row">
+									<view class="chapter-label-dot"></view>
+									<text class="chapter-label" :style="'color:' + labelColor">{{ chapters[cid].label }}</text>
+								</view>
+								<text class="chapter-title" :style="'color:' + titleColor">{{ chapters[cid].contentTitle }}</text>
+								<view class="chapter-divider"></view>
+							</view>
+							<view class="novel-body" :style="'font-size:' + fontSize + 'px;color:' + bodyColor + ';font-family:' + fontFamily">
+								<view
+									v-for="(item, vi) in chapterParagraphItems(cid)"
+									:key="cid + '-' + item.origin"
+									class="novel-paragraph"
+									@longpress="onLongPress(item.origin)"
+								>
+									<text class="novel-text">
+										<text v-if="item.underlined" class="para-underlined">{{ item.text }}</text>
+										<text v-else-if="selectedIdx === item.origin && currentChapterId === cid">
+											<text>{{ selBefore }}</text>
+											<text class="para-highlight">{{ selSelected }}</text>
+											<text>{{ selAfter }}</text>
+										</text>
+										<text v-else>{{ item.text }}</text>
+									</text>
+								</view>
+							</view>
+						</view>
 					</view>
-					<text class="chapter-title" :style="'color:' + titleColor">{{ contentTitle }}</text>
-					<view class="chapter-divider"></view>
+				</scroll-view>
+			<!-- 分页模式：双层页面翻页（仿真/覆盖/平移） -->
+			<view v-else class="page-stack">
+				<!-- 当前页层 -->
+				<view class="page-layer" :class="flipSettling ? 'page-layer-settle' : ''" :style="currentLayerStyle">
+					<view class="content-inner">
+						<view v-if="pageIndex === 0" class="chapter-header" :style="paragraphCurlStyle(0, curlTotal)">
+							<view class="chapter-label-row">
+								<view class="chapter-label-dot"></view>
+								<text class="chapter-label" :style="'color:' + labelColor">{{ chapterLabel }}</text>
+							</view>
+							<text class="chapter-title" :style="'color:' + titleColor">{{ contentTitle }}</text>
+							<view class="chapter-divider"></view>
+						</view>
+						<view class="novel-body" :style="'font-size:' + fontSize + 'px;color:' + bodyColor + ';font-family:' + fontFamily">
+							<view
+								v-for="(item, vi) in currentPageItems"
+								:key="item.origin"
+								class="novel-paragraph"
+								:style="paragraphCurlStyle((pageIndex === 0 ? 1 : 0) + vi, curlTotal)"
+								@longpress="onLongPress(item.origin)"
+							>
+								<text class="novel-text">
+									<text v-if="item.underlined" class="para-underlined">{{ item.text }}</text>
+									<text v-else-if="selectedIdx === item.origin">
+										<text>{{ selBefore }}</text>
+										<text class="para-highlight">{{ selSelected }}</text>
+										<text>{{ selAfter }}</text>
+									</text>
+									<text v-else>{{ item.text }}</text>
+								</text>
+							</view>
+						</view>
+					</view>
+					<view v-if="pageTurn === '仿真' && flipDir == -1 && flipOffset > 0" class="page-layer-shadow"></view>
 				</view>
-				<!-- 正文段落（Stitch: 19px、行距 1.95、首行缩进 2em、两端对齐；长按划词） -->
-				<view class="novel-body" :style="'font-size:' + fontSize + 'px;color:' + bodyColor">
-					<view
-						v-for="(item, vi) in currentPageItems"
-						:key="item.origin"
-						class="novel-paragraph"
-						@longpress="onLongPress(item.origin)"
-					>
-						<text class="novel-text">
-							<text v-if="item.underlined" class="para-underlined">{{ item.text }}</text>
-							<text v-else-if="selectedIdx === item.origin">
-								<text>{{ selBefore }}</text>
-								<text class="para-highlight">{{ selSelected }}</text>
-								<text>{{ selAfter }}</text>
-							</text>
-							<text v-else>{{ item.text }}</text>
-						</text>
+				<!-- 目标页层（跟手翻页时从页外滑入） -->
+				<view v-if="flipTargetIndex >= 0" class="page-layer" :style="targetLayerStyle">
+						<view v-if="pageTurn === '仿真' && flipDir == 1 && flipOffset > 0" class="page-curl-shadow" :style="curlShadowStyle"></view>
+						<view class="content-inner">
+						<view v-if="flipTargetIndex === 0" class="chapter-header">
+							<view class="chapter-label-row">
+								<view class="chapter-label-dot"></view>
+								<text class="chapter-label" :style="'color:' + labelColor">{{ chapterLabel }}</text>
+							</view>
+							<text class="chapter-title" :style="'color:' + titleColor">{{ contentTitle }}</text>
+							<view class="chapter-divider"></view>
+						</view>
+						<view class="novel-body" :style="'font-size:' + fontSize + 'px;color:' + bodyColor + ';font-family:' + fontFamily">
+							<view
+								v-for="(item, vi) in flipTargetItems"
+								:key="item.origin"
+								class="novel-paragraph"
+							>
+								<text class="novel-text">{{ item.text }}</text>
+							</view>
+						</view>
 					</view>
+					<view v-if="pageTurn === '仿真' && flipDir == 1" class="page-layer-shadow"></view>
 				</view>
 			</view>
 			<!-- 底部进度（Stitch: 时间 + 章节进度 + 百分比标签） -->
@@ -55,7 +135,7 @@
 
 		<!-- 划词气泡（Stitch: 黑底圆角 12px，复制/写想法/划线竖排图标+文字，底部三角指向选区） -->
 		<view v-if="selectedIdx >= 0" class="selection-popover" @click="clearSelection">
-			<view class="popover-body">
+			<view class="popover-body" :style="'background-color:' + popoverBg">
 				<view class="popover-btn" @click="onPopoverAction('copy')">
 					<image class="popover-icon" src="/static/icons/popover-copy.svg" />
 					<text class="popover-text">复制</text>
@@ -90,12 +170,56 @@
 			</view>
 		</view>
 
-		<!-- 底部控制面板（Stitch: 设置面板 + 听书悬浮球 + 三项导航，呼出态从底部滑入） -->
+		<!-- 底部控制面板（Stitch: 设置面板 + 听书悬浮球 + 三项导航，呼出态从底部滑入；抽屉打开时保持显示，三控制项不随子项变化） -->
 		<view
 			class="menu-bottom"
-			:class="menuVisible ? '' : 'menu-bottom-hidden'"
-			:style="'background-color:' + menuBottomBg + ';border-color:' + menuBorderColor"
+			:class="menuVisible || drawerOpen ? '' : 'menu-bottom-hidden'"
+			:style="'background-color:' + menuBottomBg + ';border-color:' + menuBorderColor + ';box-shadow:' + panelShadow"
 		>
+			<!-- 目录抽屉（与设置面板一致：作为控制栏内容块向上弹出，与设置面板互斥） -->
+			<view v-if="drawerOpen" class="drawer-panel" :style="'height:' + drawerPanelHeight + 'px'">
+					<view class="settings-grip-row">
+						<view class="settings-grip"></view>
+					</view>
+					<view class="drawer-header">
+					<view :class="drawerTab === 'catalog' ? 'drawer-tab-active' : 'drawer-tab-plain'" @click="switchDrawerTab('catalog')">
+						<text :class="drawerTab === 'catalog' ? 'drawer-tab-title' : 'drawer-tab-plain'">目录</text>
+						<text v-if="drawerTab === 'catalog'" class="drawer-tab-sort" @click="onSortTap($event)">{{ orderDesc ? '↓↑' : '⇅' }}</text>
+					</view>
+					<text class="drawer-tab-plain" @click="showToast('暂无想法与划线记录')">想法/划线</text>
+					<view :class="drawerTab === 'bookmark' ? 'drawer-tab-active' : 'drawer-tab-plain'" @click="switchDrawerTab('bookmark')">
+						<text :class="drawerTab === 'bookmark' ? 'drawer-tab-title' : 'drawer-tab-plain'">书签</text>
+					</view>
+				</view>
+				<scroll-view class="drawer-list" direction="vertical" :show-scrollbar="false">
+					<!-- 目录页 -->
+					<template v-if="drawerTab === 'catalog'">
+						<view
+							v-for="(ch, ci) in displayChapters"
+							:key="ch.id"
+							class="chapter-item"
+							@click="selectChapter(ch)"
+						>
+							<text class="chapter-item-text" :class="ch.active ? 'chapter-item-text-active' : ''" :style="'color:' + (ch.active ? activeBlue : chapterTextColor)">{{ ch.title }}</text>
+						</view>
+					</template>
+					<!-- 书签页 -->
+					<template v-else>
+						<view v-if="bookmarks.length == 0" class="bookmark-empty">
+							<text class="bookmark-empty-text" :style="'color:' + mutedColor">书签列表为空，正文下滑即可添加书签</text>
+						</view>
+						<view
+							v-for="(bm, bi) in bookmarks"
+							:key="bi"
+							class="bookmark-item"
+							@click="goToBookmark(bm)"
+						>
+							<image class="bookmark-item-icon" :src="themeIcon('reader-bookmark-active')" />
+							<text class="bookmark-item-text" :style="'color:' + chapterTextColor">{{ bookmarkLabel(bm) }}</text>
+						</view>
+					</template>
+				</scroll-view>
+			</view>
 			<!-- 设置面板（Stitch: 字号/背景/翻页，展开时隐藏顶栏与听书球） -->
 			<view v-if="settingsOpen" class="settings-panel">
 				<view class="settings-grip-row">
@@ -105,17 +229,39 @@
 					<text class="settings-label" :style="'color:' + mutedColor">字号</text>
 					<view class="settings-row-body">
 						<view class="stepper-group">
-							<view class="stepper-btn" @click="changeFontSize(-1)">
-								<text class="stepper-text" :style="'color:' + titleColor">A⁻</text>
+							<view class="stepper-btn" :style="'background-color:' + controlBg + ';border-color:' + controlBorder" @click="changeFontSize(-1)">
+								<text class="stepper-text" :style="'color:' + controlText">A⁻</text>
 							</view>
 							<text class="stepper-val" :style="'color:' + titleColor">{{ fontSize }}</text>
-							<view class="stepper-btn" @click="changeFontSize(1)">
-								<text class="stepper-text" :style="'color:' + titleColor">A⁺</text>
+							<view class="stepper-btn" :style="'background-color:' + controlBg + ';border-color:' + controlBorder" @click="changeFontSize(1)">
+								<text class="stepper-text" :style="'color:' + controlText">A⁺</text>
 							</view>
 						</view>
-						<view class="font-btn" @click="showToast('系统字体')">
-							<text class="font-btn-text" :style="'color:' + titleColor">思源黑体</text>
-							<text class="font-btn-arrow" :style="'color:' + mutedColor">&gt;</text>
+						<view class="font-btn" :style="'background-color:' + controlBg + ';border-color:' + controlBorder" @click="toggleFontList">
+							<text class="font-btn-text" :style="'color:' + controlText">{{ fontListOpen ? '请选择' : currentFontLabel }}</text>
+						</view>
+					</view>
+				</view>
+				<!-- 字体选择列表（选择后点保存本地持久化） -->
+				<view v-if="fontListOpen" class="font-select">
+					<view class="font-select-list">
+						<view
+							v-for="(f, fi) in fontOptions"
+							:key="f.key"
+							class="page-turn-btn font-option"
+							:class="pendingFontKey === f.key ? 'page-turn-active' : 'page-turn-idle'"
+							:style="pendingFontKey === f.key ? '' : 'background-color:' + controlBg + ';border-color:' + controlBorder"
+							@click="selectFont(f.key)"
+						>
+							<text class="page-turn-text" :class="pendingFontKey === f.key ? 'page-turn-text-active' : ''" :style="pendingFontKey === f.key ? '' : 'color:' + controlText">{{ f.label }}</text>
+						</view>
+					</view>
+					<view class="font-save-row">
+						<view class="font-cancel-btn" @click="cancelFontSelect">
+							<text class="font-cancel-btn-text">取消</text>
+						</view>
+						<view class="font-save-btn" :style="nightMode ? 'background-color:#f3f4f6' : ''" @click="saveFont">
+							<text class="font-save-btn-text" :style="nightMode ? 'color:#0e0f0c' : ''">保存</text>
 						</view>
 					</view>
 				</view>
@@ -144,22 +290,23 @@
 							:key="mi"
 							class="page-turn-btn"
 							:class="pageTurn === m ? 'page-turn-active' : 'page-turn-idle'"
+							:style="pageTurn === m ? '' : 'background-color:' + controlBg + ';border-color:' + controlBorder"
 							@click="selectPageTurn(m)"
 						>
-							<text class="page-turn-text" :class="pageTurn === m ? 'page-turn-text-active' : ''">{{ m }}</text>
+							<text class="page-turn-text" :class="pageTurn === m ? 'page-turn-text-active' : ''" :style="pageTurn === m ? '' : 'color:' + controlText">{{ m }}</text>
 						</view>
 					</view>
 				</view>
 			</view>
-			<!-- 听书悬浮球（Stitch: 黑底 64px 圆，"听" 28px/900，设置展开时隐藏） -->
-			<view v-if="!settingsOpen" class="listen-wrap">
+			<!-- 听书悬浮球（Stitch: 黑底 64px 圆，"听" 28px/900，设置/抽屉展开时隐藏） -->
+			<view v-if="!settingsOpen && !drawerOpen" class="listen-wrap">
 				<view class="listen-btn" @click="showToast('听书模式即将上线')">
 					<text class="listen-text">听</text>
 				</view>
 			</view>
 			<!-- 底部三项导航（Stitch: 目录/夜间/设置） -->
 			<view class="bottom-nav">
-				<view class="bottom-nav-btn" @click="openDrawer">
+				<view class="bottom-nav-btn" @click="toggleDrawer">
 					<image class="bottom-nav-icon" :src="themeIcon('reader-catalog')" />
 					<text class="bottom-nav-text" :style="'color:' + titleColor">目录</text>
 				</view>
@@ -174,87 +321,22 @@
 			</view>
 		</view>
 
-		<!-- 目录抽屉遮罩（Stitch: 透明黑渐显） -->
-		<view v-if="drawerOpen" class="drawer-backdrop" @click="closeDrawer"></view>
-		<!-- 目录抽屉（Stitch: 顶部下滑 0.32s 弹性曲线，毛玻璃背景，正/倒序切换） -->
-		<view
-			class="chapter-drawer"
-			:class="drawerOpen ? 'drawer-open' : 'drawer-closed'"
-			:style="'background-color:' + drawerBg"
-		>
-			<view class="drawer-header">
-				<view :class="drawerTab === 'catalog' ? 'drawer-tab-active' : 'drawer-tab-plain'" @click="switchDrawerTab('catalog')">
-					<text :class="drawerTab === 'catalog' ? 'drawer-tab-title' : 'drawer-tab-plain'">目录</text>
-					<text v-if="drawerTab === 'catalog'" class="drawer-tab-sort" @click="onSortTap($event)">{{ orderDesc ? '↓↑' : '⇅' }}</text>
-				</view>
-				<text class="drawer-tab-plain" @click="showToast('暂无想法与划线记录')">想法/划线</text>
-				<view :class="drawerTab === 'bookmark' ? 'drawer-tab-active' : 'drawer-tab-plain'" @click="switchDrawerTab('bookmark')">
-					<text :class="drawerTab === 'bookmark' ? 'drawer-tab-title' : 'drawer-tab-plain'">书签</text>
-				</view>
-			</view>
-			<scroll-view class="drawer-list" direction="vertical" :show-scrollbar="false">
-				<!-- 目录页 -->
-				<template v-if="drawerTab === 'catalog'">
-					<view
-						v-for="(ch, ci) in displayChapters"
-						:key="ch.id"
-						class="chapter-item"
-						@click="selectChapter(ch)"
-					>
-						<text class="chapter-item-text" :class="ch.active ? 'chapter-item-text-active' : ''" :style="'color:' + (ch.active ? activeBlue : chapterTextColor)">{{ ch.title }}</text>
-					</view>
-				</template>
-				<!-- 书签页 -->
-				<template v-else>
-					<view v-if="bookmarks.length == 0" class="bookmark-empty">
-						<text class="bookmark-empty-text" :style="'color:' + mutedColor">书签列表为空，正文下滑即可添加书签</text>
-					</view>
-					<view
-						v-for="(bm, bi) in bookmarks"
-						:key="bi"
-						class="bookmark-item"
-						@click="goToBookmark(bm)"
-					>
-						<image class="bookmark-item-icon" :src="themeIcon('reader-bookmark-active')" />
-						<text class="bookmark-item-text" :style="'color:' + chapterTextColor">{{ bookmarkLabel(bm) }}</text>
-					</view>
-				</template>
-			</scroll-view>
-			<view class="drawer-bottom">
-				<view class="bottom-nav-btn" @click="closeDrawer">
-					<image class="bottom-nav-icon" :src="drawerCatalogIcon" />
-					<text class="bottom-nav-text drawer-nav-text-active">目录</text>
-				</view>
-				<view class="bottom-nav-btn" @click="toggleNightMode">
-					<image class="bottom-nav-icon" :src="nightMode ? '/static/icons/reader-sun.svg' : themeIcon('reader-moon')" />
-					<text class="bottom-nav-text" :style="'color:' + titleColor">{{ nightMode ? '日间' : '夜间' }}</text>
-				</view>
-				<view class="bottom-nav-btn" @click="closeDrawerAndOpenSettings">
-					<image class="bottom-nav-icon" :src="themeIcon('reader-settings')" />
-					<text class="bottom-nav-text" :style="'color:' + titleColor">设置</text>
-				</view>
-			</view>
-		</view>
-
 		<!-- 书签下拉/移除遮罩（顶部半透明提示条：高度即内容位移量，填补内容下移留出的空白；书签图标在遮罩内右上角随动作变化） -->
 			<view
 				v-if="pullState != 'none' || pullSettling"
 				class="bookmark-mask"
 				:class="pullSettling ? 'bookmark-mask-settle' : ''"
-				:style="'height:' + maskHeight + 'px'"
+				:style="'height:' + maskHeight + 'px;background-color:' + maskBg"
 			>
-				<image
-					class="bookmark-mask-icon"
-					:src="pullState == 'removing' ? themeIcon('reader-bookmark-active') : themeIcon('reader-bookmark')"
-				/>
+				<image class="bookmark-mask-icon" :src="maskIconSrc" />
 				<view class="bookmark-mask-row">
-					<text class="bookmark-mask-text">{{ maskText }}</text>
+					<text class="bookmark-mask-text" :style="'color:' + maskTextColor">{{ maskText }}</text>
 				</view>
 			</view>
 
-		<!-- 自定义 Toast（Stitch: 顶部 96px 黑底圆角胶囊，1.5s 自动消失） -->
+		<!-- 全局提示（页面正中卡片弹窗，1.5s 自动消失；夜间提亮卡片底色） -->
 		<view v-if="toastVisible" class="reader-toast">
-			<text class="reader-toast-text">{{ toastMsg }}</text>
+			<text class="reader-toast-text" :style="nightMode ? 'background-color:rgba(44, 44, 44, 0.98)' : ''">{{ toastMsg }}</text>
 		</view>
 	</view>
 </template>
@@ -371,14 +453,230 @@
 		return pages
 	})
 
-	/** 当前页渲染项（随 pageIndex 变化） */
-	const currentPageItems = computed(() : PageItem[] => {
+	/** 指定页渲染项 */
+	function pageItemsAt(pi : number) : PageItem[] {
 		const paras = paragraphs.value
 		const breaks = pageBreaks.value
-		const page = pageIndex.value < breaks.length ? breaks[pageIndex.value] : breaks[0]
+		const page = pi >= 0 && pi < breaks.length ? breaks[pi] : []
 		return page.map((i) : PageItem => {
 			return { origin: i, text: paras[i].text, underlined: paras[i].underlined } as PageItem
 		})
+	}
+
+	/** 当前页渲染项（随 pageIndex 变化） */
+	const currentPageItems = computed(() : PageItem[] => {
+		return pageItemsAt(pageIndex.value)
+	})
+
+	/** 上下滚动模式：整章段落连续渲染（滚动多少显示多少） */
+	const allParagraphItems = computed(() : PageItem[] => {
+		return paragraphs.value.map((p, i) : PageItem => {
+			return { origin: i, text: p.text, underlined: p.underlined } as PageItem
+		})
+	})
+
+	/** 滚动模式程序滚动位置（绑 :scroll-top，仅切章复位/置底时更新，避免与原生滚动形成反馈循环） */
+	const scrollModeTop = ref(0)
+	/** 滚动模式实际阅读位置（@scroll 实时记录，用于进度持久化） */
+	const scrollModePos = ref(0)
+	/** 滚动模式已加载的章节 id 序列（滚到底自动追加下一章，滚到顶自动前插上一章） */
+	const scrollChapters = ref<number[]>([currentChapterId.value])
+	/** 滚动锚点：前插上一章后定位回原首章顶部，视口保持不跳 */
+	const scrollIntoView = ref('')
+
+	/** ===== 阅读进度（章节/页码/滚动位置）本地持久化 ===== */
+	type ReaderProgress = {
+		chapterId: number
+		pageIndex: number
+		scrollTop: number
+	}
+
+	const STORAGE_PROGRESS = 'reader_progress'
+
+	function saveProgress() : void {
+		const p = { chapterId: currentChapterId.value, pageIndex: pageIndex.value, scrollTop: scrollModePos.value } as ReaderProgress
+		uni.setStorageSync(STORAGE_PROGRESS, JSON.stringify(p))
+	}
+
+	/** 滚动模式实时滚动位置（仅内存记录，随 onHide/onUnload 持久化） */
+	function onScrollModeScroll(e : UniScrollEvent) : void {
+		scrollModePos.value = e.detail.scrollTop
+	}
+
+	/** 启动恢复上次阅读进度（章节/页码/滚动位置） */
+	{
+		const stored : any = uni.getStorageSync(STORAGE_PROGRESS)
+		if (typeof stored == 'string' && (stored as string).length > 0) {
+			const p = JSON.parse<ReaderProgress>(stored as string)
+			if (p != null && p.chapterId >= 0 && p.chapterId < chapters.value.length) {
+				currentChapterId.value = p.chapterId
+				if (p.pageIndex >= 0 && p.pageIndex < pageBreaks.value.length) {
+					pageIndex.value = p.pageIndex
+				}
+				scrollChapters.value = [p.chapterId]
+				scrollModeTop.value = p.scrollTop > 0 ? p.scrollTop : 0
+				scrollModePos.value = scrollModeTop.value
+			}
+		}
+	}
+
+	onUnload(() => {
+		saveProgress()
+	})
+
+	onHide(() => {
+		saveProgress()
+	})
+
+	/** 滚动到底：自动加载下一章；末章给出到底提示 */
+	function onScrollToLower() : void {
+		const last = scrollChapters.value[scrollChapters.value.length - 1]
+		if (last < chapters.value.length - 1) {
+			const next = last + 1
+			scrollChapters.value.push(next)
+			currentChapterId.value = next
+			saveProgress()
+		} else {
+			showToast('已经是最后一章')
+		}
+	}
+
+	/** 滚动到顶：自动前插上一章；首章给出到顶提示 */
+	function onScrollToUpper() : void {
+		const first = scrollChapters.value[0]
+		if (first > 0) {
+			scrollIntoView.value = ''
+			scrollChapters.value.unshift(first - 1)
+			currentChapterId.value = first - 1
+			saveProgress()
+			setTimeout(() => {
+				scrollIntoView.value = 'scroll-ch-' + first
+			}, 50)
+		} else {
+			showToast('已经是第一章')
+		}
+	}
+
+	/** 指定章的段落渲染项（key 带章 id 防止多章同段落索引冲突） */
+	function chapterParagraphItems(cid : number) : PageItem[] {
+		return paragraphs.value.map((p, i) : PageItem => {
+			return { origin: i, text: p.text, underlined: p.underlined } as PageItem
+		})
+	}
+
+	/** ===== 翻页动画（仿真/覆盖/平移/上下：跟手位移 + 松手落定/回弹） ===== */
+	const flipActive = ref(false)
+	/** 翻页方向：1 下一页 / -1 上一页 */
+	const flipDir = ref(0)
+	/** 跟手位移（px，0 至页宽/页高） */
+	const flipOffset = ref(0)
+	const flipSettling = ref(false)
+	/** 仿真卷曲旋转轴纵向位置（触点 Y 百分比） */
+	const curlOriginY = ref(100)
+
+	/** 跟手目标页索引（仅章内有效；越章界为 -1，目标层不渲染，松手走 flipPage 边界逻辑） */
+	const flipTargetIndex = computed(() : number => {
+		if (!flipActive.value || flipDir.value == 0) {
+			return -1
+		}
+		const t = pageIndex.value + flipDir.value
+		if (t < 0 || t > pageBreaks.value.length - 1) {
+			return -1
+		}
+		return t
+	})
+
+	const flipTargetItems = computed(() : PageItem[] => {
+		const t = flipTargetIndex.value
+		if (t < 0) {
+			return []
+		}
+		return pageItemsAt(t)
+	})
+
+	/** 当前页层样式：按翻页模式产生位移/卷曲与层级（跟手与回弹共用） */
+	const currentLayerStyle = computed(() : string => {
+		if (!flipActive.value && !flipSettling.value) {
+			return ''
+		}
+		const o = flipOffset.value
+		const d = flipDir.value
+		const mode = pageTurn.value
+		if (mode == '平移') {
+			return 'transform:translateX(' + (d * o * -1) + 'px);z-index:1'
+		}
+		if (mode == '仿真') {
+			if (d == 1) {
+				// 前翻：整层静置（波次卷曲由页内各段落分别变换），左缘投影随卷曲层
+				return 'z-index:2;box-shadow:-10px 0 30px rgba(0, 0, 0, 0.3)'
+			}
+			if (d == -1) {
+				// 回翻：当前页向右滑出露出下层旧页
+				return 'transform:translateX(' + o + 'px);z-index:2'
+			}
+			return 'z-index:1'
+		}
+		if (mode == '覆盖') {
+			if (d == -1) {
+				return 'transform:translateX(' + o + 'px);z-index:2'
+			}
+			return 'z-index:1'
+		}
+		return ''
+	})
+
+	/** 目标页层样式：按翻页模式从页外滑入或静置下层 */
+	const targetLayerStyle = computed(() : string => {
+		if (!flipActive.value || flipDir.value == 0) {
+			return ''
+		}
+		const d = flipDir.value
+		const mode = pageTurn.value
+		if (mode == '平移') {
+			const o = flipOffset.value
+			return 'transform:translateX(' + (d * (pageW.value - o)) + 'px);z-index:2'
+		}
+		if (mode == '覆盖') {
+			if (d == 1) {
+				const o = flipOffset.value
+				// 前翻：目标页自右侧滑入覆盖
+				return 'transform:translateX(' + (pageW.value - o) + 'px);z-index:2'
+			}
+			return 'z-index:1'
+		}
+		if (mode == '仿真') {
+			// 仿真：目标页静置下层，被卷起的当前页覆盖其上
+			return 'z-index:1'
+		}
+		return ''
+	})
+
+	/** 当前页卷曲波次行数（章节头 + 段落数） */
+	const curlTotal = computed(() : number => {
+		return currentPageItems.value.length + (pageIndex.value === 0 ? 1 : 0)
+	})
+
+	/** 仿真卷曲：段落波次变换（页尾先卷起，向前传播；j=0 为章节头） */
+	function paragraphCurlStyle(j : number, total : number) : string {
+		if (pageTurn.value != '仿真' || flipDir.value != 1 || !flipActive.value) {
+			return ''
+		}
+		const p = pageW.value > 0 ? flipOffset.value / pageW.value : 0
+		const pj = Math.max(0, Math.min(1, p * total - (total - 1 - j)))
+		if (pj <= 0) {
+			return ''
+		}
+		return 'transform:translateX(' + (-60 * pj) + 'px);opacity:' + (1 - 0.4 * pj).toFixed(2)
+	}
+
+	/** 仿真投影样式：跟随卷曲前缘落在下层页面上 */
+	const curlShadowStyle = computed(() : string => {
+		if (pageTurn.value != '仿真' || flipDir.value != 1) {
+			return ''
+		}
+		const p = pageW.value > 0 ? flipOffset.value / pageW.value : 0
+		const frontX = pageW.value * (1 - p)
+		return 'left:' + Math.max(0, frontX - 60) + 'px;opacity:' + Math.min(1, p * 2).toFixed(2)
 	})
 
 	/** 主题状态（色值唯一定义于 utils/theme.uts：日间=画布令牌，夜间/纸张为阅读专用主题） */
@@ -390,20 +688,32 @@
 	const labelColor = ref(READER_THEME_LIGHT.labelColor)
 	const mutedColor = ref(READER_THEME_LIGHT.mutedColor)
 	const chapterTextColor = ref(READER_THEME_LIGHT.chapterTextColor)
-	const drawerBg = ref(READER_THEME_LIGHT.drawerBg)
 	const menuTopBg = ref(READER_THEME_LIGHT.menuTopBg)
 	const menuBottomBg = ref(READER_THEME_LIGHT.menuBottomBg)
 	const menuBorderColor = ref(READER_THEME_LIGHT.menuBorderColor)
 	const activeBlue = ref(READER_THEME_LIGHT.activeBlue)
+	/** 书签遮罩背景与文字色（夜间浅白遮罩 + 深色文字，与暗底视觉区分） */
+	const maskBg = ref(READER_THEME_LIGHT.maskBg)
+	const maskTextColor = ref(READER_THEME_LIGHT.maskTextColor)
+	/** 划词气泡背景（夜间提亮与暗底区分） */
+	const popoverBg = ref(READER_THEME_LIGHT.popoverBg)
+	/** 设置面板控件色（夜间灰底白字突出，日间白底墨字） */
+	const controlBg = ref('#ffffff')
+	const controlBorder = ref('#e9e9e6')
+	const controlText = ref('#0e0f0c')
+	/** 底部控制栏投影（夜间切换白色微光） */
+	const panelShadow = ref(READER_THEME_LIGHT.panelShadow)
 
 	/** 阅读设置（Stitch: 字号 12-36、背景色板、翻页模式） */
-	const fontSize = ref(19)
+	const fontSize = ref(18)
 	const selectedBg = ref(READER_THEME_LIGHT.readerBg)
-	const pageTurnModes = ref<string[]>(['仿真', '覆盖', '平移', '上下'])
+	const pageTurnModes = ref<string[]>(['仿真', '覆盖', '平移', '滚动'])
 	const pageTurn = ref('仿真')
+	/** 当前主题 key：light / night / paper */
+	const themeKey = ref('light')
 
-	/** 浮层状态（Stitch: 菜单默认呼出，点击正文空白切换） */
-	const menuVisible = ref(true)
+	/** 浮层状态（进入阅读默认正文全屏，点击正文空白切换控制项显隐） */
+	const menuVisible = ref(false)
 	const settingsOpen = ref(false)
 	const drawerOpen = ref(false)
 	const orderDesc = ref(false)
@@ -413,11 +723,30 @@
 	/** 顶部导航内容行（px）：与小程序胶囊同行对齐（同子页 BackButton 口径：状态栏高度起、行高 40px） */
 	const navTop = ref(44)
 	const navHeight = ref(40)
+	/** 目录抽屉高度（px）：抽屉顶对齐小程序控制项（胶囊）下方 8px，并扣除控制行自身高度（152rpx） */
+	const drawerPanelHeight = ref(500)
+	/** 翻页行程：页面内容宽/高（px） */
+	const pageW = ref(0)
+	const pageH = ref(0)
 	{
 		const win = uni.getWindowInfo()
 		if (win.statusBarHeight > 0) {
 			navTop.value = win.statusBarHeight
 		}
+		pageW.value = win.windowWidth - uni.upx2px(124)
+		pageH.value = win.windowHeight
+		const navH = uni.upx2px(152)
+		// #ifdef MP-WEIXIN
+		const capsule = uni.getMenuButtonBoundingClientRect()
+		if (capsule.height > 0) {
+			drawerPanelHeight.value = win.windowHeight - (capsule.top + capsule.height + 8) - navH
+		} else {
+			drawerPanelHeight.value = win.windowHeight - (navTop.value + navHeight.value + 8) - navH
+		}
+		// #endif
+		// #ifndef MP-WEIXIN
+		drawerPanelHeight.value = win.windowHeight - (navTop.value + navHeight.value + 8) - navH
+		// #endif
 	}
 
 	/** ===== 书签（正文下滑切换：无书签时添加、有书签时删除；本地持久化） ===== */
@@ -453,8 +782,11 @@
 		return -1
 	}
 
-	/** 书签标记（右上角旗帜）是否展示：当前章节页已有书签 */
+	/** 书签标记（右上角旗帜）是否展示：滚动模式无页码概念，仅分页模式展示 */
 	const bookmarkFlagVisible = computed(() : boolean => {
+		if (pageTurn.value == '滚动') {
+			return false
+		}
 		return indexOfBookmark() >= 0
 	})
 
@@ -476,6 +808,91 @@
 		}
 		return '↓ 下拉添加书签'
 	})
+
+	/** 遮罩内书签图标：夜间浅白遮罩上用墨色描边的日间版图标保证对比，其余用主题变体 */
+	const maskIconSrc = computed(() : string => {
+		const name = pullState.value == 'removing' ? 'reader-bookmark-active' : 'reader-bookmark'
+		return nightMode.value ? '/static/icons/' + name + '.svg' : themeIcon(name)
+	})
+
+	/** ===== 正文字体（默认思源黑体，未安装时经回退链落到系统黑体；选择后本地持久化） ===== */
+	type FontOption = {
+		key: string
+		label: string
+		/** CSS 字体栈：缺失字体自动回退到后续项，末位 sans-serif 即系统黑体 */
+		family: string
+	}
+
+	const STORAGE_FONT = 'reader_font'
+
+	const fontOptions : FontOption[] = [
+		{ key: 'sourcehan', label: '思源黑体', family: "'Source Han Sans SC', 'Noto Sans SC', sans-serif" } as FontOption,
+		{ key: 'system', label: '系统黑体', family: 'sans-serif' } as FontOption,
+		{ key: 'songti', label: '宋体', family: "'Source Han Serif SC', 'SimSun', serif" } as FontOption,
+		{ key: 'kaiti', label: '楷体', family: 'KaiTi, STKaiti, serif' } as FontOption
+	]
+
+	const fontKey = ref('sourcehan')
+	/** 字体列表中的待保存选择 */
+	const pendingFontKey = ref('sourcehan')
+	const fontListOpen = ref(false)
+
+	{
+		const stored : any = uni.getStorageSync(STORAGE_FONT)
+		if (typeof stored == 'string') {
+			const key = stored as string
+			for (let i = 0; i < fontOptions.length; i++) {
+				if (fontOptions[i].key == key) {
+					fontKey.value = key
+					pendingFontKey.value = key
+					break
+				}
+			}
+		}
+	}
+
+	function fontOptionOf(key : string) : FontOption {
+		for (let i = 0; i < fontOptions.length; i++) {
+			if (fontOptions[i].key == key) {
+				return fontOptions[i]
+			}
+		}
+		return fontOptions[0]
+	}
+
+	/** 当前生效字体名（字体按钮展示） */
+	const currentFontLabel = computed(() : string => {
+		return fontOptionOf(fontKey.value).label
+	})
+
+	/** 当前生效字体栈（应用至正文） */
+	const fontFamily = computed(() : string => {
+		return fontOptionOf(fontKey.value).family
+	})
+
+	/** 展开/收起字体列表（展开时待保存选择重置为当前生效值） */
+	function toggleFontList() : void {
+		fontListOpen.value = !fontListOpen.value
+		pendingFontKey.value = fontKey.value
+	}
+
+	function selectFont(key : string) : void {
+		pendingFontKey.value = key
+	}
+
+	/** 保存字体选择并应用 */
+	function saveFont() : void {
+		fontKey.value = pendingFontKey.value
+		uni.setStorageSync(STORAGE_FONT, fontKey.value)
+		fontListOpen.value = false
+		showToast('字体已保存')
+	}
+
+	/** 取消字体选择：放弃待保存选择并收起列表 */
+	function cancelFontSelect() : void {
+		pendingFontKey.value = fontKey.value
+		fontListOpen.value = false
+	}
 
 	function saveBookmarks() : void {
 		uni.setStorageSync(STORAGE_BOOKMARKS, JSON.stringify(bookmarks.value))
@@ -501,13 +918,14 @@
 	/** 书签条目文案（章节标签 · 第 N 页，页码 1-based 展示） */
 	function bookmarkLabel(bm : Bookmark) : string {
 		const ch = bm.chapterId >= 0 && bm.chapterId < chapters.value.length ? chapters.value[bm.chapterId] : chapters.value[0]
-		return ch.label + ' · 第 ' + (bm.pageIndex + 1) + ' 页'
+		return ch.title + ' · 第 ' + (bm.pageIndex + 1) + ' 页'
 	}
 
 	/** 跳转到书签所在章节页并关闭抽屉 */
 	function goToBookmark(bm : Bookmark) : void {
 		goToChapter(bm.chapterId, false)
 		pageIndex.value = bm.pageIndex
+		saveProgress()
 		drawerOpen.value = false
 	}
 
@@ -527,6 +945,25 @@
 	const selBefore = ref('')
 	const selSelected = ref('')
 	const selAfter = ref('')
+
+	/** 启动恢复本地设置（字号/翻页模式/主题） */
+	{
+		const stored : any = uni.getStorageSync(STORAGE_SETTINGS)
+		if (typeof stored == 'string' && (stored as string).length > 0) {
+			const s = JSON.parse<ReaderSettings>(stored as string)
+			if (s != null) {
+				if (s.fontSize >= 12 && s.fontSize <= 36) {
+					fontSize.value = s.fontSize
+				}
+				if (s.pageTurn == '仿真' || s.pageTurn == '覆盖' || s.pageTurn == '平移' || s.pageTurn == '滚动') {
+					pageTurn.value = s.pageTurn
+				}
+				if (s.theme == 'night' || s.theme == 'paper') {
+					applyReaderTheme(s.theme)
+				}
+			}
+		}
+	}
 
 	/** Toast（Stitch: 顶部 96px 黑底胶囊 1.5s 自动消失） */
 	const toastVisible = ref(false)
@@ -568,16 +1005,42 @@
 
 	function onContentTouchStart(e: UniTouchEvent) : void {
 		pullSettling.value = false
+		flipSettling.value = false
 		touchStartX = e.touches[0].clientX
 		touchStartY = e.touches[0].clientY
 	}
 
 	function onContentTouchMove(e: UniTouchEvent) : void {
-		if (e.touches.length == 0) {
+		if (e.touches.length == 0 || pageTurn.value == '滚动') {
+			// 上下滚动模式：滚动由 scroll-view 原生处理，不启用翻页/书签手势
 			return
 		}
 		const dx = e.touches[0].clientX - touchStartX
 		const dy = e.touches[0].clientY - touchStartY
+		// 翻页跟手：按模式取主轴（上下模式取纵向，其余取横向）
+		const verticalMode = pageTurn.value == '滚动'
+		const primary = verticalMode ? dy : dx
+		const secondary = verticalMode ? dx : dy
+		const gesture = Math.abs(primary) > 20 && Math.abs(primary) > Math.abs(secondary) * 1.5
+		if (gesture) {
+			const dir = primary < 0 ? 1 : -1
+			flipSettling.value = false
+			flipActive.value = true
+			flipDir.value = dir
+			// 翻页跟手开始：默认隐藏上下控制项（落定后保持正文全屏，点击正文重新呼出）
+			menuVisible.value = false
+			if (pageTurn.value == '仿真' && dir == 1 && !verticalMode) {
+				// 仿真前翻：卷曲进度与旋转轴跟随触点绝对位置（手指位置即卷曲位置）
+				const relX = e.touches[0].clientX - uni.upx2px(62)
+				flipOffset.value = Math.max(0, Math.min(pageW.value, pageW.value - relX))
+				curlOriginY.value = Math.max(20, Math.min(100, e.touches[0].clientY / pageH.value * 100))
+			} else {
+				// 回翻/其他模式：按手势位移映射
+				const span = verticalMode ? pageH.value : pageW.value
+				flipOffset.value = Math.min(Math.abs(primary), span)
+			}
+			return
+		}
 		// 无书签：下拉进入「添加」提示态；有书签：下拉进入「移除」提示态——位移均跟手（阻尼映射）
 		const vertical = dy > 40 && dy > Math.abs(dx) * 1.5
 		if (bookmarkFlagVisible.value) {
@@ -601,8 +1064,36 @@
 	}
 
 	function onContentTouchEnd(e: UniTouchEvent) : void {
+		if (pageTurn.value == '滚动') {
+			return
+		}
 		const dx = e.changedTouches[0].clientX - touchStartX
 		const dy = e.changedTouches[0].clientY - touchStartY
+		// 翻页跟手收尾：位移过阈值（或快速轻扫）落定翻页，否则回弹归位
+		if (flipActive.value) {
+			const done = flipOffset.value > pageW.value * 0.35 || Math.abs(dx) > 80
+			if (done) {
+				flipSettling.value = true
+				flipActive.value = false
+				const d = flipDir.value
+				flipDir.value = 0
+				flipOffset.value = 0
+				flipPage(d)
+				setTimeout(() => {
+					flipSettling.value = false
+				}, 300)
+			} else {
+				flipSettling.value = true
+				flipOffset.value = 0
+				setTimeout(() => {
+					flipSettling.value = false
+					flipActive.value = false
+					flipDir.value = 0
+				}, 300)
+			}
+			return
+		}
+		// 快速水平轻扫（未进入跟手态）：直接翻页
 		if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 2) {
 			flipPage(dx < 0 ? 1 : -1)
 			settlePull()
@@ -658,13 +1149,19 @@
 		}
 		pageIndex.value = next
 		clearSelection()
+		saveProgress()
 	}
 
-	/** 切换章节并定位页（进入新章默认首页，回退上一章定位末页） */
+	/** 切换章节并定位页（进入新章默认首页，回退上一章定位末页；滚动模式复位章节序列与滚动位置） */
 	function goToChapter(id: number, atLastPage: boolean) : void {
 		currentChapterId.value = id
 		pageIndex.value = atLastPage ? pageBreaks.value.length - 1 : 0
+		scrollChapters.value = [id]
+		scrollModeTop.value = atLastPage ? 999999 : 0
+		scrollModePos.value = scrollModeTop.value
+		scrollIntoView.value = ''
 		clearSelection()
+		saveProgress()
 	}
 
 	function showToast(msg: string) : void {
@@ -678,8 +1175,13 @@
 		}, 1500)
 	}
 
-	/** 点击正文空白（Stitch: 划词激活→清除；设置展开→收起；否则切换菜单显隐） */
+	/** 点击正文空白（Stitch: 抽屉打开→收起；划词激活→清除；设置展开→收起；否则切换菜单显隐） */
 	function onContentTap() : void {
+		if (drawerOpen.value) {
+			closeDrawer()
+			menuVisible.value = true
+			return
+		}
 		if (selectedIdx.value >= 0) {
 			clearSelection()
 			return
@@ -751,6 +1253,11 @@
 	/** 设置面板开关（Stitch: 展开时隐藏顶栏与听书球） */
 	function toggleSettings() : void {
 		settingsOpen.value = !settingsOpen.value
+		if (settingsOpen.value) {
+			// 与目录抽屉互斥：打开设置时收起抽屉并回到菜单呼出态（控制栏保留展示设置表单）
+			drawerOpen.value = false
+			menuVisible.value = true
+		}
 	}
 
 	function closeSettings() : void {
@@ -764,35 +1271,31 @@
 			return
 		}
 		fontSize.value = next
+		saveReaderSettings()
 	}
 
 	/** 背景色板切换（Stitch: 纯白/暖米黄，正文与标题色跟随；浮层重置为日间主题） */
-	function changeReaderBg(bg: string, text: string) : void {
-		selectedBg.value = bg
-		readerBg.value = bg
-		bodyColor.value = text
-		titleColor.value = text
-		labelColor.value = text
-		nightMode.value = false
-		mutedColor.value = READER_THEME_LIGHT.mutedColor
-		chapterTextColor.value = text
-		menuTopBg.value = READER_THEME_LIGHT.menuTopBg
-		menuBottomBg.value = READER_THEME_LIGHT.menuBottomBg
-		menuBorderColor.value = READER_THEME_LIGHT.menuBorderColor
-		drawerBg.value = READER_THEME_LIGHT.drawerBg
+	/** 本地设置（字号/翻页模式/主题）持久化 */
+	type ReaderSettings = {
+		fontSize: number
+		pageTurn: string
+		theme: string
 	}
 
-	/** 翻页模式选择（Stitch: 单选高亮 + toast） */
-	function selectPageTurn(mode: string) : void {
-		pageTurn.value = mode
-		showToast('已切换至【' + mode + '】模式')
-	}
+	const STORAGE_SETTINGS = 'reader_settings'
 
-	/** 日/夜切换（主题成组取自 utils/theme.uts） */
-	function toggleNightMode() : void {
-		nightMode.value = !nightMode.value
-		const theme = nightMode.value ? READER_THEME_NIGHT : READER_THEME_LIGHT
+	/** 应用阅读主题（整组成组切换：正文/浮层/遮罩/控件色） */
+	function applyReaderTheme(key : string) : void {
+		let theme = READER_THEME_LIGHT
+		if (key == 'night') {
+			theme = READER_THEME_NIGHT
+		} else if (key == 'paper') {
+			theme = READER_THEME_PAPER
+		}
+		themeKey.value = key
+		nightMode.value = key == 'night'
 		readerBg.value = theme.readerBg
+		selectedBg.value = theme.readerBg
 		bodyColor.value = theme.bodyColor
 		titleColor.value = theme.titleColor
 		labelColor.value = theme.labelColor
@@ -801,24 +1304,69 @@
 		menuTopBg.value = theme.menuTopBg
 		menuBottomBg.value = theme.menuBottomBg
 		menuBorderColor.value = theme.menuBorderColor
-		drawerBg.value = theme.drawerBg
 		activeBlue.value = theme.activeBlue
+		maskBg.value = theme.maskBg
+		maskTextColor.value = theme.maskTextColor
+		popoverBg.value = theme.popoverBg
+		panelShadow.value = theme.panelShadow
+		if (key == 'night') {
+			// 夜间：控件灰底白字，与暗面板区分且文字突出
+			controlBg.value = '#3a3a3a'
+			controlBorder.value = 'rgba(255, 255, 255, 0.12)'
+			controlText.value = '#f3f4f6'
+		} else {
+			controlBg.value = '#ffffff'
+			controlBorder.value = '#e9e9e6'
+			controlText.value = '#0e0f0c'
+		}
+	}
+
+	function saveReaderSettings() : void {
+		const s = { fontSize: fontSize.value, pageTurn: pageTurn.value, theme: themeKey.value } as ReaderSettings
+		uni.setStorageSync(STORAGE_SETTINGS, JSON.stringify(s))
+	}
+
+	function changeReaderBg(bg: string, text: string) : void {
+		selectedBg.value = bg
+		applyReaderTheme(bg == READER_THEME_PAPER.readerBg ? 'paper' : 'light')
+		saveReaderSettings()
+	}
+
+	/** 翻页模式选择（Stitch: 单选高亮 + toast；切至滚动模式以当前章初始化章节序列） */
+	function selectPageTurn(mode: string) : void {
+		pageTurn.value = mode
+		if (mode == '滚动') {
+			scrollChapters.value = [currentChapterId.value]
+			scrollModeTop.value = 0
+		}
+		saveReaderSettings()
+		showToast('已切换至【' + mode + '】模式')
+	}
+
+	/** 日/夜切换（主题成组取自 utils/theme.uts） */
+	function toggleNightMode() : void {
+		applyReaderTheme(nightMode.value ? 'light' : 'night')
+		saveReaderSettings()
 		showToast(nightMode.value ? '已切换至夜间模式' : '已切换至日间模式')
 	}
 
 	/** 目录抽屉（Stitch: 遮罩渐显 + 抽屉顶部下滑 0.32s） */
-	function openDrawer() : void {
+	/** 目录按钮：切换抽屉（打开时顶部控制栏收起、抽屉标题位于小程序控制项下方；再次点击收起抽屉、回到菜单呼出态，控制项保留） */
+	function toggleDrawer() : void {
+		if (drawerOpen.value) {
+			closeDrawer()
+			menuVisible.value = true
+			return
+		}
+		// 与设置面板互斥：打开抽屉时收起设置面板与顶部控制栏
+		settingsOpen.value = false
+		menuVisible.value = false
 		drawerTab.value = 'catalog'
 		drawerOpen.value = true
 	}
 
 	function closeDrawer() : void {
 		drawerOpen.value = false
-	}
-
-	function closeDrawerAndOpenSettings() : void {
-		closeDrawer()
-		settingsOpen.value = true
 	}
 
 	/** 目录正/倒序（Stitch: ⇅/↓↑ 图标 + toast） */
@@ -857,6 +1405,59 @@
 		padding-bottom: 31rpx;
 		flex-direction: column;
 		justify-content: space-between;
+	}
+
+	/* 页面层堆叠容器：翻页动画的舞台（溢出裁剪） */
+	.page-stack {
+		flex: 1;
+		overflow: hidden;
+	}
+
+	/* 上下滚动模式：整章连续滚动容器（滚轮/触摸原生滚动） */
+	.scroll-mode {
+		flex: 1;
+	}
+
+	.scroll-mode-inner {
+		padding-bottom: 31rpx;
+		flex-direction: column;
+	}
+
+	/* 章前间距锚点（140rpx）：前插上一章后 scroll-into-view 锚定此锚点，视口完整呈现「上一章尾部 → 间距 → 标题」 */
+	.scroll-chapter-anchor {
+		height: 140rpx;
+	}
+
+	.page-layer {
+		position: absolute;
+		left: 0;
+		right: 0;
+		top: 0;
+		bottom: 0;
+	}
+
+	/* 松手回弹/落定：层位移以过渡动画归位 */
+	.page-layer-settle {
+		transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+	}
+
+	/* 仿真模式阴影条：跟随移动页前缘模拟纸张翻起的投影 */
+	.page-layer-shadow {
+		position: absolute;
+		left: 0;
+		top: 0;
+		bottom: 0;
+		width: 40rpx;
+		background-image: linear-gradient(90deg, rgba(0, 0, 0, 0.25), rgba(0, 0, 0, 0));
+	}
+
+	/* 仿真卷曲投影：落在下层页面上、跟随卷曲前缘的横向渐变暗带 */
+	.page-curl-shadow {
+		position: absolute;
+		top: 0;
+		bottom: 0;
+		width: 60px;
+		background-image: linear-gradient(90deg, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.35));
 	}
 
 	/* 章节头部（Stitch: 标签行 + 大标题 + 分隔条，与正文间距 56px） */
@@ -1101,6 +1702,26 @@
 		color: $bai-on-primary;
 	}
 
+	/* 全局提示（页面正中卡片弹窗：视口居中、圆角卡片、日间墨底/夜间深灰底白字） */
+	.reader-toast {
+		position: fixed;
+		left: 50%;
+		top: 50%;
+		transform: translate(-50%, -50%);
+		z-index: 90;
+		max-width: 70%;
+	}
+
+	.reader-toast-text {
+		font-size: 27rpx;
+		line-height: 42rpx;
+		color: $bai-on-primary;
+		padding: 27rpx 38rpx;
+		border-radius: $bai-rounded-lg;
+		background-color: rgba($bai-ink, 0.85);
+		text-align: center;
+	}
+
 	/* 底部控制面板（令牌: 顶部圆角 xl 24px、毛玻璃、浮层提升阴影，呼出/隐藏滑移动效） */
 	.menu-bottom {
 		position: absolute;
@@ -1110,7 +1731,7 @@
 		border-top-left-radius: $bai-rounded-xl;
 		border-top-right-radius: $bai-rounded-xl;
 		z-index: 30;
-		box-shadow: $bai-shadow-panel;
+		/* 投影内联绑定（夜间切换白色微光） */
 		transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.28s cubic-bezier(0.16, 1, 0.3, 1);
 	}
 
@@ -1200,8 +1821,52 @@
 		font-size: 23rpx;
 	}
 
-	.font-btn-arrow {
-		font-size: 19rpx;
+	/* 字体选择列表（点字体按钮展开：选项 2×2 胶囊 + 右下保存按钮） */
+	.font-select {
+		padding: 8rpx 0 23rpx 92rpx;
+		flex-direction: column;
+	}
+
+	.font-select-list {
+		flex-direction: row;
+		flex-wrap: wrap;
+		gap: 15rpx;
+	}
+
+	.font-option {
+		width: 260rpx;
+	}
+
+	.font-save-row {
+		margin-top: 19rpx;
+		flex-direction: row;
+		justify-content: flex-end;
+		gap: 15rpx;
+	}
+
+	.font-cancel-btn {
+		padding: 12rpx 38rpx;
+		border-radius: $bai-rounded-pill;
+		border: 1px solid $bai-pale;
+	}
+
+	.font-cancel-btn-text {
+		font-size: 23rpx;
+		font-weight: 600;
+		color: $bai-mute;
+	}
+
+	.font-save-btn {
+		padding: 12rpx 38rpx;
+		border-radius: $bai-rounded-pill;
+		background-color: $bai-ink;
+		border: 1px solid rgba($bai-on-primary, 0.2);
+	}
+
+	.font-save-btn-text {
+		font-size: 23rpx;
+		font-weight: 600;
+		color: $bai-on-primary;
 	}
 
 	.swatch-group {
@@ -1316,10 +1981,6 @@
 		font-size: 21rpx;
 	}
 
-	.drawer-nav-text-active {
-		font-weight: 600;
-	}
-
 	/* 划词气泡（Stitch: 黑底圆角 12px 内边距 12x8，操作项竖排图标+文字，底部 7px 三角） */
 	.selection-popover {
 		position: fixed;
@@ -1337,7 +1998,7 @@
 		align-items: center;
 		gap: 23rpx;
 		padding: 15rpx 23rpx;
-		background-color: $bai-ink;
+		/* 背景内联绑定（夜间提亮一档与暗底区分，日间墨黑） */
 		border-radius: $bai-rounded-md;
 		box-shadow: $bai-shadow-popover;
 	}
@@ -1384,38 +2045,10 @@
 		border-top-color: $bai-ink;
 	}
 
-	/* 目录抽屉遮罩（Stitch: 透明黑，200ms 渐显） */
-	.drawer-backdrop {
-		position: fixed;
-		left: 0;
-		right: 0;
-		top: 0;
-		bottom: 0;
-		background-color: rgba($bai-black, 0.4);
-		z-index: 40;
-	}
-
-	/* 目录抽屉（Stitch: 顶部 64px 下滑覆盖，圆角顶 xl 24px，毛玻璃 75% 背景，滑移动效 0.32s） */
-	.chapter-drawer {
-		position: fixed;
-		left: 0;
-		right: 0;
-		top: 123rpx;
-		bottom: 0;
-		border-top-left-radius: $bai-rounded-xl;
-		border-top-right-radius: $bai-rounded-xl;
+	/* 目录抽屉（控制栏内容块：与设置面板一致随控制栏从底部弹出，高度内联绑定恢复独立浮层时期尺寸；顶部间距与设置面板一致） */
+	.drawer-panel {
+		padding-top: 23rpx;
 		flex-direction: column;
-		z-index: 50;
-		box-shadow: $bai-shadow-drawer;
-		transition: transform 0.32s cubic-bezier(0.16, 1, 0.3, 1);
-	}
-
-	.drawer-open {
-		transform: translateY(0);
-	}
-
-	.drawer-closed {
-		transform: translateY(-110%);
 	}
 
 	.drawer-header {
@@ -1464,10 +2097,5 @@
 
 	.chapter-item-text-active {
 		font-weight: 600;
-	}
-
-	.drawer-bottom {
-		flex-direction: row;
-		padding: 23rpx 46rpx 54rpx 46rpx;
 	}
 </style>
