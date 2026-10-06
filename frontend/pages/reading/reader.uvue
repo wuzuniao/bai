@@ -12,17 +12,17 @@
 	>
 			<!-- 上下滚动模式：整章连续滚动（滚轮/触摸拖拽，滚动多少显示多少） -->
 			<scroll-view
-					v-if="pageTurn === '滚动'"
-					class="scroll-mode"
-					direction="vertical"
-					:show-scrollbar="false"
-					:scroll-top="scrollModeTop"
+				v-if="pageTurn === '滚动'"
+				class="scroll-mode"
+				direction="vertical"
+				:show-scrollbar="false"
+				:scroll-top="scrollModeTop"
 					:scroll-into-view="scrollIntoView"
 					@scroll="onScrollModeScroll"
 					@scrolltolower="onScrollToLower"
 					@scrolltoupper="onScrollToUpper"
 				>
-					<view class="scroll-mode-inner">
+					<view class="scroll-mode-inner" :style="'padding-top:' + contentTopPx + 'px;padding-bottom:' + contentBottomPx + 'px'">
 						<!-- 章前间距锚点：前插上一章后 scroll-into-view 锚定此锚点，视口完整呈现「上一章尾部 → 间距 → 标题」 -->
 						<view
 							v-for="(cid, ci) in scrollChapters"
@@ -60,11 +60,11 @@
 						</view>
 					</view>
 				</scroll-view>
-			<!-- 分页模式：双层页面翻页（仿真/覆盖/平移） -->
+			<!-- 分页模式：三层常驻页面翻页（当前页 + 上一页 + 下一页预渲染，仿真/覆盖/平移） -->
 			<view v-else class="page-stack">
 				<!-- 当前页层 -->
-				<view class="page-layer" :class="flipSettling ? 'page-layer-settle' : ''" :style="currentLayerStyle">
-					<view class="content-inner">
+				<view class="page-layer" :class="flipSettling ? 'page-layer-settle' : ''" :style="'background-color:' + readerBg + ';' + currentLayerStyle">
+					<view class="content-inner" :style="'padding-top:' + contentTopPx + 'px;padding-bottom:' + contentBottomPx + 'px'">
 						<view v-if="pageIndex === 0" class="chapter-header">
 							<view class="chapter-label-row">
 								<view class="chapter-label-dot"></view>
@@ -81,48 +81,85 @@
 								@longpress="onLongPress(item.origin)"
 							>
 								<text class="novel-text">
-									<text v-if="item.underlined" class="para-underlined">{{ item.text }}</text>
-									<text v-else-if="selectedIdx === item.origin">
+									<text v-if="item.underlined" class="para-underlined" :style="'font-size:' + fontSize + 'px'">{{ item.text }}</text>
+									<text v-else-if="selectedIdx === item.origin" :style="'font-size:' + fontSize + 'px'">
 										<text>{{ selBefore }}</text>
 										<text class="para-highlight">{{ selSelected }}</text>
 										<text>{{ selAfter }}</text>
 									</text>
-									<text v-else>{{ item.text }}</text>
+									<text v-else :style="'font-size:' + fontSize + 'px'">{{ item.text }}</text>
+								</text>
+							</view>
+						</view>
+					</view>
+					<!-- 覆盖模式回翻遮罩（仅回翻）：盖在当前页上，随上一页覆盖进度由浅入深；上一页保持高亮 -->
+					<view v-if="pageTurn === '覆盖' && flipDir == -1 && hasPrevPage" class="page-cover-mask" :class="flipSettling ? 'page-cover-mask-settle' : ''" :style="'background-color:' + coverMaskBg + ';opacity:' + coverCurrentMaskOpacity"></view>
+				</view>
+				<!-- 上一页常驻层：非跟手时停在屏外预渲染，回翻跟手时作为目标层滑入（首次翻到新页无渲染空白） -->
+				<view v-if="hasPrevPage" class="page-layer" :class="flipSettling ? 'page-layer-settle' : ''" :style="'background-color:' + readerBg + ';' + prevLayerStyle">
+					<!-- #ifdef APP -->
+					<!-- 仿真卷曲（APP 端真实实现）：回翻时前缘为卷起纸筒弧面 + 落在下层的投影 -->
+					<view v-if="pageTurn === '仿真' && flipDir == -1 && flipOffset > 0" class="page-curl-roller page-curl-roller-right"></view>
+					<view v-if="pageTurn === '仿真' && flipDir == -1 && flipOffset > 0" class="page-curl-shadow page-curl-shadow-right"></view>
+					<!-- #endif -->
+					<view class="content-inner" :style="'padding-top:' + contentTopPx + 'px;padding-bottom:' + contentBottomPx + 'px'">
+						<view v-if="prevPageIndex === 0" class="chapter-header">
+							<view class="chapter-label-row">
+								<view class="chapter-label-dot"></view>
+								<text class="chapter-label" :style="'color:' + labelColor">{{ prevChapterLabel }}</text>
+							</view>
+							<text class="chapter-title" :style="'color:' + titleColor">{{ prevChapterTitle }}</text>
+							<view class="chapter-divider"></view>
+						</view>
+						<view class="novel-body" :style="'font-size:' + fontSize + 'px;color:' + bodyColor + ';font-family:' + fontFamily">
+							<view
+								v-for="(item, vi) in prevPageItems"
+								:key="item.origin"
+								class="novel-paragraph"
+							>
+								<text class="novel-text">
+									<text v-if="item.underlined" class="para-underlined" :style="'font-size:' + fontSize + 'px'">{{ item.text }}</text>
+									<text v-else :style="'font-size:' + fontSize + 'px'">{{ item.text }}</text>
 								</text>
 							</view>
 						</view>
 					</view>
 				</view>
-				<!-- 目标页层（跟手翻页时从页外滑入） -->
-				<view v-if="flipTargetIndex >= 0" class="page-layer" :class="flipSettling ? 'page-layer-settle' : ''" :style="targetLayerStyle">
+				<!-- 下一页常驻层：非跟手时停在屏外预渲染，前翻跟手时作为目标层滑入 -->
+				<view v-if="hasNextPage" class="page-layer" :class="flipSettling ? 'page-layer-settle' : ''" :style="'background-color:' + readerBg + ';' + nextLayerStyle">
 					<!-- #ifdef APP -->
-					<!-- 仿真卷曲（APP 端真实实现）：目标页自页外滑入覆盖，前缘为卷起纸筒弧面 + 落在下层的投影 -->
-					<view v-if="pageTurn === '仿真' && flipDir != 0 && flipOffset > 0" class="page-curl-roller" :class="flipDir == 1 ? 'page-curl-roller-left' : 'page-curl-roller-right'"></view>
-					<view v-if="pageTurn === '仿真' && flipDir != 0 && flipOffset > 0" class="page-curl-shadow" :class="flipDir == 1 ? 'page-curl-shadow-left' : 'page-curl-shadow-right'"></view>
+					<!-- 仿真卷曲（APP 端真实实现）：前翻时前缘为卷起纸筒弧面 + 落在下层的投影 -->
+					<view v-if="pageTurn === '仿真' && flipDir == 1 && flipOffset > 0" class="page-curl-roller page-curl-roller-left"></view>
+					<view v-if="pageTurn === '仿真' && flipDir == 1 && flipOffset > 0" class="page-curl-shadow page-curl-shadow-left"></view>
 					<!-- #endif -->
-					<view class="content-inner">
-						<view v-if="flipTargetIndex === 0" class="chapter-header">
+					<view class="content-inner" :style="'padding-top:' + contentTopPx + 'px;padding-bottom:' + contentBottomPx + 'px'">
+						<view v-if="nextPageIndex === 0" class="chapter-header">
 							<view class="chapter-label-row">
 								<view class="chapter-label-dot"></view>
-								<text class="chapter-label" :style="'color:' + labelColor">{{ chapterLabel }}</text>
+								<text class="chapter-label" :style="'color:' + labelColor">{{ nextChapterLabel }}</text>
 							</view>
-							<text class="chapter-title" :style="'color:' + titleColor">{{ contentTitle }}</text>
+							<text class="chapter-title" :style="'color:' + titleColor">{{ nextChapterTitle }}</text>
 							<view class="chapter-divider"></view>
 						</view>
 						<view class="novel-body" :style="'font-size:' + fontSize + 'px;color:' + bodyColor + ';font-family:' + fontFamily">
 							<view
-								v-for="(item, vi) in flipTargetItems"
+								v-for="(item, vi) in nextPageItems"
 								:key="item.origin"
 								class="novel-paragraph"
 							>
-								<text class="novel-text">{{ item.text }}</text>
+								<text class="novel-text">
+									<text v-if="item.underlined" class="para-underlined" :style="'font-size:' + fontSize + 'px'">{{ item.text }}</text>
+									<text v-else :style="'font-size:' + fontSize + 'px'">{{ item.text }}</text>
+								</text>
 							</view>
 						</view>
 					</view>
+					<!-- 覆盖模式滑入遮罩（仅前翻）：盖在滑入的下一页上的均匀暗层，出现越多遮罩越浅，落定归零 -->
+					<view v-if="pageTurn === '覆盖' && flipDir == 1" class="page-cover-mask" :class="flipSettling ? 'page-cover-mask-settle' : ''" :style="'background-color:' + coverMaskBg + ';opacity:' + coverNextMaskOpacity"></view>
 				</view>
 			</view>
-			<!-- 底部进度（Stitch: 时间 + 章节进度 + 百分比标签） -->
-			<view class="reader-footer">
+			<!-- 底部进度（Stitch: 时间 + 章节进度 + 百分比标签；文字行底仅比手势条横条高一点；滚动模式随滚动淡入、停止淡出） -->
+			<view class="reader-footer" :style="'padding-bottom:' + footerBottomPx + 'px;opacity:' + footerOpacity">
 				<view class="footer-left">
 					<view class="footer-dot"></view>
 					<text class="footer-time">14:30</text>
@@ -430,29 +467,55 @@
 	/** 当前页码（章内 0-based，左右滑动翻页切换） */
 	const pageIndex = ref(0)
 
-	/** 每页字数预算（对应原型一屏排版密度约 160 字；段落不跨页拆分） */
-	const PAGE_CHAR_BUDGET = 160
+	/** 正文区底部留白（px）：页脚浮层文字行之上留足间距，正文与页脚不紧挨 */
+	const contentBottomPx = computed(() : number => safeAreaBottomPx.value + 80)
 
-	/** 分页结果：每页的章内段落索引数组 */
+	/** 页脚贴底内边距（px）：文字行底仅比手势条横条高一点（下沉 10px，不低于 4px 兜底） */
+	const footerBottomPx = computed(() : number => Math.max(4, safeAreaBottomPx.value - 10))
+
+	/** 分页结果：每页的章内段落索引数组——按可用高度百分比做高度预算，段落高度（整行×行高）逐段累计，装不下的段落流到下一页；章首页扣除章节头高度 */
 	const pageBreaks = computed(() : number[][] => {
 		const paras = paragraphs.value
 		const pages: number[][] = []
 		let current: number[] = []
-		let count = 0
+		let usedH = 0
+		if (pageW.value <= 0 || pageH.value <= 0 || fontSize.value <= 0) {
+			return paras.map((p, i) : number[] => [i])
+		}
+		const lineH = fontSize.value * 1.7
+		// 每行字数计入字距 0.4rpx（约 0.2px/字）
+		const perLine = Math.max(1, Math.floor((pageW.value - uni.upx2px(124)) / (fontSize.value + 0.2)))
+		const paraGap = uni.upx2px(40)
+		const headerH = uni.upx2px(294)
+		// 页面高度预算 = 可用高度（屏高-顶部起点-底部留白）的 95%，留排版误差余量
+		const budget = Math.max(lineH, (pageH.value - contentTopPx.value - contentBottomPx.value) * 0.95)
+		// 章节头（标签行+大标题+分隔条+下边距，约 294rpx）仅占用章首页
+		let curBudget = Math.max(lineH, budget - headerH)
 		for (let i = 0; i < paras.length; i++) {
-			current.push(i)
-			count += paras[i].text.length
-			if (count >= PAGE_CHAR_BUDGET) {
+			const paraH = Math.ceil(paras[i].text.length / perLine) * lineH
+			let gap = current.length > 0 ? paraGap : 0
+			if (usedH + gap + paraH > curBudget && current.length > 0) {
 				pages.push(current)
 				current = []
-				count = 0
+				usedH = 0
+				gap = 0
+				curBudget = budget
 			}
+			current.push(i)
+			usedH += gap + paraH
 		}
 		if (current.length > 0) {
 			pages.push(current)
 		}
 		return pages
 	})
+
+	/** 分页变化（字号调节/设置恢复触发重分页）后钳制当前页码，避免指向不存在的空页 */
+	function clampPageIndex() : void {
+		if (pageIndex.value > pageBreaks.value.length - 1) {
+			pageIndex.value = Math.max(0, pageBreaks.value.length - 1)
+		}
+	}
 
 	/** 指定页渲染项 */
 	function pageItemsAt(pi : number) : PageItem[] {
@@ -504,9 +567,23 @@
 		uni.setStorageSync(STORAGE_PROGRESS, JSON.stringify(p))
 	}
 
-	/** 滚动模式实时滚动位置（仅内存记录，随 onHide/onUnload 持久化） */
+	/** 滚动模式页脚信息栏显隐：滚动时淡入展示进度，停止滚动后淡出隐藏（不影响阅读） */
+	const footerVisible = ref(false)
+	let footerHideTimer = -1
+
+	/** 滚动模式实时滚动位置（仅内存记录，随 onHide/onUnload 持久化）；滚动阅读时隐藏上下控制项，并淡入页脚、停止后淡出 */
 	function onScrollModeScroll(e : UniScrollEvent) : void {
 		scrollModePos.value = e.detail.scrollTop
+		if (menuVisible.value) {
+			menuVisible.value = false
+		}
+		footerVisible.value = true
+		if (footerHideTimer >= 0) {
+			clearTimeout(footerHideTimer)
+		}
+		footerHideTimer = setTimeout(() => {
+			footerVisible.value = false
+		}, 1500)
 	}
 
 	/** 启动恢复上次阅读进度（书名匹配才恢复，避免不同书之间串用；章节/页码/滚动位置） */
@@ -578,27 +655,78 @@
 	const flipOffset = ref(0)
 	const flipSettling = ref(false)
 
-	/** 跟手目标页索引（仅章内有效；越章界为 -1，目标层不渲染，松手走 flipPage 边界逻辑） */
-	const flipTargetIndex = computed(() : number => {
-		if (!flipActive.value || flipDir.value == 0) {
-			return -1
+	/** 上一页渲染项（常驻预渲染：章内相邻页；章首跨上一章末页；第一章无上一页为空数组）——目标层视图常驻，跟手时零创建延迟，首次翻到新页无渲染空白 */
+	const prevPageItems = computed(() : PageItem[] => {
+		if (pageIndex.value > 0) {
+			return pageItemsAt(pageIndex.value - 1)
 		}
-		const t = pageIndex.value + flipDir.value
-		if (t < 0 || t > pageBreaks.value.length - 1) {
-			return -1
+		if (currentChapterId.value > 0) {
+			return pageItemsAt(pageBreaks.value.length - 1)
 		}
-		return t
+		return [] as PageItem[]
 	})
 
-	const flipTargetItems = computed(() : PageItem[] => {
-		const t = flipTargetIndex.value
-		if (t < 0) {
-			return []
-		}
-		return pageItemsAt(t)
+	/** 是否存在上一页（书首为 false） */
+	const hasPrevPage = computed(() : boolean => pageIndex.value > 0 || currentChapterId.value > 0)
+
+	/** 上一页的章内页索引（章内相邻页；跨章取上一章末页；原型阶段全章共用同一份正文，分页一致） */
+	const prevPageIndex = computed(() : number => {
+		return pageIndex.value > 0 ? pageIndex.value - 1 : pageBreaks.value.length - 1
 	})
 
-	/** 当前页层样式：按翻页模式产生位移/卷曲与层级（跟手与回弹共用） */
+	/** 上一页所在章 id（章内=当前章；章首跨上一章） */
+	const prevPageChapterId = computed(() : number => {
+		return pageIndex.value > 0 ? currentChapterId.value : (currentChapterId.value > 0 ? currentChapterId.value - 1 : currentChapterId.value)
+	})
+
+	/** 下一页渲染项（常驻预渲染：章内相邻页；章尾跨下一章首页；末章无下一页为空数组） */
+	const nextPageItems = computed(() : PageItem[] => {
+		if (pageIndex.value < pageBreaks.value.length - 1) {
+			return pageItemsAt(pageIndex.value + 1)
+		}
+		if (currentChapterId.value < chapters.value.length - 1) {
+			return pageItemsAt(0)
+		}
+		return [] as PageItem[]
+	})
+
+	/** 是否存在下一页（末章为 false） */
+	const hasNextPage = computed(() : boolean => pageIndex.value < pageBreaks.value.length - 1 || currentChapterId.value < chapters.value.length - 1)
+
+	/** 下一页的章内页索引（章内相邻页；跨章取下一章首页） */
+	const nextPageIndex = computed(() : number => {
+		return pageIndex.value < pageBreaks.value.length - 1 ? pageIndex.value + 1 : 0
+	})
+
+	/** 下一页所在章 id（章内=当前章；章尾跨下一章） */
+	const nextPageChapterId = computed(() : number => {
+		return pageIndex.value < pageBreaks.value.length - 1 ? currentChapterId.value : (currentChapterId.value < chapters.value.length - 1 ? currentChapterId.value + 1 : currentChapterId.value)
+	})
+
+	/** 上一层章节头文案（跨章时为上一章） */
+	const prevChapterLabel = computed(() : string => chapters.value[prevPageChapterId.value].label)
+
+	/** 上一层章节头大标题 */
+	const prevChapterTitle = computed(() : string => chapters.value[prevPageChapterId.value].contentTitle)
+
+	/** 下层章节头文案（跨章时为下一章） */
+	const nextChapterLabel = computed(() : string => chapters.value[nextPageChapterId.value].label)
+
+	/** 下层章节头大标题 */
+	const nextChapterTitle = computed(() : string => chapters.value[nextPageChapterId.value].contentTitle)
+
+	/** 跟手方向上是否存在目标页（书首/末章边界为 false，松手回弹并提示） */
+	const flipHasTarget = computed(() : boolean => {
+		if (flipDir.value == -1) {
+			return hasPrevPage.value
+		}
+		if (flipDir.value == 1) {
+			return hasNextPage.value
+		}
+		return false
+	})
+
+	/** 当前页层样式：按翻页模式产生位移与层级（跟手与回弹共用） */
 	const currentLayerStyle = computed(() : string => {
 		if (!flipActive.value && !flipSettling.value) {
 			return ''
@@ -607,6 +735,10 @@
 		const d = flipDir.value
 		const mode = pageTurn.value
 		if (mode == '平移') {
+			if (d == 0) {
+				// 落定帧不产生位移（避免新页从边缘重新滑入一道边界），与跟手末帧满屏内容无缝衔接
+				return 'z-index:1'
+			}
 			return 'transform:translateX(' + (d * o * -1) + 'px);z-index:1'
 		}
 		// #ifdef APP
@@ -616,41 +748,55 @@
 		}
 		// #endif
 		if (mode == '覆盖') {
-			if (d == -1) {
-				return 'transform:translateX(' + o + 'px);z-index:2'
-			}
+			// 覆盖：当前页静置底层，其上暗化遮罩随滑动由浅入深（被覆盖越多越深），由目标页滑入覆盖
 			return 'z-index:1'
 		}
 		return ''
 	})
 
-	/** 目标页层样式：按翻页模式从页外滑入或静置下层 */
-	const targetLayerStyle = computed(() : string => {
-		if (!flipActive.value || flipDir.value == 0) {
-			return ''
+	/** 上一页层样式：常驻屏左外预渲染（pageW 未就绪时先透明），回翻跟手/补间时作为目标层滑入（覆盖/仿真/平移通用） */
+	const prevLayerStyle = computed(() : string => {
+		if (pageW.value <= 0) {
+			return 'opacity:0;z-index:2'
 		}
-		const d = flipDir.value
-		const mode = pageTurn.value
-		if (mode == '平移') {
+		if (flipActive.value && flipDir.value == -1) {
 			const o = flipOffset.value
-			return 'transform:translateX(' + (d * (pageW.value - o)) + 'px);z-index:2'
+			return 'transform:translateX(' + (o - pageW.value) + 'px);z-index:2'
 		}
-		if (mode == '覆盖') {
-			if (d == 1) {
-				const o = flipOffset.value
-				// 前翻：目标页自右侧滑入覆盖
-				return 'transform:translateX(' + (pageW.value - o) + 'px);z-index:2'
-			}
-			return 'z-index:1'
+		return 'transform:translateX(-' + pageW.value + 'px);z-index:2'
+	})
+
+	/** 下一页层样式：常驻屏右外预渲染，前翻跟手/补间时作为目标层滑入（覆盖/仿真/平移通用） */
+	const nextLayerStyle = computed(() : string => {
+		if (pageW.value <= 0) {
+			return 'opacity:0;z-index:2'
 		}
-		// #ifdef APP
-		if (mode == '仿真') {
-			// 仿真（APP 端专属实现）：目标页连同卷筒/投影滑入覆盖——前翻自右缘向左、回翻自左缘向右
+		if (flipActive.value && flipDir.value == 1) {
 			const o = flipOffset.value
-			return 'transform:translateX(' + (d == 1 ? pageW.value - o : o - pageW.value) + 'px);z-index:2'
+			return 'transform:translateX(' + (pageW.value - o) + 'px);z-index:2'
 		}
-		// #endif
-		return ''
+		return 'transform:translateX(' + pageW.value + 'px);z-index:2'
+	})
+
+	/** 覆盖模式遮罩透明度（滑入的下一页上，仅前翻）：出现越多遮罩越浅，落定归零 */
+	const coverNextMaskOpacity = computed(() : number => {
+		if (pageW.value <= 0) {
+			return 0
+		}
+		return 1 - Math.min(flipOffset.value / pageW.value, 1)
+	})
+
+	/** 覆盖模式遮罩透明度（当前页上，仅回翻）：被上一页取代越多越深 */
+	const coverCurrentMaskOpacity = computed(() : number => {
+		if (pageW.value <= 0) {
+			return 0
+		}
+		return Math.min(flipOffset.value / pageW.value, 1)
+	})
+
+	/** 覆盖遮罩面色（主题适配）：浅色纸面用墨色加深，暗色纸面用浅白提亮（与书签遮罩/浮层的暗底区分惯例一致） */
+	const coverMaskBg = computed(() : string => {
+		return nightMode.value ? 'rgba(255, 255, 255, 0.24)' : 'rgba(0, 0, 0, 0.45)'
 	})
 
 	/** 主题状态（色值唯一定义于 utils/theme.uts：日间=画布令牌，夜间/纸张为阅读专用主题） */
@@ -689,6 +835,11 @@
 	const pageTurnModes = ref<string[]>(['滚动', '覆盖', '平移'])
 	// #endif
 	const pageTurn = ref('滚动')
+
+	/** 页脚浮层透明度：滚动模式由滚动/控制项状态驱动（footerVisible），其他模式常驻显示 */
+	const footerOpacity = computed(() : number => {
+		return (pageTurn.value == '滚动' && !footerVisible.value) ? 0 : 1
+	})
 	/** 当前主题 key：light / night / paper */
 	const themeKey = ref('light')
 
@@ -705,20 +856,31 @@
 	const navHeight = ref(40)
 	/** 目录抽屉高度（px）：抽屉顶对齐小程序控制项（胶囊）下方 8px，并扣除控制行自身高度（152rpx） */
 	const drawerPanelHeight = ref(500)
-	/** 翻页行程：页面内容宽/高（px） */
+	/** 翻页行程：页面全屏宽/高（px，与全屏翻页舞台容器宽一致，prev/next 屏外待命位移同源） */
 	const pageW = ref(0)
 	const pageH = ref(0)
+	/** 正文区顶部起点（px）：小程序在胶囊下方，其他端在状态栏+导航行下方 */
+	const contentTopPx = ref(92)
+	/** 底部安全区高度（px，全面屏手势条避让） */
+	const safeAreaBottomPx = ref(0)
 	{
 		const win = uni.getWindowInfo()
 		if (win.statusBarHeight > 0) {
 			navTop.value = win.statusBarHeight
 		}
-		pageW.value = win.windowWidth - uni.upx2px(124)
+		pageW.value = win.windowWidth
 		pageH.value = win.windowHeight
+		contentTopPx.value = navTop.value + navHeight.value + 8
+		// 安全区：safeArea 为可空字段，空安全读取（手势条高度=窗口高-安全区底界）
+		const safeArea = win.safeArea
+		if (safeArea != null) {
+			safeAreaBottomPx.value = Math.max(0, win.windowHeight - safeArea.bottom)
+		}
 		const navH = uni.upx2px(152)
 		// #ifdef MP-WEIXIN
 		const capsule = uni.getMenuButtonBoundingClientRect()
 		if (capsule.height > 0) {
+			contentTopPx.value = capsule.bottom + 8
 			drawerPanelHeight.value = win.windowHeight - (capsule.top + capsule.height + 8) - navH
 		} else {
 			drawerPanelHeight.value = win.windowHeight - (navTop.value + navHeight.value + 8) - navH
@@ -934,6 +1096,7 @@
 			if (s != null) {
 				if (s.fontSize >= 12 && s.fontSize <= 36) {
 					fontSize.value = s.fontSize
+					clampPageIndex()
 				}
 				if (s.pageTurn == '仿真' || s.pageTurn == '覆盖' || s.pageTurn == '平移' || s.pageTurn == '滚动') {
 					pageTurn.value = s.pageTurn
@@ -1057,22 +1220,28 @@
 		}
 		const dx = e.changedTouches[0].clientX - touchStartX
 		const dy = e.changedTouches[0].clientY - touchStartY
-		// 翻页跟手收尾：位移过阈值（或快速轻扫）落定翻页，否则回弹归位
+		// 翻页跟手收尾：位移过阈值（或快速轻扫）且有目标页时，先补间到满行程再切换内容；否则回弹归位
 		if (flipActive.value) {
 			const done = flipOffset.value > pageW.value * 0.35 || Math.abs(dx) > 80
-			if (done) {
+			const d = flipDir.value
+			if (done && flipHasTarget.value) {
+				// 补间到满行程：两页平滑滑到替换完成位置（内容全程完整），过渡结束后再切换，消除瞬间替换造成的内容缺失
 				flipSettling.value = true
-				flipActive.value = false
-				const d = flipDir.value
-				flipDir.value = 0
-				flipOffset.value = 0
-				flipPage(d)
+				flipOffset.value = pageW.value
 				setTimeout(() => {
+					flipPage(d)
+					flipActive.value = false
+					flipDir.value = 0
+					flipOffset.value = 0
 					flipSettling.value = false
 				}, 300)
 			} else {
+				// 未达阈值或章界无目标页：跟手位移归零回弹；已达轻扫阈值时走 flipPage 边界提示
 				flipSettling.value = true
 				flipOffset.value = 0
+				if (done) {
+					flipPage(d)
+				}
 				setTimeout(() => {
 					flipSettling.value = false
 					flipActive.value = false
@@ -1163,7 +1332,7 @@
 		}, 1500)
 	}
 
-	/** 点击正文空白（Stitch: 抽屉打开→收起；划词激活→清除；设置展开→收起；否则切换菜单显隐） */
+	/** 点击正文空白（Stitch: 抽屉打开→收起；划词激活→清除；设置展开→收起；否则切换菜单显隐。页脚显隐独立于控制项，仅随滚动淡入淡出） */
 	function onContentTap() : void {
 		if (drawerOpen.value) {
 			closeDrawer()
@@ -1252,13 +1421,14 @@
 		settingsOpen.value = false
 	}
 
-	/** 字号调节（Stitch: 12-36px 范围，实时作用于正文） */
+	/** 字号调节（Stitch: 12-36px 范围，实时作用于正文；字号变化触发重分页，页码钳制防空页） */
 	function changeFontSize(delta: number) : void {
 		const next = fontSize.value + delta
 		if (next < 12 || next > 36) {
 			return
 		}
 		fontSize.value = next
+		clampPageIndex()
 		saveReaderSettings()
 	}
 
@@ -1320,12 +1490,15 @@
 		saveReaderSettings()
 	}
 
-	/** 翻页模式选择（Stitch: 单选高亮 + toast；切至滚动模式以当前章初始化章节序列） */
+	/** 翻页模式选择（Stitch: 单选高亮 + toast；切至滚动模式以当前章初始化章节序列，页脚转滚动显隐态） */
 	function selectPageTurn(mode: string) : void {
 		pageTurn.value = mode
 		if (mode == '滚动') {
 			scrollChapters.value = [currentChapterId.value]
 			scrollModeTop.value = 0
+			footerVisible.value = false
+		} else {
+			footerVisible.value = true
 		}
 		saveReaderSettings()
 		showToast('已切换至【' + mode + '】模式')
@@ -1384,30 +1557,36 @@
 		overflow: hidden;
 	}
 
-	/* 阅读内容区（Stitch: 左右 32px、上 80px、下 16px，上下两端分布） */
+	/* 阅读内容区：纯手势/布局容器（排版内边距下沉——滚动模式由 scroll-mode-inner、分页模式由 content-inner 承担） */
 	.content {
 		flex: 1;
-		padding-left: 62rpx;
-		padding-right: 62rpx;
-		padding-top: 154rpx;
-		padding-bottom: 31rpx;
 		flex-direction: column;
-		justify-content: space-between;
 	}
 
-	/* 页面层堆叠容器：翻页动画的舞台（溢出裁剪） */
+	/* 页面层堆叠容器：翻页动画的舞台——absolute 铺满整个页面（溢出裁剪），正文排版由 content-inner 内边距承担 */
 	.page-stack {
-		flex: 1;
+		position: absolute;
+		left: 0;
+		right: 0;
+		top: 0;
+		bottom: 0;
 		overflow: hidden;
 	}
 
-	/* 上下滚动模式：整章连续滚动容器（滚轮/触摸原生滚动） */
+	/* 页层正文容器：上下留白内联动态绑定（顶部=控制项下方、底部=页脚浮层上方+安全区），左右为固定排版边距 */
+	.content-inner {
+		padding-left: 62rpx;
+		padding-right: 62rpx;
+	}
+
+	/* 上下滚动模式：整章连续滚动容器（滚轮/触摸原生滚动；底部补偿=页脚浮层区域高度，内联动态绑定） */
 	.scroll-mode {
 		flex: 1;
 	}
 
 	.scroll-mode-inner {
-		padding-bottom: 31rpx;
+		padding-left: 62rpx;
+		padding-right: 62rpx;
 		flex-direction: column;
 	}
 
@@ -1427,6 +1606,19 @@
 	/* 松手回弹/落定：层位移以过渡动画归位 */
 	.page-layer-settle {
 		transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+	}
+
+	/* 覆盖翻页暗化遮罩：盖在页面上的均匀暗层（边界无阴影），面色随主题内联绑定（夜间浅白/日间墨色），透明度随进度变化（跟手期无过渡） */
+	.page-cover-mask {
+		position: absolute;
+		left: 0;
+		right: 0;
+		top: 0;
+		bottom: 0;
+	}
+
+	.page-cover-mask-settle {
+		transition: opacity 0.28s cubic-bezier(0.16, 1, 0.3, 1);
 	}
 
 	/* #ifdef APP */
@@ -1505,7 +1697,7 @@
 		opacity: 0.9;
 	}
 
-	/* 正文（Stitch: 行距 1.95、首行缩进 2em、字距 0.02em、两端对齐、段落间距 21px） */
+	/* 正文（行距 1.7 对齐主流阅读器 1.5-1.8 区间、首行缩进 2em、字距 0.02em、两端对齐、段落间距 21px） */
 	.novel-body {
 		flex-direction: column;
 		gap: 40rpx;
@@ -1516,7 +1708,7 @@
 	}
 
 	.novel-text {
-		line-height: 1.95;
+		line-height: 1.7;
 		letter-spacing: 0.4rpx;
 		text-align: justify;
 	}
@@ -1534,15 +1726,20 @@
 		border-radius: 4rpx;
 	}
 
-	/* 底部进度（Stitch: 上 40px 下 24px 两端分布） */
+	/* 底部进度（浮于翻页层之上：尽量贴近屏幕底部，底部内边距内联绑定避让手势条；滚动模式透明度过渡淡入淡出；z 序高于页层、低于顶栏/面板/书签遮罩） */
 	.reader-footer {
-		padding-top: 77rpx;
-		padding-bottom: 46rpx;
-		padding-left: 8rpx;
-		padding-right: 8rpx;
+		position: absolute;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		padding-top: 40rpx;
+		padding-left: 70rpx;
+		padding-right: 70rpx;
 		flex-direction: row;
 		align-items: center;
 		justify-content: space-between;
+		z-index: 20;
+		transition: opacity 0.3s ease-in-out;
 	}
 
 	.footer-left {
