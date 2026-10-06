@@ -92,6 +92,7 @@
 							</view>
 						</view>
 					</view>
+				</view>
 				<!-- 目标页层（跟手翻页时从页外滑入） -->
 				<view v-if="flipTargetIndex >= 0" class="page-layer" :class="flipSettling ? 'page-layer-settle' : ''" :style="targetLayerStyle">
 					<!-- #ifdef APP -->
