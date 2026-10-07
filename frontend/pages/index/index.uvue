@@ -171,7 +171,7 @@
 				{ char: '日', pinyin: 'rì' } as PoemChar,
 				{ char: '登', pinyin: 'dēng' } as PoemChar,
 				{ char: '临', pinyin: 'lín' } as PoemChar,
-				{ char: '太', pinyin: 'tài' } as PoemChar,
+				{ char: '泰', pinyin: 'tài' } as PoemChar,
 				{ char: '山', pinyin: 'shān' } as PoemChar,
 				{ char: '顶', pinyin: 'dǐng' } as PoemChar
 			],
@@ -310,12 +310,13 @@
 		justify-content: center;
 	}
 
+	/* 行距 margin 与汉字行高增量（50-31=19）联动压缩，保持总行距 54/69rpx 不变 */
 	.poem-line-gap-inner {
-		margin-top: 23rpx;
+		margin-top: 4rpx;
 	}
 
 	.poem-line-gap-outer {
-		margin-top: 38rpx;
+		margin-top: 19rpx;
 	}
 
 	/* 字单元（Figma: 28px 宽 = 拼音区 14px + 汉字区 16px；右侧 15rpx 对应字间距 8px） */
@@ -337,10 +338,10 @@
 		font-family: $bai-font-serif;
 	}
 
-	/* 汉字（Figma: 字面 16px 墨黑 #0E0F0C 衬线） */
+	/* 汉字（Figma: 字面 16px 墨黑 #0E0F0C 衬线；行高 1.5em≥字号，官方建议防原生端字形上缘裁剪） */
 	.poem-char {
 		font-size: 33rpx;
-		line-height: 31rpx;
+		line-height: 50rpx;
 		color: $bai-ink;
 		font-family: $bai-font-serif;
 	}

@@ -180,3 +180,17 @@ export const useUserStore = defineStore('user', () => {
 		clearUser
 	}
 })
+
+/** 头像 key 与静态资源路径映射（数据库存 key；未知 key 回退 hong）——全局共享，页面勿重复定义 */
+export function avatarPathOf(key: string) : string {
+	if (key == 'hei') {
+		return '/static/touxiang/hei.png'
+	}
+	if (key == 'huang') {
+		return '/static/touxiang/huang.png'
+	}
+	if (key == 'lan') {
+		return '/static/touxiang/lan.png'
+	}
+	return '/static/touxiang/hong.png'
+}

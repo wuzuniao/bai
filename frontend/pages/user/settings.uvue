@@ -83,7 +83,7 @@
 <script setup lang="uts">
 	import NoticeButton from '@/components/NoticeButton/NoticeButton.uvue'
 	import BottomNavBar from '@/components/BottomNavBar/BottomNavBar.uvue'
-	import { useUserStore } from '@/stores/user.uts'
+	import { useUserStore, avatarPathOf } from '@/stores/user.uts'
 
 	const userStore = useUserStore()
 
@@ -177,17 +177,6 @@
 		}
 		return info.signature
 	})
-
-	/** 头像 key 与静态资源路径映射（数据库存 key） */
-	function avatarPathOf(key: string) : string {
-		if (key == 'hei') {
-			return '/static/touxiang/hei.png'
-		}
-		if (key == 'lan') {
-			return '/static/touxiang/lan.png'
-		}
-		return '/static/touxiang/hong.png'
-	}
 
 	// 头像：未登录使用默认头像 hong；已登录从用户信息取，字段为空则不显示
 	const avatarUrl = computed((): string => {

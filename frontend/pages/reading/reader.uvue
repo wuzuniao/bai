@@ -43,17 +43,18 @@
 								<view
 									v-for="(item, vi) in chapterParagraphItems(cid)"
 									:key="cid + '-' + item.origin"
-									class="novel-paragraph"
-									@longpress="onLongPress(item.origin)"
+									class="novel-paragraph para-scroll"
+									:id="'scroll-para-' + cid + '-' + item.origin"
+									@longpress="onLongPress(item.origin, cid, $event)"
+									@click="onParaTap($event, item.origin, cid)"
 								>
 									<text class="novel-text">
-										<text v-if="item.underlined" class="para-underlined">{{ item.text }}</text>
-										<text v-else-if="selectedIdx === item.origin && currentChapterId === cid">
-											<text>{{ selBefore }}</text>
-											<text class="para-highlight">{{ selSelected }}</text>
-											<text>{{ selAfter }}</text>
-										</text>
-										<text v-else>{{ item.text }}</text>
+										<text
+											v-for="(seg, si) in paragraphSegments(item.origin, cid)"
+											:key="si"
+											:id="seg.anchor == 1 ? 'sel-anchor-start' : (seg.anchor == 2 ? 'sel-anchor-end' : '')"
+											:class="segClass(seg)"
+										>{{ seg.text }}</text>
 									</text>
 								</view>
 							</view>
@@ -76,18 +77,20 @@
 						<view class="novel-body" :style="'font-size:' + fontSize + 'px;color:' + bodyColor + ';font-family:' + fontFamily">
 							<view
 								v-for="(item, vi) in currentPageItems"
-								:key="item.origin"
-								class="novel-paragraph"
-								@longpress="onLongPress(item.origin)"
-							>
+									:key="item.origin"
+									class="novel-paragraph para-page"
+									:id="'ppara-' + item.origin"
+									@longpress="onLongPress(item.origin, -1, $event)"
+									@click="onParaTap($event, item.origin, -1)"
+								>
 								<text class="novel-text">
-									<text v-if="item.underlined" class="para-underlined" :style="'font-size:' + fontSize + 'px'">{{ item.text }}</text>
-									<text v-else-if="selectedIdx === item.origin" :style="'font-size:' + fontSize + 'px'">
-										<text>{{ selBefore }}</text>
-										<text class="para-highlight">{{ selSelected }}</text>
-										<text>{{ selAfter }}</text>
-									</text>
-									<text v-else :style="'font-size:' + fontSize + 'px'">{{ item.text }}</text>
+									<text
+										v-for="(seg, si) in paragraphSegments(item.origin, currentChapterId)"
+										:key="si"
+										:id="seg.anchor == 1 ? 'sel-anchor-start' : (seg.anchor == 2 ? 'sel-anchor-end' : '')"
+										:class="segClass(seg)"
+										:style="'font-size:' + fontSize + 'px'"
+									>{{ seg.text }}</text>
 								</text>
 							</view>
 						</view>
@@ -118,8 +121,12 @@
 								class="novel-paragraph"
 							>
 								<text class="novel-text">
-									<text v-if="item.underlined" class="para-underlined" :style="'font-size:' + fontSize + 'px'">{{ item.text }}</text>
-									<text v-else :style="'font-size:' + fontSize + 'px'">{{ item.text }}</text>
+									<text
+										v-for="(seg, si) in paragraphSegments(item.origin, prevPageChapterId)"
+										:key="si"
+										:class="segClass(seg)"
+										:style="'font-size:' + fontSize + 'px'"
+									>{{ seg.text }}</text>
 								</text>
 							</view>
 						</view>
@@ -148,8 +155,12 @@
 								class="novel-paragraph"
 							>
 								<text class="novel-text">
-									<text v-if="item.underlined" class="para-underlined" :style="'font-size:' + fontSize + 'px'">{{ item.text }}</text>
-									<text v-else :style="'font-size:' + fontSize + 'px'">{{ item.text }}</text>
+									<text
+										v-for="(seg, si) in paragraphSegments(item.origin, nextPageChapterId)"
+										:key="si"
+										:class="segClass(seg)"
+										:style="'font-size:' + fontSize + 'px'"
+									>{{ seg.text }}</text>
 								</text>
 							</view>
 						</view>
@@ -171,25 +182,111 @@
 			</view>
 		</view>
 
-		<!-- 划词气泡（Stitch: 黑底圆角 12px，复制/写想法/划线竖排图标+文字，底部三角指向选区） -->
-		<view v-if="selectedIdx >= 0" class="selection-popover" @click="clearSelection">
-			<view class="popover-body" :style="'background-color:' + popoverBg">
-				<view class="popover-btn" @click="onPopoverAction('copy')">
-					<image class="popover-icon" src="/static/icons/popover-copy.svg" />
-					<text class="popover-text">复制</text>
-				</view>
-				<view class="popover-divider"></view>
-				<view class="popover-btn" @click="onPopoverAction('idea')">
-					<image class="popover-icon" src="/static/icons/popover-idea.svg" />
-					<text class="popover-text">写想法</text>
-				</view>
-				<view class="popover-divider"></view>
-				<view class="popover-btn" @click="onPopoverAction('underline')">
-					<image class="popover-icon" src="/static/icons/popover-underline.svg" />
-					<text class="popover-text">划线</text>
-				</view>
-				<view class="popover-arrow"></view>
+		<!-- 划词手柄（选区两端水滴形大手柄：拖动调节选中范围，触摸热区大于视觉体便于拖动；锚点实测完成后才显示，避免位置跳变） -->
+		<template v-if="selectionLaidOut">
+			<view
+				id="sel-handle-start"
+				class="sel-handle sel-handle-start"
+				:style="'left:' + handleStartLeft + 'px;top:' + handleStartTop + 'px'"
+				@touchstart="onStartHandleTouchStart"
+				@touchmove="onStartHandleTouchMove"
+				@touchend="onStartHandleTouchEnd"
+				@touchcancel="onStartHandleTouchEnd"
+			>
+				<view class="sel-handle-drop"></view>
+				<view class="sel-handle-tip sel-handle-tip-down"></view>
 			</view>
+			<view
+				id="sel-handle-end"
+				class="sel-handle sel-handle-end"
+				:style="'left:' + handleEndLeft + 'px;top:' + handleEndTop + 'px'"
+				@touchstart="onEndHandleTouchStart"
+				@touchmove="onEndHandleTouchMove"
+				@touchend="onEndHandleTouchEnd"
+				@touchcancel="onEndHandleTouchEnd"
+			>
+				<view class="sel-handle-tip sel-handle-tip-up"></view>
+				<view class="sel-handle-drop"></view>
+			</view>
+		</template>
+
+		<!-- 划词气泡（Stitch: 黑底圆角 12px，复制/写想法/划线竖排图标+文字；三角为体旁旋转方块，动态指向按住位置，拖动手柄中隐藏） -->
+		<view
+			v-if="popoverVisible"
+			class="selection-popover"
+			:style="'left:' + popoverLeft + 'px;top:' + popoverTop + 'px'"
+			@click="clearSelection"
+		>
+			<!-- 气泡在选区下方时三角贴体顶朝上 -->
+			<view
+				v-if="popoverBelow"
+				class="popover-arrow popover-arrow-above"
+				:style="'margin-left:' + arrowLeft + 'px;background-color:' + popoverBg"
+			></view>
+			<view class="popover-body" :class="popoverTwoLine ? 'popover-body-two' : ''" :style="'background-color:' + popoverBg">
+				<template v-if="popoverTwoLine">
+					<view class="popover-row">
+						<view class="popover-btn" @click="onPopoverAction($event, 'copy')">
+							<image class="popover-icon" src="/static/icons/popover-copy.svg" />
+							<text class="popover-text">复制</text>
+						</view>
+						<view class="popover-divider"></view>
+						<view class="popover-btn" @click="onPopoverAction($event, 'idea')">
+							<image class="popover-icon" src="/static/icons/popover-idea.svg" />
+							<text class="popover-text">写想法</text>
+						</view>
+						<view class="popover-divider"></view>
+						<view class="popover-btn" @click="onPopoverAction($event, 'underline')">
+							<image class="popover-icon" src="/static/icons/popover-underline.svg" />
+							<text class="popover-text">划线</text>
+						</view>
+					</view>
+					<view class="popover-divider-h"></view>
+					<view class="popover-row">
+						<view class="popover-btn" @click="onPopoverAction($event, 'query')">
+							<image class="popover-icon" src="/static/icons/popover-query.svg" />
+							<text class="popover-text">查询</text>
+						</view>
+						<view class="popover-divider"></view>
+						<view class="popover-btn" @click="onPopoverAction($event, 'share')">
+							<image class="popover-icon" src="/static/icons/popover-share.svg" />
+							<text class="popover-text">分享</text>
+						</view>
+					</view>
+				</template>
+				<template v-else>
+					<view class="popover-btn" @click="onPopoverAction($event, 'copy')">
+						<image class="popover-icon" src="/static/icons/popover-copy.svg" />
+						<text class="popover-text">复制</text>
+					</view>
+					<view class="popover-divider"></view>
+					<view class="popover-btn" @click="onPopoverAction($event, 'idea')">
+						<image class="popover-icon" src="/static/icons/popover-idea.svg" />
+						<text class="popover-text">写想法</text>
+					</view>
+					<view class="popover-divider"></view>
+					<view class="popover-btn" @click="onPopoverAction($event, 'underline')">
+						<image class="popover-icon" src="/static/icons/popover-underline.svg" />
+						<text class="popover-text">划线</text>
+					</view>
+					<view class="popover-divider"></view>
+					<view class="popover-btn" @click="onPopoverAction($event, 'query')">
+						<image class="popover-icon" src="/static/icons/popover-query.svg" />
+						<text class="popover-text">查询</text>
+					</view>
+					<view class="popover-divider"></view>
+					<view class="popover-btn" @click="onPopoverAction($event, 'share')">
+						<image class="popover-icon" src="/static/icons/popover-share.svg" />
+						<text class="popover-text">分享</text>
+					</view>
+				</template>
+			</view>
+			<!-- 气泡在选区上方时三角贴体底朝下 -->
+			<view
+				v-if="!popoverBelow"
+				class="popover-arrow popover-arrow-below"
+				:style="'margin-left:' + arrowLeft + 'px;background-color:' + popoverBg"
+			></view>
 		</view>
 
 		<!-- 顶部导航菜单（Stitch: 返回/书名，呼出态从顶部滑入；内容行与小程序胶囊同行） -->
@@ -224,14 +321,16 @@
 						<text :class="drawerTab === 'catalog' ? 'drawer-tab-title' : 'drawer-tab-plain'">目录</text>
 						<text v-if="drawerTab === 'catalog'" class="drawer-tab-sort" @click="onSortTap($event)">{{ orderDesc ? '↓↑' : '⇅' }}</text>
 					</view>
-					<text class="drawer-tab-plain" @click="showToast('暂无想法与划线记录')">想法/划线</text>
+					<view :class="drawerTab === 'note' ? 'drawer-tab-active' : 'drawer-tab-plain'" @click="switchDrawerTab('note')">
+						<text :class="drawerTab === 'note' ? 'drawer-tab-title' : 'drawer-tab-plain'">想法/划线</text>
+					</view>
 					<view :class="drawerTab === 'bookmark' ? 'drawer-tab-active' : 'drawer-tab-plain'" @click="switchDrawerTab('bookmark')">
 						<text :class="drawerTab === 'bookmark' ? 'drawer-tab-title' : 'drawer-tab-plain'">书签</text>
 					</view>
 				</view>
 				<scroll-view class="drawer-list" direction="vertical" :show-scrollbar="false">
 					<!-- 目录页 -->
-					<template v-if="drawerTab === 'catalog'">
+					<view v-if="drawerTab === 'catalog'">
 						<view
 							v-for="(ch, ci) in displayChapters"
 							:key="ch.id"
@@ -240,9 +339,24 @@
 						>
 							<text class="chapter-item-text" :class="ch.active ? 'chapter-item-text-active' : ''" :style="'color:' + (ch.active ? activeBlue : chapterTextColor)">{{ ch.title }}</text>
 						</view>
-					</template>
+					</view>
+					<!-- 想法/划线页：划线记录卡片（随划线与取消划线实时同步） -->
+					<view v-else-if="drawerTab === 'note'">
+						<view v-if="noteRecords.length == 0" class="bookmark-empty">
+							<text class="bookmark-empty-text" :style="'color:' + mutedColor">暂无划线记录，长按正文即可划线</text>
+						</view>
+						<view
+							v-for="(r, ri) in noteRecords"
+							:key="ri"
+							class="note-item"
+							@click="goToUnderline(r)"
+						>
+							<text class="note-item-text" :style="'color:' + mutedColor">{{ r.quote }}</text>
+							<text v-if="r.content.length > 0" class="note-item-content" :style="'color:' + chapterTextColor">{{ r.content }}</text>
+						</view>
+					</view>
 					<!-- 书签页 -->
-					<template v-else>
+					<view v-else>
 						<view v-if="bookmarks.length == 0" class="bookmark-empty">
 							<text class="bookmark-empty-text" :style="'color:' + mutedColor">书签列表为空，正文下滑即可添加书签</text>
 						</view>
@@ -255,7 +369,7 @@
 							<image class="bookmark-item-icon" :src="themeIcon('reader-bookmark-active')" />
 							<text class="bookmark-item-text" :style="'color:' + chapterTextColor">{{ bookmarkLabel(bm) }}</text>
 						</view>
-					</template>
+					</view>
 				</scroll-view>
 			</view>
 			<!-- 设置面板（Stitch: 字号/背景/翻页，展开时隐藏顶栏与听书球） -->
@@ -350,7 +464,7 @@
 				</view>
 				<view class="bottom-nav-btn" @click="toggleNightMode">
 					<image class="bottom-nav-icon" :src="nightMode ? '/static/icons/reader-sun.svg' : themeIcon('reader-moon')" />
-					<text class="bottom-nav-text" :style="'color:' + titleColor">{{ nightMode ? '日间' : '夜间' }}</text>
+					<text class="bottom-nav-text" :style="'color:' + titleColor">{{ nightMode ? '白天' : '夜晚' }}</text>
 				</view>
 				<view class="bottom-nav-btn" @click="toggleSettings">
 					<image class="bottom-nav-icon" :src="themeIcon('reader-settings')" />
@@ -372,6 +486,80 @@
 				</view>
 			</view>
 
+		<!-- 想法编辑器（多行输入框浮层：上方双引号引用高亮文本，确认后保存想法并同步划线；点击拦截已移除避免微信端 textarea 聚焦失效） -->
+		<view v-if="thoughtEditorOpen" class="thought-mask">
+			<view class="thought-dialog">
+				<text class="thought-title">写想法</text>
+				<view class="thought-quote">
+					<text class="thought-quote-text" :style="'color:' + mutedColor"><text class="thought-quote-mark">“</text>{{ thoughtQuote }}<text class="thought-quote-mark">”</text></text>
+				</view>
+				<textarea
+					class="thought-input"
+					v-model="thoughtInput"
+					placeholder="写下你的想法…"
+					:maxlength="10000"
+					:focus="thoughtInputFocus"
+					auto-height
+					:style="'max-height:' + thoughtInputMaxH + 'px'"
+				/>
+				<view class="thought-actions">
+					<view class="thought-btn-cancel" @click="cancelThought">
+						<text class="thought-btn-cancel-text">取消</text>
+					</view>
+					<view class="thought-btn-confirm" @click="confirmThought">
+						<text class="thought-btn-confirm-text">保存</text>
+					</view>
+				</view>
+			</view>
+		</view>
+
+		<!-- 想法查看（锚定划线下方/上方只读浮层：仅展示想法内容，超长内部滚动，点击任意处关闭；配色随主题切换） -->
+		<view v-if="thoughtViewOpen" class="thought-view-mask" @click="closeThoughtView">
+			<view
+				class="thought-view-panel"
+				:style="'left:' + thoughtViewLeft + 'px;top:' + thoughtViewTop + 'px;width:' + thoughtViewW + 'px;background-color:' + thoughtViewPanelBg + ';box-shadow:' + panelShadow"
+				@click="closeThoughtView"
+			>
+				<scroll-view scroll-y class="thought-view-scroll" :style="'max-height:' + thoughtViewMaxH + 'px'">
+					<text class="thought-view-content" :style="'color:' + titleColor">{{ thoughtViewContent }}</text>
+				</scroll-view>
+			</view>
+		</view>
+
+		<!-- 分享卡片预览（头像半出卡片顶部正中/产品名/引文渐出/想法预览限高滚动；导出为全量长图；分享按钮仅微信端） -->
+		<view v-if="shareOpen" class="share-mask" @click="closeShare">
+			<view class="share-pop">
+				<view class="share-card">
+					<text class="share-card-app">无足鸟古诗词学习助手</text>
+					<scroll-view scroll-y class="share-card-scroll" :style="'max-height:' + shareCardMaxH + 'px'">
+						<text class="share-card-text">
+							<text class="share-ctx-far">{{ shareCtxFarBefore }}</text><text class="share-ctx-near">{{ shareCtxNearBefore }}</text><text class="share-quote-mark">“</text><text class="share-quote-main">{{ shareQuote }}</text><text class="share-quote-mark">”</text><text class="share-ctx-near">{{ shareCtxNearAfter }}</text><text class="share-ctx-far">{{ shareCtxFarAfter }}</text>
+						</text>
+						<view v-if="shareThought.length > 0" class="share-card-thought">
+							<text class="share-card-thought-text">{{ shareThought }}</text>
+						</view>
+					</scroll-view>
+					<text class="share-card-source">《{{ BOOK_TITLE }}》 · {{ shareSource }}</text>
+				</view>
+				<view class="share-card-logo-ring">
+					<image class="share-card-logo" :src="shareLogoSrc" />
+				</view>
+				<view class="share-actions">
+					<view class="share-action" @click="saveShareImage">
+						<text class="share-action-text">保存为图片</text>
+					</view>
+					<!-- #ifdef MP-WEIXIN -->
+					<button class="share-action share-action-share" open-type="share">
+						<text class="share-action-text share-action-text-primary">分享</text>
+					</button>
+					<!-- #endif -->
+				</view>
+			</view>
+		</view>
+
+		<!-- 分享卡片绘制画布（隐藏，仅用于导出图片） -->
+		<canvas id="share-canvas" type="2d" class="share-canvas"></canvas>
+
 		<!-- 全局提示（页面正中卡片弹窗，1.5s 自动消失；夜间提亮卡片底色） -->
 		<view v-if="toastVisible" class="reader-toast">
 			<text class="reader-toast-text" :style="nightMode ? 'background-color:rgba(44, 44, 44, 0.98)' : ''">{{ toastMsg }}</text>
@@ -381,18 +569,16 @@
 
 <script setup lang="uts">
 	import { READER_THEME_LIGHT, READER_THEME_NIGHT, READER_THEME_PAPER } from '@/utils/theme.uts'
+	import { useUserStore, avatarPathOf } from '@/stores/user.uts'
 
 	type Paragraph = {
 		text: string
-		/** 划线标记（气泡"划线"后持久为波浪下划线样式） */
-		underlined: boolean
 	}
 
 	/** 当前页渲染项（origin 为段落在章内的索引，划词状态按其定位） */
 	type PageItem = {
 		origin: number
 		text: string
-		underlined: boolean
 	}
 
 	type Chapter = {
@@ -409,18 +595,18 @@
 
 	/** 章节正文示例内容（Stitch 原型 7 段 + 剧情延续示例；后续接入后端按章加载） */
 	const paragraphs = ref<Paragraph[]>([
-		{ text: '深秋时节，黄叶飘落，恰逢秋雨绵绵，冷风一吹，怎一个愁字了得。', underlined: false } as Paragraph,
-		{ text: '李唯独自一人走在公园的小路上，就像是一只被遗弃的流浪狗，从里到外，都是湿漉漉，冰凉凉的。', underlined: false } as Paragraph,
-		{ text: '灰败的心情，灰败的天地，像极了他注定灰败的一生。', underlined: false } as Paragraph,
-		{ text: '正麻木时。', underlined: false } as Paragraph,
-		{ text: '“嘀！”的一声在耳畔响起，这本是寻常的声音，但不知为何，他却有一种时间都被暂停的错觉。', underlined: false } as Paragraph,
-		{ text: '连那细密的雨雾，在此刻都清晰可见的被定住。', underlined: false } as Paragraph,
-		{ text: '然后，一张灰扑扑的卡片出现在眼前。', underlined: false } as Paragraph,
-		{ text: '李唯怔怔地望着那张卡片，卡片表面粗糙得像是被砂纸打磨过，边角处还沾着一点怎么也洗不掉的泥渍。', underlined: false } as Paragraph,
-		{ text: '他下意识地环顾四周，公园里空无一人，连方才那种雨雾凝滞的错觉也消失得无影无踪。', underlined: false } as Paragraph,
-		{ text: '就在他以为自己出现了幻觉的时候，卡片正中央忽然亮起了一行淡金色的字。', underlined: false } as Paragraph,
-		{ text: '【签到成功，获得新手礼包一份】', underlined: false } as Paragraph,
-		{ text: '字迹浮现的瞬间，一段陌生的记忆如同潮水般涌进了他的脑海。', underlined: false } as Paragraph
+		{ text: '深秋时节，黄叶飘落，恰逢秋雨绵绵，冷风一吹，怎一个愁字了得。' } as Paragraph,
+		{ text: '李唯独自一人走在公园的小路上，就像是一只被遗弃的流浪狗，从里到外，都是湿漉漉，冰凉凉的。' } as Paragraph,
+		{ text: '灰败的心情，灰败的天地，像极了他注定灰败的一生。' } as Paragraph,
+		{ text: '正麻木时。' } as Paragraph,
+		{ text: '“嘀！”的一声在耳畔响起，这本是寻常的声音，但不知为何，他却有一种时间都被暂停的错觉。' } as Paragraph,
+		{ text: '连那细密的雨雾，在此刻都清晰可见的被定住。' } as Paragraph,
+		{ text: '然后，一张灰扑扑的卡片出现在眼前。' } as Paragraph,
+		{ text: '李唯怔怔地望着那张卡片，卡片表面粗糙得像是被砂纸打磨过，边角处还沾着一点怎么也洗不掉的泥渍。' } as Paragraph,
+		{ text: '他下意识地环顾四周，公园里空无一人，连方才那种雨雾凝滞的错觉也消失得无影无踪。' } as Paragraph,
+		{ text: '就在他以为自己出现了幻觉的时候，卡片正中央忽然亮起了一行淡金色的字。' } as Paragraph,
+		{ text: '【签到成功，获得新手礼包一份】' } as Paragraph,
+		{ text: '字迹浮现的瞬间，一段陌生的记忆如同潮水般涌进了他的脑海。' } as Paragraph
 	])
 
 	/** 目录章节与正文页章节信息（Stitch 示例） */
@@ -523,7 +709,7 @@
 		const breaks = pageBreaks.value
 		const page = pi >= 0 && pi < breaks.length ? breaks[pi] : []
 		return page.map((i) : PageItem => {
-			return { origin: i, text: paras[i].text, underlined: paras[i].underlined } as PageItem
+			return { origin: i, text: paras[i].text } as PageItem
 		})
 	}
 
@@ -535,7 +721,7 @@
 	/** 上下滚动模式：整章段落连续渲染（滚动多少显示多少） */
 	const allParagraphItems = computed(() : PageItem[] => {
 		return paragraphs.value.map((p, i) : PageItem => {
-			return { origin: i, text: p.text, underlined: p.underlined } as PageItem
+			return { origin: i, text: p.text } as PageItem
 		})
 	})
 
@@ -574,6 +760,10 @@
 	/** 滚动模式实时滚动位置（仅内存记录，随 onHide/onUnload 持久化）；滚动阅读时隐藏上下控制项，并淡入页脚、停止后淡出 */
 	function onScrollModeScroll(e : UniScrollEvent) : void {
 		scrollModePos.value = e.detail.scrollTop
+		// 滚动使内容位移，选区与手柄位置失效，随滚动清除
+		if (selSpan.value != null) {
+			clearSelection()
+		}
 		if (menuVisible.value) {
 			menuVisible.value = false
 		}
@@ -626,7 +816,7 @@
 	/** 指定章的段落渲染项（key 带章 id 防止多章同段落索引冲突） */
 	function chapterParagraphItems(cid : number) : PageItem[] {
 		return paragraphs.value.map((p, i) : PageItem => {
-			return { origin: i, text: p.text, underlined: p.underlined } as PageItem
+			return { origin: i, text: p.text } as PageItem
 		})
 	}
 
@@ -896,6 +1086,147 @@
 		}
 	}
 
+	/** ===== 划线与想法（本地持久化）：划线按「章+段落」记录（多章共用原型正文时仅划线发生章显示划线），想法关联到记录区间 ===== */
+	type UnderlineEntry = {
+		/** 划线发生所在章 */
+		cid: number
+		origin: number
+		/** 段内字符索引闭区间 [start, end] 列表 */
+		ranges: number[][]
+	}
+
+	type Thought = {
+		/** 想法选区（跨段）：从起点段/字符到终点段/字符 */
+		fromCid : number
+		fromOrigin : number
+		fromStart : number
+		toCid : number
+		toOrigin : number
+		toEnd : number
+		/** 保存时的划线文本快照 */
+		quote: string
+		content: string
+	}
+
+	/** 判定想法覆盖某章某段落的某字符（跨段选区） */
+	/** 判定想法覆盖某章某段落的某字符（跨段跨章选区，章 id 升序即阅读顺序） */
+	function thoughtCovers(t : Thought, cid : number, origin : number, charIdx : number) : boolean {
+		if (cid < t.fromCid || cid > t.toCid) {
+			return false
+		}
+		if (t.fromCid == t.toCid) {
+			if (origin < t.fromOrigin || origin > t.toOrigin) {
+				return false
+			}
+			if (origin == t.fromOrigin && origin == t.toOrigin) {
+				return charIdx >= t.fromStart && charIdx <= t.toEnd
+			}
+			if (origin == t.fromOrigin) {
+				return charIdx >= t.fromStart
+			}
+			if (origin == t.toOrigin) {
+				return charIdx <= t.toEnd
+			}
+			return true
+		}
+		if (cid == t.fromCid) {
+			if (origin < t.fromOrigin) {
+				return false
+			}
+			return origin > t.fromOrigin || charIdx >= t.fromStart
+		}
+		if (cid == t.toCid) {
+			if (origin > t.toOrigin) {
+				return false
+			}
+			return origin < t.toOrigin || charIdx <= t.toEnd
+		}
+		return true
+	}
+
+	const STORAGE_UNDERLINES = 'reader_underlines'
+	const STORAGE_THOUGHTS = 'reader_thoughts'
+
+	const underlineStore = ref<UnderlineEntry[]>([])
+	const thoughts = ref<Thought[]>([])
+
+	/** 查找章+段落的划线记录 */
+	function findUnderlineEntry(cid : number, origin : number) : UnderlineEntry | null {
+		for (const e of underlineStore.value) {
+			if (e.cid == cid && e.origin == origin) {
+				return e
+			}
+		}
+		return null
+	}
+
+	/** 读取章+段落的划线区间（无则空列表） */
+	function rangesAt(cid : number, origin : number) : number[][] {
+		const e = findUnderlineEntry(cid, origin)
+		return e != null ? e.ranges : [] as number[][]
+	}
+
+	/** 跨段区间与某章某段落的交集（[start, end] 单元素或空数组）：同章取起点段到终点段之间、起点章取起点段及之后、终点章取终点段及之前、中间章全段 */
+	function spanRangeAt(fromCid : number, fromOrigin : number, fromStart : number, toCid : number, toOrigin : number, toEnd : number, renderCid : number, origin : number) : number[] {
+		const full : number[] = [0, paragraphs.value[origin].text.length - 1]
+		if (fromCid == toCid && fromOrigin == toOrigin) {
+			return origin == fromOrigin ? [fromStart, toEnd] : ([] as number[])
+		}
+		if (renderCid == fromCid && renderCid == toCid) {
+			// 同章：起点段到终点段之间的所有段落
+			if (origin >= fromOrigin && origin <= toOrigin) {
+				return [origin == fromOrigin ? fromStart : 0, origin == toOrigin ? toEnd : full[1]]
+			}
+			return [] as number[]
+		}
+		if (renderCid == fromCid) {
+			// 起点章：起点段及其之后的段落
+			if (origin >= fromOrigin) {
+				return [origin == fromOrigin ? fromStart : 0, full[1]]
+			}
+			return [] as number[]
+		}
+		if (renderCid == toCid) {
+			// 终点章：终点段及其之前的段落
+			if (origin <= toOrigin) {
+				return [0, origin == toOrigin ? toEnd : full[1]]
+			}
+			return [] as number[]
+		}
+		if (renderCid > fromCid && renderCid < toCid) {
+			// 中间章：全段
+			return full
+		}
+		return [] as number[]
+	}
+
+	/** 恢复本地划线与想法 */
+	{
+		const storedUl : any = uni.getStorageSync(STORAGE_UNDERLINES)
+		if (typeof storedUl == 'string' && (storedUl as string).length > 0) {
+			const list = JSON.parse<Array<UnderlineEntry>>(storedUl as string)
+			if (list != null) {
+				underlineStore.value = list
+			}
+		}
+		const storedTh : any = uni.getStorageSync(STORAGE_THOUGHTS)
+		if (typeof storedTh == 'string' && (storedTh as string).length > 0) {
+			const list = JSON.parse<Array<Thought>>(storedTh as string)
+			if (list != null) {
+				thoughts.value = list
+			}
+		}
+	}
+
+	/** 持久化划线与想法 */
+	function saveUnderlines() : void {
+		uni.setStorageSync(STORAGE_UNDERLINES, JSON.stringify(underlineStore.value))
+	}
+
+	function saveThoughts() : void {
+		uni.setStorageSync(STORAGE_THOUGHTS, JSON.stringify(thoughts.value))
+	}
+
 	/** 当前页是否已有书签 */
 	function indexOfBookmark() : number {
 		for (let i = 0; i < bookmarks.value.length; i++) {
@@ -1054,6 +1385,48 @@
 		drawerOpen.value = false
 	}
 
+	/** 跳转到划线记录位置并关闭抽屉：分页定位到记录章的所在页（跨章先切章），滚动模式定位到记录章的段落锚点（章未加载时先重置加载该章） */
+	function goToUnderline(r : NoteRecord) : void {
+		if (pageTurn.value == '滚动') {
+			if (scrollChapters.value.indexOf(r.cid) < 0) {
+				// 记录章未在滚动序列中：重置为仅加载该章，从头定位
+				scrollChapters.value = [r.cid]
+				scrollIntoView.value = ''
+				scrollModeTop.value = 0
+				scrollModePos.value = 0
+				currentChapterId.value = r.cid
+				const targetLate = 'scroll-para-' + r.cid + '-' + r.origin
+				setTimeout(() => {
+					scrollIntoView.value = targetLate
+				}, 300)
+			} else {
+				// 先清空再设值，重复点击同一记录也能重新触发滚动
+				scrollIntoView.value = ''
+				const target = 'scroll-para-' + r.cid + '-' + r.origin
+				setTimeout(() => {
+					scrollIntoView.value = target
+				}, 50)
+			}
+		} else {
+			if (r.cid != currentChapterId.value) {
+				goToChapter(r.cid, false)
+			}
+			let targetPage = -1
+			for (let pi = 0; pi < pageBreaks.value.length; pi++) {
+				if (pageBreaks.value[pi].indexOf(r.origin) >= 0) {
+					targetPage = pi
+					break
+				}
+			}
+			if (targetPage >= 0) {
+				pageIndex.value = targetPage
+			}
+		}
+		clearSelection()
+		saveProgress()
+		drawerOpen.value = false
+	}
+
 	/** 抽屉页签切换（进入目录页签时恢复正序浏览态由 orderDesc 独立控制） */
 	function switchDrawerTab(tab : string) : void {
 		drawerTab.value = tab
@@ -1065,11 +1438,746 @@
 		toggleOrder()
 	}
 
-	/** 划词状态（Stitch: 长按选中段落 22%-72% 区间） */
-	const selectedIdx = ref(-1)
-	const selBefore = ref('')
-	const selSelected = ref('')
-	const selAfter = ref('')
+	/** 划词状态（跨段选区：从起点段/字符到终点段/字符的闭区间，手柄拖动可跨段落选择） */
+	type SelSpan = {
+		fromCid : number
+		fromOrigin : number
+		fromStart : number
+		toCid : number
+		toOrigin : number
+		toEnd : number
+	}
+	const selSpan = ref<SelSpan | null>(null)
+	/** 起点段视口位置（px，长按时缓存；滚动/翻页/字号变化即清选区防止手柄错位） */
+	const selRectLeft = ref(0)
+	const selRectTop = ref(0)
+	/** 手柄位置（px，视口坐标，随选区端点更新） */
+	const handleStartLeft = ref(0)
+	const handleStartTop = ref(0)
+	const handleEndLeft = ref(0)
+	const handleEndTop = ref(0)
+	/** 选区几何（px，视口坐标，气泡定位用）：估算即时填充，锚点实测后覆盖为真实值 */
+	const selTopPx = ref(0)
+	const selBottomPx = ref(0)
+	/** 选区两端锚点（零宽字符，排入选中文本流）：其渲染位置即字符边界的真实位置，手柄/气泡吸附实测值 */
+	const ANCHOR_CHAR = '\u200B'
+	let anchorStart : NodeInfo | null = null
+	let anchorEnd : NodeInfo | null = null
+	/** 手柄热区/视觉体尺寸（rpx）：热区大于视觉体便于拖动 */
+	const HANDLE_HOT_RPX = 76
+	const HANDLE_VISUAL_RPX = 50
+	/** 句末标点与闭合引号（句界扫描：句末标点后紧跟闭合引号视为引用嵌入、非句子边界） */
+	const SENTENCE_END_CHARS = '。！？!?…'
+	const SENTENCE_CLOSERS = '”』」）)】》"'
+
+		/** 当前选区文本（跨段拼接，段间换行；复用 spanSegs 段序列，段内字符长度与段落数严格区分） */
+		function selectionText() : string {
+			const s0 = selSpan.value
+			if (s0 == null) {
+				return ''
+			}
+			let out = ''
+			for (const seg of spanSegs(s0)) {
+				if (seg.end < seg.start) {
+					continue
+				}
+				if (out.length > 0) {
+					out += '\n'
+				}
+				out += paragraphs.value[seg.origin].text.slice(seg.start, seg.end + 1)
+			}
+			return out
+		}
+
+		/** 选区覆盖的段序列（含首末部分段与中间整段；跨章时按章连续展开；段落数上限防御） */
+		type SpanSeg = {
+			cid : number
+			origin : number
+			start : number
+			end : number
+		}
+
+		function spanSegs(s0 : SelSpan) : SpanSeg[] {
+			const s = normalizeSpan(s0)
+			const segs : SpanSeg[] = []
+			const paraTotal = paragraphs.value.length
+			const fromTextLen = paragraphs.value[s.fromOrigin].text.length
+			if (s.toCid == s.fromCid && s.toOrigin == s.fromOrigin) {
+				if (s.toEnd >= s.fromStart) {
+					segs.push({ cid: s.fromCid, origin: s.fromOrigin, start: s.fromStart, end: s.toEnd } as SpanSeg)
+				}
+				return segs
+			}
+			segs.push({ cid: s.fromCid, origin: s.fromOrigin, start: s.fromStart, end: fromTextLen - 1 } as SpanSeg)
+			if (s.toCid == s.fromCid) {
+				for (let o = s.fromOrigin + 1; o < s.toOrigin && o < paraTotal; o++) {
+					segs.push({ cid: s.fromCid, origin: o, start: 0, end: paragraphs.value[o].text.length - 1 } as SpanSeg)
+				}
+			} else {
+				for (let o = s.fromOrigin + 1; o < paraTotal; o++) {
+					segs.push({ cid: s.fromCid, origin: o, start: 0, end: paragraphs.value[o].text.length - 1 } as SpanSeg)
+				}
+				for (let c = s.fromCid + 1; c < s.toCid && c < paraTotal; c++) {
+					for (let o = 0; o < paraTotal; o++) {
+						segs.push({ cid: c, origin: o, start: 0, end: paragraphs.value[o].text.length - 1 } as SpanSeg)
+					}
+				}
+				for (let o = 0; o < s.toOrigin && o < paraTotal; o++) {
+					segs.push({ cid: s.toCid, origin: o, start: 0, end: paragraphs.value[o].text.length - 1 } as SpanSeg)
+				}
+			}
+			segs.push({ cid: s.toCid, origin: s.toOrigin, start: 0, end: s.toEnd } as SpanSeg)
+			return segs
+		}
+
+	/** 段落渲染分段（按划线/想法区间与当前选区切分，相邻同属性段合并；选区两端插入零宽锚点段供实测边界坐标） */
+	type TextSeg = {
+		start: number
+		text: string
+		selected: boolean
+		underlined: boolean
+		/** 有想法的区间（下划线样式与纯划线区分，点击可查看想法） */
+		thought: boolean
+		/** 锚点标记：0=普通段 / 1=选区起点锚点段 / 2=选区终点锚点段 */
+		anchor: number
+	}
+
+	/** 段落文本分段：renderCid 为渲染内容所属章（选区/划线/想法按章匹配，多章共用原型正文防串显）；选区支持跨段 */
+	function paragraphSegments(origin : number, renderCid : number) : TextSeg[] {
+		const p = paragraphs.value[origin]
+		const len = p.text.length
+		if (len == 0) {
+			return [] as TextSeg[]
+		}
+		const ranges = rangesAt(renderCid, origin)
+		// 当前章该段落的想法区间（想法段下划线样式与纯划线区分，想法支持跨段）
+		const thoughtRanges : number[][] = []
+		for (const t of thoughts.value) {
+			const r = spanRangeAt(t.fromCid, t.fromOrigin, t.fromStart, t.toCid, t.toOrigin, t.toEnd, renderCid, origin)
+			if (r.length == 2) {
+				thoughtRanges.push(r)
+			}
+		}
+		// 当前章该段落的选区交集（跨段选区）
+		let selS = -1
+		let selE = -1
+		const span = selSpan.value
+		if (span != null) {
+			const r = spanRangeAt(span.fromCid, span.fromOrigin, span.fromStart, span.toCid, span.toOrigin, span.toEnd, renderCid, origin)
+			if (r.length == 2) {
+				selS = r[0]
+				selE = r[1]
+			}
+		}
+		const isSel = selS >= 0 && selE >= selS
+		// 收集切分边界并排序
+		const cuts : number[] = [0, len]
+		if (isSel) {
+			cuts.push(selS)
+			cuts.push(selE + 1)
+		}
+		for (const u of ranges) {
+			cuts.push(u[0])
+			cuts.push(u[1] + 1)
+		}
+		for (const t of thoughtRanges) {
+			cuts.push(t[0])
+			cuts.push(t[1] + 1)
+		}
+		cuts.sort((a : number, b : number) : number => a - b)
+		// 相邻边界成段；同属性相邻普通段合并，锚点段（零宽，带 id）恒独立
+		const segs : TextSeg[] = []
+		for (let i = 0; i < cuts.length - 1; i++) {
+			const a = cuts[i]
+			const b = Math.min(cuts[i + 1], len)
+			if (a >= b || a >= len) {
+				continue
+			}
+			const inSel = isSel && a >= selS && b <= selE + 1
+			let inUl = false
+			for (const u of ranges) {
+				if (a >= u[0] && b <= u[1] + 1) {
+					inUl = true
+					break
+				}
+			}
+			let inThought = false
+			for (const t of thoughtRanges) {
+				if (a >= t[0] && b <= t[1] + 1) {
+					inThought = true
+					break
+				}
+			}
+			// 选区起点锚点段：插在选中首段之前（起点段）
+			if (span != null && inSel && renderCid == span.fromCid && origin == span.fromOrigin) {
+				segs.push({ start: a, text: ANCHOR_CHAR, selected: false, underlined: false, thought: false, anchor: 1 } as TextSeg)
+			}
+			const last = segs.length > 0 ? segs[segs.length - 1] : null
+			if (last != null && last.anchor == 0 && last.selected == inSel && last.underlined == inUl && last.thought == inThought) {
+				last.text = last.text + p.text.slice(a, b)
+			} else {
+				segs.push({ start: a, text: p.text.slice(a, b), selected: inSel, underlined: inUl, thought: inThought, anchor: 0 } as TextSeg)
+			}
+			// 选区终点锚点段：插在选中末段之后（终点段）
+			if (span != null && inSel && renderCid == span.toCid && origin == span.toOrigin) {
+				segs.push({ start: b, text: ANCHOR_CHAR, selected: false, underlined: false, thought: false, anchor: 2 } as TextSeg)
+			}
+		}
+		return segs
+	}
+
+	/** 分段样式类：选区高亮与下划线叠加；想法段实线下划线优先于划线波浪线 */
+	function segClass(seg : TextSeg) : string {
+		let cls = ''
+		if (seg.selected) {
+			cls = cls + 'para-highlight '
+		}
+		if (seg.thought) {
+			cls = cls + 'para-thought'
+		} else if (seg.underlined) {
+			cls = cls + 'para-underlined'
+		}
+		return cls
+	}
+
+	/** 划线段点击协调标志：段落 click 先于父级 content click（微信端无有效 stopPropagation，用标志让父级跳过本次） */
+	let paragraphTapHandled = false
+
+	/** 想法查看面板（锚定划线上/下方：上引用下想法，点击任意处关闭） */
+	const thoughtViewOpen = ref(false)
+	const thoughtViewQuote = ref('')
+	const thoughtViewContent = ref('')
+	const thoughtViewLeft = ref(0)
+	const thoughtViewTop = ref(0)
+	const thoughtViewW = ref(0)
+	/** 面板内容最大高度（px，屏高的 35%，超出内部滚动） */
+	const thoughtViewMaxH = computed(() : number => pageH.value * 0.35)
+	/** 面板底色：夜晚用深色浮层，白天用纯白与页面背景区分 */
+	const thoughtViewPanelBg = computed(() : string => nightMode.value ? menuBottomBg.value : '#ffffff')
+	/** 分享预览卡片内容区限高（px，屏高的 45%，预览可滚动；导出为全量长图不受此限） */
+	const shareCardMaxH = computed(() : number => pageH.value * 0.45)
+	let thoughtViewH = 0
+	const THOUGHT_VIEW_EST_H = 150
+	/** 定位基准：点击划线段的视口上下界（实测校正后重定位用） */
+	let thoughtViewSelBottom = 0
+	let thoughtViewSelTop = 0
+
+	function positionThoughtView(selBottom : number, selTop : number) : void {
+		const margin = uni.upx2px(24)
+		thoughtViewLeft.value = margin
+		thoughtViewW.value = pageW.value - margin * 2
+		const gap = uni.upx2px(16)
+		const h = thoughtViewH > 0 ? thoughtViewH : THOUGHT_VIEW_EST_H
+		const bottomSpace = pageH.value - selBottom - gap - h
+		const topSpace = selTop - gap - h
+		// 下方放得下置下方；否则取上下空间宽裕侧并钳制不出屏
+		if (bottomSpace >= uni.upx2px(60) || bottomSpace >= topSpace) {
+			thoughtViewTop.value = Math.min(selBottom + gap, pageH.value - h - uni.upx2px(40))
+		} else {
+			thoughtViewTop.value = Math.max(navTop.value, selTop - gap - h)
+		}
+	}
+
+	/** 面板显示后实测高度并校正垂直定位（想法长度不同高度不同，每次打开都测） */
+	function measureThoughtView() : void {
+		uni.createSelectorQuery().select('.thought-view-panel').boundingClientRect((rect : NodeInfo | null) : void => {
+			if (rect != null && rect.height > 0) {
+				thoughtViewH = rect.height
+				positionThoughtView(thoughtViewSelBottom, thoughtViewSelTop)
+			}
+		}).exec()
+	}
+
+	function closeThoughtView() : void {
+		thoughtViewOpen.value = false
+	}
+
+	/** ===== 分享卡片（预览弹窗 + canvas 保存到相册 + 微信端转发） ===== */
+	const userStore = useUserStore()
+	const shareOpen = ref(false)
+	/** 卡片正文：上/下文各拆两档透明度实现渐出，选中文本实色 */
+	const shareCtxFarBefore = ref('')
+	const shareCtxNearBefore = ref('')
+	const shareQuote = ref('')
+	const shareCtxNearAfter = ref('')
+	const shareCtxFarAfter = ref('')
+	const shareThought = ref('')
+	const shareSource = ref('')
+	/** 分享卡片头像：登录用户取其头像 key 映射的静态图，未登录/无头像用默认 hei */
+	const shareLogoSrc = computed(() : string => {
+		const info = userStore.userInfo
+		if (info != null && info.avatar_url.length > 0) {
+			return avatarPathOf(info.avatar_url)
+		}
+		return '/static/touxiang/hei.png'
+	})
+
+	function closeShare() : void {
+		shareOpen.value = false
+	}
+
+	/** 打开分享预览：快照选区与上下文（微信端冒泡会清选区）、关联想法、出处；跨段选区取首段前文/末段后文 */
+	function openSharePreview() : void {
+		const s = selSpan.value
+		if (s == null) {
+			return
+		}
+		const fromP = paragraphs.value[s.fromOrigin]
+		const toP = paragraphs.value[s.toOrigin]
+		const ctxStart = Math.max(0, s.fromStart - 24)
+		const ctxEnd = Math.min(toP.text.length, s.toEnd + 25)
+		const before = fromP.text.slice(ctxStart, s.fromStart)
+		const after = toP.text.slice(s.toEnd + 1, ctxEnd)
+		const halfB = Math.ceil(before.length / 2)
+		shareCtxFarBefore.value = before.slice(0, halfB)
+		shareCtxNearBefore.value = before.slice(halfB)
+		const halfA = Math.floor(after.length / 2)
+		shareCtxNearAfter.value = after.slice(0, halfA)
+		shareCtxFarAfter.value = after.slice(halfA)
+		shareQuote.value = selectionText()
+		shareThought.value = ''
+		for (const t of thoughts.value) {
+			// 选区与想法区间相交即展示（拖动微调后仍关联）
+			const tEndAfterSpanFrom = comparePos(t.toCid, t.toOrigin, t.toEnd, s.fromCid, s.fromOrigin, s.fromStart) >= 0
+			const tStartBeforeSpanEnd = comparePos(t.fromCid, t.fromOrigin, t.fromStart, s.toCid, s.toOrigin, s.toEnd) <= 0
+			if (tEndAfterSpanFrom && tStartBeforeSpanEnd) {
+				shareThought.value = t.content
+				break
+			}
+		}
+		shareSource.value = chapters.value[s.toCid].title
+		thoughtViewOpen.value = false
+		shareOpen.value = true
+	}
+
+	/** 分享卡片绘制辅助：文本按宽度折行（\n 强制换行保留段落结构；返回行数组，供画布高度预算与逐行绘制） */
+	function wrapCanvasLines(ctx : CanvasRenderingContext2D, text : string, maxW : number, font : string) : string[] {
+		ctx.font = font
+		const lines : string[] = []
+		let line = ''
+		for (let i = 0; i < text.length; i++) {
+			const ch = text.charAt(i)
+			if (ch == '\n') {
+				lines.push(line)
+				line = ''
+				continue
+			}
+			if (ctx.measureText(line + ch).width > maxW && line.length > 0) {
+				lines.push(line)
+				line = ch
+			} else {
+				line = line + ch
+			}
+		}
+		if (line.length > 0) {
+			lines.push(line)
+		}
+		return lines
+	}
+
+	/** 分享卡片绘制辅助：逐行绘制（yTop 为首行行盒顶，与预览 text 行盒模型一致；baseline 为字号对应基线偏移），返回块底 yTop */
+	function drawCanvasLines(ctx : CanvasRenderingContext2D, lines : string[], x : number, yTop : number, lineH : number, font : string, color : string, baseline : number) : number {
+		ctx.font = font
+		ctx.fillStyle = color
+		let top = yTop
+		for (const line of lines) {
+			ctx.fillText(line, x, top + baseline)
+			top += lineH
+		}
+		return top
+	}
+
+	/** 分享卡片富文本运行段（字号/加粗/颜色/内容） */
+	type ShareRun = {
+		text : string
+		fs : number
+		bold : boolean
+		color : string
+	}
+
+	/** 富文本行（行内运行段顺序混排，基线对齐） */
+	type RenderLine = {
+		runs : ShareRun[]
+	}
+
+	function shareRunFont(r : ShareRun) : string {
+		return (r.bold ? 'bold ' : '') + r.fs + 'px sans-serif'
+	}
+
+	/** 富文本流式折行排版（逐字符测量、\n 强制换行、行内同款运行段合并），返回行数组 */
+	function layoutShareRuns(ctx : CanvasRenderingContext2D, runs : ShareRun[], maxW : number) : RenderLine[] {
+		const out : RenderLine[] = []
+		let curRuns : ShareRun[] = [] as ShareRun[]
+		let curW = 0.0
+		const pushLine = () : void => {
+			if (curRuns.length > 0) {
+				out.push({ runs: curRuns } as RenderLine)
+				curRuns = [] as ShareRun[]
+				curW = 0.0
+			}
+		}
+		for (const run of runs) {
+			ctx.font = shareRunFont(run)
+			for (let i = 0; i < run.text.length; i++) {
+				const ch = run.text.charAt(i)
+				if (ch == '\n') {
+					pushLine()
+					continue
+				}
+				const w = ctx.measureText(ch).width
+				if (curW + w > maxW && curW > 0) {
+					pushLine()
+				}
+				const last = curRuns.length > 0 ? curRuns[curRuns.length - 1] : null
+				if (last != null && last.fs == run.fs && last.bold == run.bold && last.color == run.color) {
+					last.text = last.text + ch
+				} else {
+					curRuns.push({ text: ch, fs: run.fs, bold: run.bold, color: run.color } as ShareRun)
+				}
+				curW += w
+			}
+		}
+		pushLine()
+		return out
+	}
+
+	/** 富文本行绘制（行内基线按行内最大字号对齐），返回块底 yTop */
+	function drawRenderLines(ctx : CanvasRenderingContext2D, lines : RenderLine[], x : number, yTop : number, lineH : number) : number {
+		let top = yTop
+		for (const line of lines) {
+			let maxFs = 12.5
+			for (const r of line.runs) {
+				if (r.fs > maxFs) {
+					maxFs = r.fs
+				}
+			}
+			const bl = top + maxFs * 0.8
+			let rx = x
+			for (const r of line.runs) {
+				ctx.font = shareRunFont(r)
+				ctx.fillStyle = r.color
+				ctx.fillText(r.text, rx, bl)
+				rx += ctx.measureText(r.text).width
+			}
+			top += lineH
+		}
+		return top
+	}
+
+	/** 绘制分享卡片到隐藏 canvas 并保存为长图（排版参数与预览 CSS 精确换算：卡片宽 295/边距 40/内边距 15.5/字号减半/行盒顶模型/出处左对齐；头像半出卡片顶部白环包裹；想法全量渲染不截断） */
+	function saveShareImage() : void {
+		uni.createSelectorQuery().select('#share-canvas').fields({ node: true, size: true }, (res : any) : void => {
+			if (res == null || res.node == null) {
+				showToast('保存失败，请重试')
+				return
+			}
+			const canvas = res.node as CanvasNode
+			const dpr = uni.getWindowInfo().pixelRatio
+			// 画布与排版参数（与预览 CSS 逐项换算：rpx 值减半为 px；画布即卡片宽，无灰边）
+			const W = 295.0
+			const pad = 15.5
+			const tx = pad
+			const textW = W - pad * 2
+			const lineH = 21.0
+			const base12 = 10.0
+			const base13 = 11.0
+			const base20 = 16.0
+			const base10 = 8.5
+			// 画布上下文先用于行数预算（height 赋值会重置状态，随后重新 scale）
+			const ctx = canvas.getContext('2d')
+			if (ctx == null) {
+				showToast('保存失败，请重试')
+				return
+			}
+			// 引文富文本运行段（上/下文渐出 + 大引号 + 选中文本加粗）
+			const quoteRuns : ShareRun[] = [] as ShareRun[]
+			if (shareCtxFarBefore.value.length > 0) {
+				quoteRuns.push({ text: shareCtxFarBefore.value, fs: 12.5, bold: false, color: 'rgba(14, 15, 12, 0.18)' } as ShareRun)
+			}
+			if (shareCtxNearBefore.value.length > 0) {
+				quoteRuns.push({ text: shareCtxNearBefore.value, fs: 12.5, bold: false, color: 'rgba(14, 15, 12, 0.4)' } as ShareRun)
+			}
+			quoteRuns.push({ text: '“', fs: 20, bold: true, color: 'rgba(14, 15, 12, 0.25)' } as ShareRun)
+			quoteRuns.push({ text: shareQuote.value, fs: 13.5, bold: true, color: '#0e0f0c' } as ShareRun)
+			quoteRuns.push({ text: '”', fs: 20, bold: true, color: 'rgba(14, 15, 12, 0.25)' } as ShareRun)
+			if (shareCtxNearAfter.value.length > 0) {
+				quoteRuns.push({ text: shareCtxNearAfter.value, fs: 12.5, bold: false, color: 'rgba(14, 15, 12, 0.4)' } as ShareRun)
+			}
+			if (shareCtxFarAfter.value.length > 0) {
+				quoteRuns.push({ text: shareCtxFarAfter.value, fs: 12.5, bold: false, color: 'rgba(14, 15, 12, 0.18)' } as ShareRun)
+			}
+			// 富文本流式排版（引号与文本连续、跨段 \n 换行）
+			const quoteLines = layoutShareRuns(ctx, quoteRuns, textW)
+			const quoteBlockH = quoteLines.length * lineH
+			// 想法行（纯文本段，支持换行）
+			const thL = shareThought.value.length > 0 ? wrapCanvasLines(ctx, shareThought.value, textW, '12.5px sans-serif') : ([] as string[])
+			// 画布顶部留白(6) + 头像环上半(23) → 卡片顶 = 29；卡片高度按内容行盒累计
+			const cardTop = 29.0
+			let yTop = cardTop + 30.0
+			yTop += lineH + 11.5
+			yTop += quoteBlockH
+			if (thL.length > 0) {
+				yTop += 11.5 + 1 + 9.5 + thL.length * lineH
+			}
+			yTop += 11.5 + 15
+			const cardH = yTop - cardTop
+			const H = cardTop + cardH
+			canvas.width = W * dpr
+			canvas.height = H * dpr
+			ctx.scale(dpr, dpr)
+			// 顶部头像带（浅灰，衬托白环与出卡头像的半圆）+ 卡片白底（左右紧贴无灰边）
+			ctx.fillStyle = '#efefec'
+			ctx.fillRect(0, 0, W, cardTop)
+			ctx.fillStyle = '#ffffff'
+			ctx.fillRect(0, cardTop, W, H - cardTop)
+			// 产品名（头像下方居中）
+			ctx.fillStyle = 'rgba(14, 15, 12, 0.45)'
+			ctx.font = '12.5px sans-serif'
+			ctx.textAlign = 'center'
+			ctx.fillText('无足鸟古诗词学习助手', W / 2, cardTop + 30 + base12)
+			ctx.textAlign = 'left'
+			// 引文（富文本流式：大引号 + 上/下文渐出 + 选中文本加粗）
+			drawRenderLines(ctx, quoteLines, tx, cardTop + 30.0 + lineH + 11.5, lineH)
+			// 想法（全量渲染，蓝色）
+			if (thL.length > 0) {
+				const thoughtTop = cardTop + 30.0 + lineH + 11.5 + quoteBlockH + 11.5 + 1 + 9.5
+				drawCanvasLines(ctx, thL, tx, thoughtTop, lineH, '12.5px sans-serif', '#1e40af', base12)
+			}
+			// 出处（左对齐，与预览一致）
+			const sourceTop = cardTop + 30.0 + lineH + 11.5 + quoteBlockH + (thL.length > 0 ? 11.5 + 1 + 9.5 + thL.length * lineH : 0) + 11.5
+			ctx.fillStyle = 'rgba(14, 15, 12, 0.4)'
+			ctx.font = '10.5px sans-serif'
+			ctx.fillText('《' + BOOK_TITLE + '》 · ' + shareSource.value, tx, sourceTop + base10)
+			// 头像（白环包裹，跨卡片顶边：一半在卡片外浅灰底上，环色与卡片一致）
+			let headerDrawn = false
+			let exported = false
+			const drawLogo = (withLogo : boolean) : void => {
+				if (headerDrawn) {
+					return
+				}
+				headerDrawn = true
+				// 白环（与卡片同色，包裹头像）
+				ctx.fillStyle = '#ffffff'
+				ctx.beginPath()
+				ctx.arc(W / 2, cardTop, 23, 0, Math.PI * 2)
+				ctx.fill()
+				if (withLogo) {
+					ctx.save()
+					ctx.beginPath()
+					ctx.arc(W / 2, cardTop, 20, 0, Math.PI * 2)
+					ctx.clip()
+					ctx.drawImage(logo, W / 2 - 20, cardTop - 20, 40, 40)
+					ctx.restore()
+				} else {
+					// 浅色圆替代
+					ctx.fillStyle = '#d9d9d5'
+					ctx.beginPath()
+					ctx.arc(W / 2, cardTop, 20, 0, Math.PI * 2)
+					ctx.fill()
+				}
+			}
+			const exportCanvas = () : void => {
+				if (exported) {
+					return
+				}
+				exported = true
+				uni.canvasToTempFilePath({
+					canvas: canvas,
+					success: (res2) => {
+						uni.saveImageToPhotosAlbum({
+							filePath: res2.tempFilePath,
+							success: () => {
+								showToast('已保存到相册')
+							},
+							fail: () => {
+								showToast('保存失败，请检查相册权限')
+							}
+						})
+					},
+					fail: () => {
+						showToast('保存失败，请重试')
+					}
+				})
+			}
+			const logo = canvas.createImage()
+			logo.src = shareLogoSrc.value
+			logo.onload = () => {
+				drawLogo(true)
+				exportCanvas()
+			}
+			logo.onerror = () => {
+				drawLogo(false)
+				exportCanvas()
+			}
+			// 加载异常兜底：超时后按浅色圆导出
+			setTimeout(() => {
+				drawLogo(false)
+				exportCanvas()
+			}, 1500)
+		}).exec()
+	}
+
+	// #ifdef MP-WEIXIN
+	onShareAppMessage(() => {
+		return { title: '《' + BOOK_TITLE + '》' + shareSource.value, path: '/pages/reading/reader' }
+	})
+	// #endif
+
+	/** 点击正文段落（100% 可靠的 view 载体）：段落含划线/想法时吞掉父级点击，异步按点击坐标精判——命中想法弹查看面板，命中纯划线无展示，未命中划线自动补执行父级点击行为 */
+	function onParaTap(e : UniPointerEvent, origin : number, cid : number) : void {
+		const renderCid = cid >= 0 ? cid : currentChapterId.value
+		const ranges = rangesAt(renderCid, origin)
+		if (ranges.length == 0) {
+			return
+		}
+		paragraphTapHandled = true
+		const clientX = e.clientX
+		const clientY = e.clientY
+		uni.createSelectorQuery().select(selectionParaId(origin, cid)).boundingClientRect((rect : NodeInfo | null) : void => {
+			if (rect == null || selSpan.value != null) {
+				// 查询失败或已进入划词状态：放行父级点击
+				paragraphTapHandled = false
+				onContentTap()
+				return
+			}
+			const p = paragraphs.value[origin]
+			const m = layoutMetrics()
+			const maxRow = Math.max(0, Math.floor((p.text.length - 1) / m.perLine))
+			let row = Math.floor((clientY - rect.top) / m.lineH)
+			row = Math.max(0, Math.min(row, maxRow))
+			let col = Math.floor((clientX - rect.left) / rowSpacing(m, p.text.length, maxRow, row))
+			col = Math.max(0, Math.min(col, m.perLine - 1))
+			const charIdx = Math.min(row * m.perLine + col, p.text.length - 1)
+			let inUl = false
+			for (const u of ranges) {
+				if (charIdx >= u[0] && charIdx <= u[1]) {
+					inUl = true
+					break
+				}
+			}
+			if (!inUl) {
+				// 点击段落内未划线区域：补执行父级点击行为（菜单/清选区等）
+				paragraphTapHandled = false
+				onContentTap()
+				return
+			}
+			// 命中划线区间：有想法则弹查看面板（锚定划线下方，空间不足转上方），纯划线无展示
+			for (const t of thoughts.value) {
+				if (thoughtCovers(t, renderCid, origin, charIdx)) {
+					thoughtViewQuote.value = t.quote
+					thoughtViewContent.value = t.content
+					thoughtViewSelBottom = rect.bottom
+					thoughtViewSelTop = rect.top
+					positionThoughtView(rect.bottom, rect.top)
+					thoughtViewOpen.value = true
+					setTimeout(() => {
+						measureThoughtView()
+					}, 80)
+					return
+				}
+			}
+			}).exec()
+			}
+
+	/** 应用划线区间（按章+段落记录）：先从现有区间减去选中区域；add=true 恒并入（写想法时确保划线），add=false 为切换（选中区域已完全划线则取消） */
+	function applySelectionUnderline(cid : number, origin : number, start : number, end : number, add : boolean) : void {
+		let entry = findUnderlineEntry(cid, origin)
+		if (entry == null) {
+			entry = { cid: cid, origin: origin, ranges: [] } as UnderlineEntry
+			underlineStore.value.push(entry)
+		}
+		let covered = 0
+		for (const u of entry.ranges) {
+			const lo = Math.max(u[0], start)
+			const hi = Math.min(u[1] + 1, end + 1)
+			if (hi > lo) {
+				covered += hi - lo
+			}
+		}
+		const isCovered = covered == end - start + 1
+		const result : number[][] = []
+		for (const u of entry.ranges) {
+			if (u[1] < start || u[0] > end) {
+				result.push(u)
+				continue
+			}
+			if (u[0] < start) {
+				result.push([u[0], start - 1])
+			}
+			if (u[1] > end) {
+				result.push([end + 1, u[1]])
+			}
+		}
+		if (add || !isCovered) {
+			result.push([start, end])
+		}
+		entry.ranges = result
+		if (entry.ranges.length == 0) {
+			// 区间清空后移除记录，避免存储留空壳
+			const idx = underlineStore.value.indexOf(entry)
+			if (idx >= 0) {
+				underlineStore.value.splice(idx, 1)
+			}
+		}
+		saveUnderlines()
+	}
+
+	/** 选区跨段划线应用：拆分选区覆盖的段序列逐段应用（add=true 并入/确保划线，add=false 切换取消） */
+	function applySpanUnderline(s : SelSpan, add : boolean) : void {
+		for (const seg of spanSegs(s)) {
+			if (seg.end < seg.start) {
+				continue
+			}
+			applySelectionUnderline(seg.cid, seg.origin, seg.start, seg.end, add)
+		}
+	}
+
+	/** 想法/划线卡片：quote=划线文本（上半），content=想法内容（下半，纯划线为空）；cid/origin/qStart 用于定位跳转与排序 */
+	type NoteRecord = {
+		cid: number
+		origin: number
+		qStart: number
+		quote: string
+		content: string
+	}
+
+	/** 想法/划线卡片列表：划线区间派生卡片并关联想法（想法覆盖的划线区间不再单出划线卡），无匹配区间的想法独立成卡；按章/段落/位置排序 */
+	const noteRecords = computed(() : NoteRecord[] => {
+		const records : NoteRecord[] = []
+		const usedThoughts : boolean[] = thoughts.value.map(() : boolean => false)
+		for (const e of underlineStore.value) {
+			const p = paragraphs.value[e.origin]
+			for (const u of e.ranges) {
+				const quote = p.text.slice(u[0], u[1] + 1)
+				let content = ''
+				for (let ti = 0; ti < thoughts.value.length; ti++) {
+					const t = thoughts.value[ti]
+					if (t.fromCid == e.cid && t.fromOrigin == e.origin && t.fromStart == u[0] && t.toCid == e.cid && t.toOrigin == e.origin && t.toEnd == u[1]) {
+						content = t.content
+						usedThoughts[ti] = true
+						break
+					}
+				}
+				records.push({ cid: e.cid, origin: e.origin, qStart: u[0], quote: quote, content: content } as NoteRecord)
+			}
+		}
+		for (let ti = 0; ti < thoughts.value.length; ti++) {
+			if (!usedThoughts[ti]) {
+				const t = thoughts.value[ti]
+				records.push({ cid: t.fromCid, origin: t.fromOrigin, qStart: t.fromStart, quote: t.quote, content: t.content } as NoteRecord)
+			}
+		}
+		records.sort((a : NoteRecord, b : NoteRecord) : number => {
+			if (a.cid != b.cid) {
+				return a.cid - b.cid
+			}
+			if (a.origin != b.origin) {
+				return a.origin - b.origin
+			}
+			return a.qStart - b.qStart
+		})
+		return records
+	})
 
 	/** 启动恢复本地设置（字号/翻页模式/主题） */
 	{
@@ -1160,6 +2268,10 @@
 	function onContentTouchMove(e: UniTouchEvent) : void {
 		if (e.touches.length == 0 || pageTurn.value == '滚动') {
 			// 上下滚动模式：滚动由 scroll-view 原生处理，不启用翻页/书签手势
+			return
+		}
+		// 划词激活：移动手势不触发翻页/书签（避免长按后手指微动误翻页），选区由手柄或点击空白操作
+		if (selSpan.value != null) {
 			return
 		}
 		const dx = e.touches[0].clientX - touchStartX
@@ -1332,14 +2444,23 @@
 		}, 1500)
 	}
 
-	/** 点击正文空白（Stitch: 抽屉打开→收起；划词激活→清除；设置展开→收起；否则切换菜单显隐。页脚显隐独立于控制项，仅随滚动淡入淡出） */
+	/** 点击正文空白（Stitch: 划线段点击已处理→跳过；想法查看打开→关闭；抽屉打开→收起；划词激活→清除；设置展开→收起；否则切换菜单显隐） */
 	function onContentTap() : void {
+		// 正文划线段 click 已处理（含纯划线吞点击）：跳过本次父级点击
+		if (paragraphTapHandled) {
+			paragraphTapHandled = false
+			return
+		}
+		if (thoughtViewOpen.value) {
+			closeThoughtView()
+			return
+		}
 		if (drawerOpen.value) {
 			closeDrawer()
 			menuVisible.value = true
 			return
 		}
-		if (selectedIdx.value >= 0) {
+		if (selSpan.value != null) {
 			clearSelection()
 			return
 		}
@@ -1357,53 +2478,615 @@
 		uni.navigateBack()
 	}
 
-	/** 长按段落：选中 22%-72% 区间（Stitch: triggerSelectionOnElement） */
-	function onLongPress(pi: number) : void {
-		const p = paragraphs.value[pi]
+	/** 划词排版度量：每行字数/行高/字宽（px）；正文左右内边距已含在段落 rect 内，坐标一律以 rect 为基准 */
+	type TextMetrics = {
+		perLine: number
+		lineH: number
+		/** 自然字距（=字号；0.4rpx 字距在原生渲染实测未生效，按 APP 端实测每行字数校准） */
+		charW: number
+		/** 满行实际字距（正文两端对齐拉伸后按行宽均分） */
+		fullCharW: number
+	}
+
+	function layoutMetrics() : TextMetrics {
+		// 每行字数须与真实渲染一致：letter-spacing 0.4rpx（约 0.2px）在 APP 原生渲染中未生效，
+		// 计入会导致每行字数少估 1，划词手柄每跨一行累计右偏 1 字符（pageBreaks 的高度预算为保守估计，另按原公式不动）
+		const charW = fontSize.value
+		const contentW = pageW.value - uni.upx2px(124)
+		const perLine = Math.max(1, Math.floor(contentW / charW))
+		return {
+			perLine: perLine,
+			lineH: fontSize.value * 1.7,
+			charW: charW,
+			fullCharW: contentW / perLine
+		} as TextMetrics
+	}
+
+	/** 指定行的字距：满行经两端对齐拉伸按行宽均分，末行未满不拉伸按自然字距（与渲染排版对齐） */
+	function rowSpacing(m : TextMetrics, len : number, maxRow : number, row : number) : number {
+		const rest = len - maxRow * m.perLine
+		return (row < maxRow || rest == m.perLine) ? m.fullCharW : m.charW
+	}
+
+	/** 所在句范围（[起点, 终点] 闭区间）：触点向前/向后扫句末标点定句界，标点后的闭合引号随句并入 */
+	function sentenceRange(text : string, idx : number) : number[] {
+		let start = 0
+		for (let i = idx - 1; i >= 0; i--) {
+			if (SENTENCE_END_CHARS.indexOf(text.charAt(i)) >= 0) {
+				if (i + 1 < text.length && SENTENCE_CLOSERS.indexOf(text.charAt(i + 1)) >= 0) {
+					continue
+				}
+				start = i + 1
+				break
+			}
+		}
+		let end = text.length - 1
+		for (let i = idx; i < text.length; i++) {
+			if (SENTENCE_END_CHARS.indexOf(text.charAt(i)) >= 0) {
+				if (i + 1 < text.length && SENTENCE_CLOSERS.indexOf(text.charAt(i + 1)) >= 0) {
+					continue
+				}
+				end = i
+				break
+			}
+		}
+		while (end + 1 < text.length && SENTENCE_CLOSERS.indexOf(text.charAt(end + 1)) >= 0) {
+			end++
+		}
+		return [start, end]
+	}
+
+	/** 选中段落元素查询 id（滚动模式按段落所在章 id 前缀防多章同索引冲突，cid<0 为分页模式；滚动模式 id 同时用作 scroll-into-view 锚点） */
+	function selectionParaId(pi : number, cid : number) : string {
+		if (cid >= 0) {
+			return '#scroll-para-' + cid + '-' + pi
+		}
+		return '#ppara-' + pi
+	}
+
+	/** 字符边界视口坐标（[x, y]）：isEnd=末字符右缘/其行底，否则首字符左缘/其行顶；字距按所在行取满行均分/末行自然值 */
+	function charEdgePos(charIdx : number, isEnd : boolean, len : number) : number[] {
+		const m = layoutMetrics()
+		const maxRow = Math.max(0, Math.floor((len - 1) / m.perLine))
+		const row = Math.max(0, Math.min(Math.floor(charIdx / m.perLine), maxRow))
+		const col = charIdx - row * m.perLine
+		const spacing = rowSpacing(m, len, maxRow, row)
+		const lineTop = selRectTop.value + row * m.lineH
+		const x = selRectLeft.value + (isEnd ? (col + 1) * spacing : col * spacing)
+		return [x, isEnd ? lineTop + m.lineH : lineTop]
+	}
+
+	/** 按选区端点估算刷新手柄与选区几何（即时显示兜底；跨段选区估算失效，由锚点实测定位） */
+	function updateHandles() : void {
+		const s = selSpan.value
+		if (s == null) {
+			return
+		}
+		if (s.fromOrigin != s.toOrigin || s.fromCid != s.toCid) {
+			return
+		}
+		const hotH = uni.upx2px(HANDLE_HOT_RPX)
+		const visH = uni.upx2px(HANDLE_VISUAL_RPX)
+		const len = paragraphs.value[s.fromOrigin].text.length
+		const sp = charEdgePos(s.fromStart, false, len)
+		handleStartLeft.value = sp[0] - hotH / 2
+		handleStartTop.value = sp[1] - visH
+		const ep = charEdgePos(s.toEnd, true, len)
+		handleEndLeft.value = ep[0] - hotH / 2
+		handleEndTop.value = ep[1] - hotH + visH
+		selTopPx.value = sp[1]
+		selBottomPx.value = ep[1]
+	}
+
+	/** 划词气泡定位：气泡体水平中心跟随焦点（长按触点/拖动端，随选中位置水平移动，钳制屏幕内），垂直优先置于选区上方、空间不足转下方，箭头指向焦点 */
+	function updatePopover() : void {
+		if (selSpan.value == null) {
+			return
+		}
+		const selTop = selTopPx.value
+		const selBottom = selBottomPx.value
+		// 估算兜底按布局模式区分（双行更矮更窄），实测后以真实尺寸校正
+		const w = popoverW > 0 ? popoverW : (popoverTwoLine.value ? uni.upx2px(290) : POPOVER_EST_W)
+		const h = popoverH > 0 ? popoverH : (popoverTwoLine.value ? 100 : POPOVER_EST_H)
+		// 上下间距避开手柄视觉体：起点柄悬于行顶上方、终点柄圆头垂于行底下方，另留 16rpx 呼吸空隙
+		const hotH = uni.upx2px(HANDLE_HOT_RPX)
+		const visH = uni.upx2px(HANDLE_VISUAL_RPX)
+		const gapUp = visH + uni.upx2px(16)
+		const gapDown = hotH - visH + uni.upx2px(16)
+		const arrowH = uni.upx2px(13)
+		// 水平：气泡体中心跟随焦点位置，两侧留边钳制不出屏
+		const margin = uni.upx2px(24)
+		popoverLeft.value = Math.max(margin, Math.min(selFocusX.value - w / 2, pageW.value - margin - w))
+		// 垂直：上方放得下置上方；否则取上下空间宽裕侧（下方时箭头朝上）
+		const topSpace = selTop - gapUp - arrowH - h
+		const bottomSpace = pageH.value - selBottom - gapDown - arrowH - h
+		if (topSpace >= navTop.value || topSpace >= bottomSpace) {
+			popoverBelow.value = false
+			popoverTop.value = Math.max(navTop.value, selTop - gapUp - arrowH - h)
+		} else {
+			popoverBelow.value = true
+			popoverTop.value = Math.min(selBottom + gapDown + arrowH, pageH.value - h - uni.upx2px(60))
+		}
+		// 箭头（20rpx 方块）指向焦点：焦点在气泡体内时对准其位置、出体时钳到边缘，左缘再扣半宽
+		const arrowMargin = uni.upx2px(30)
+		const arrowCenter = Math.max(arrowMargin, Math.min(selFocusX.value - popoverLeft.value, w - arrowMargin))
+		arrowLeft.value = arrowCenter - uni.upx2px(10)
+		if (!popoverMeasured) {
+			setTimeout(() => {
+				measurePopover()
+			}, 80)
+		}
+	}
+
+	/** 测量选区两端锚点真实渲染位置（零宽字符排入选中文本流，位置即字符边界真实位置），吸附手柄与气泡 */
+	function measureAnchors() : void {
+		if (selSpan.value == null) {
+			return
+		}
+		anchorStart = null
+		anchorEnd = null
+		uni.createSelectorQuery().select('#sel-anchor-start').boundingClientRect((r : NodeInfo | null) : void => {
+			anchorStart = r
+			applyAnchors()
+		}).exec()
+		uni.createSelectorQuery().select('#sel-anchor-end').boundingClientRect((r : NodeInfo | null) : void => {
+			anchorEnd = r
+			applyAnchors()
+		}).exec()
+	}
+
+	/** 两个锚点测量齐备后吸附：手柄贴真实字符边界，选区几何与气泡随之精化 */
+	function applyAnchors() : void {
+		const s = anchorStart
+		const e = anchorEnd
+		if (selSpan.value == null || s == null || e == null) {
+			return
+		}
+		const hotH = uni.upx2px(HANDLE_HOT_RPX)
+		const visH = uni.upx2px(HANDLE_VISUAL_RPX)
+		handleStartLeft.value = s.left - hotH / 2
+		handleStartTop.value = s.top - visH
+		handleEndLeft.value = e.right - hotH / 2
+		handleEndTop.value = e.bottom - hotH + visH
+		selTopPx.value = s.top
+		selBottomPx.value = e.bottom
+		// 拖动过手柄后箭头指向被拖端的新边界，未拖动时保持指向长按触点
+		if (lastDragEnd == -1) {
+			selFocusX.value = s.left
+		} else if (lastDragEnd == 1) {
+			selFocusX.value = e.right
+		}
+		updatePopover()
+		// 实测完成，手柄与气泡以精确位置首次显示
+		selectionLaidOut.value = true
+	}
+
+	/** 查询气泡体实际尺寸并校正定位（内容固定仅查一次，查询失败允许重试） */
+	function measurePopover() : void {
+		uni.createSelectorQuery().select('.popover-body').boundingClientRect((rect : NodeInfo | null) : void => {
+			if (rect != null && rect.width > 0 && rect.height > 0) {
+				popoverW = rect.width
+				popoverH = rect.height
+				popoverMeasured = true
+				updatePopover()
+			}
+		}).exec()
+	}
+
+	/** 手柄拖动状态（触摸目标在 touchstart 时锁定，move/end 持续派发至该手柄；响应式供气泡显隐联动） */
+	const dragStartActive = ref(false)
+	const dragEndActive = ref(false)
+
+	/** 划词气泡定位（px，视口坐标）：气泡体水平中心对准选区中心（钳制屏幕内），垂直置于选区上/下侧 */
+	const popoverLeft = ref(0)
+	const popoverTop = ref(0)
+	/** 气泡是否位于选区下方（箭头朝上指向选区） */
+	const popoverBelow = ref(false)
+	/** 箭头指向的视口 x：长按触点位置，拖动手柄后为被拖端的新边界 */
+	const selFocusX = ref(0)
+	/** 箭头在气泡体内的水平位置（px，相对气泡体左缘，钳制不悬空） */
+	const arrowLeft = ref(0)
+	/** 最后操作的手柄端：0=未拖动（箭头指长按触点）/ -1=起点 / 1=终点 */
+	let lastDragEnd = 0
+	/** 选区已实测定位（锚点测量完成后手柄/气泡才出现，避免估算兜底位置跳变为实测位置） */
+	const selectionLaidOut = ref(false)
+	/** 气泡显示：有选区且已实测定位、不在拖动手柄中（拖动中隐藏，松手按新选区重定位显示） */
+	const popoverVisible = computed(() : boolean => {
+		return selectionLaidOut.value && !dragStartActive.value && !dragEndActive.value
+	})
+	/** 气泡体尺寸缓存（内容固定，显示后查询一次校正；未就绪用估算值兜底） */
+	let popoverW = 0
+	let popoverH = 0
+	let popoverMeasured = false
+	const POPOVER_EST_W = 230
+	const POPOVER_EST_H = 52
+	/** 气泡双行布局：五项单行所需宽超过屏宽可用宽时切换（紧凑单行约 234px，手机屏均可单行，仅超窄屏兜底触发），按屏宽判定一次 */
+	const popoverTwoLine = ref(false)
+	{
+		const needW = uni.upx2px(449) + 24
+		const availW = pageW.value - uni.upx2px(48)
+		popoverTwoLine.value = needW > availW
+	}
+
+	/** 拖动中的段落视口矩形缓存（触点→段落映射，支撑跨段拖动） */
+	type ParaRect = {
+		cid : number
+		origin : number
+		left : number
+		top : number
+		bottom : number
+	}
+	let dragParaRects : ParaRect[] = []
+
+	/** 缓存正文段落视口矩形（滚动模式含已加载各章，分页模式仅当前页段落；rect 顺序与段序一致） */
+	function cacheParaRects() : void {
+		dragParaRects = []
+		if (pageTurn.value == '滚动') {
+			uni.createSelectorQuery().selectAll('.para-scroll').boundingClientRect((rects : NodeInfo[]) : void => {
+				if (rects == null) {
+					return
+				}
+				const paraLen = paragraphs.value.length
+				for (let i = 0; i < rects.length; i++) {
+					const ci = Math.floor(i / paraLen)
+					if (ci >= scrollChapters.value.length) {
+						break
+					}
+					dragParaRects.push({
+						cid: scrollChapters.value[ci],
+						origin: i % paraLen,
+						left: rects[i].left,
+						top: rects[i].top,
+						bottom: rects[i].bottom
+					} as ParaRect)
+				}
+			}).exec()
+		} else {
+			uni.createSelectorQuery().selectAll('.para-page').boundingClientRect((rects : NodeInfo[]) : void => {
+				if (rects == null) {
+					return
+				}
+				for (let i = 0; i < rects.length; i++) {
+					dragParaRects.push({
+						cid: currentChapterId.value,
+						origin: currentPageItems.value[i].origin,
+						left: rects[i].left,
+						top: rects[i].top,
+						bottom: rects[i].bottom
+					} as ParaRect)
+				}
+			}).exec()
+		}
+	}
+
+	/** 位置比较（章/段/字符字典序，章 id 升序即阅读顺序）：负=前小于后，0=相等 */
+	function comparePos(cid1 : number, origin1 : number, idx1 : number, cid2 : number, origin2 : number, idx2 : number) : number {
+		if (cid1 != cid2) {
+			return cid1 - cid2
+		}
+		if (origin1 != origin2) {
+			return origin1 - origin2
+		}
+		return idx1 - idx2
+	}
+
+	/** 选区规范化：保证 from 端点在 to 端点之前（拖动反向越过时端点互换后的防御） */
+	function normalizeSpan(s : SelSpan) : SelSpan {
+		if (comparePos(s.fromCid, s.fromOrigin, s.fromStart, s.toCid, s.toOrigin, s.toEnd) > 0) {
+			return {
+				fromCid: s.toCid,
+				fromOrigin: s.toOrigin,
+				fromStart: s.toEnd,
+				toCid: s.fromCid,
+				toOrigin: s.fromOrigin,
+				toEnd: s.fromStart
+			} as SelSpan
+		}
+		return s
+	}
+
+	/** 手柄拖动（跨段）：触点映射到段落与字符并更新被拖端点；越过另一端时端点互换（原生选择交互）；拖动中手柄视觉跟随手指，松手后由锚点实测吸附真实边界 */
+	function applyHandleDrag(e : UniTouchEvent, isEnd : boolean) : void {
+		const span = selSpan.value
+		if (e.touches.length == 0 || span == null || dragParaRects.length == 0) {
+			return
+		}
+		const m = layoutMetrics()
+		const touch = e.touches[0]
+		// 触点命中段落（纵向区间，未命中钳制首末段）
+		let idx = -1
+		for (let i = 0; i < dragParaRects.length; i++) {
+			if (touch.clientY >= dragParaRects[i].top && touch.clientY <= dragParaRects[i].bottom) {
+				idx = i
+				break
+			}
+		}
+		if (idx < 0) {
+			idx = touch.clientY < dragParaRects[0].top ? 0 : dragParaRects.length - 1
+		}
+		const pr = dragParaRects[idx]
+		const p = paragraphs.value[pr.origin]
+		const maxRow = Math.max(0, Math.floor((p.text.length - 1) / m.perLine))
+		let row = Math.floor((touch.clientY - pr.top) / m.lineH)
+		row = Math.max(0, Math.min(row, maxRow))
+		let col = Math.floor((touch.clientX - pr.left) / rowSpacing(m, p.text.length, maxRow, row))
+		col = Math.max(0, Math.min(col, m.perLine - 1))
+		const charIdx = Math.min(row * m.perLine + col, p.text.length - 1)
+		if (isEnd) {
+			// 终点柄：新位置在起点之前则互换端点，否则更新终点
+			if (comparePos(pr.cid, pr.origin, charIdx, span.fromCid, span.fromOrigin, span.fromStart) >= 0) {
+				span.toCid = pr.cid
+				span.toOrigin = pr.origin
+				span.toEnd = charIdx
+			} else {
+				span.toCid = span.fromCid
+				span.toOrigin = span.fromOrigin
+				span.toEnd = span.fromStart
+				span.fromCid = pr.cid
+				span.fromOrigin = pr.origin
+				span.fromStart = charIdx
+			}
+		} else {
+			// 起点柄：新位置在终点之后则互换端点，否则更新起点
+			if (comparePos(pr.cid, pr.origin, charIdx, span.toCid, span.toOrigin, span.toEnd) <= 0) {
+				span.fromCid = pr.cid
+				span.fromOrigin = pr.origin
+				span.fromStart = charIdx
+			} else {
+				span.fromCid = span.toCid
+				span.fromOrigin = span.toOrigin
+				span.fromStart = span.toEnd
+				span.toCid = pr.cid
+				span.toOrigin = pr.origin
+				span.toEnd = charIdx
+			}
+		}
+		const hotH = uni.upx2px(HANDLE_HOT_RPX)
+		// 箭头焦点跟随触点（跨段拖动时气泡随手指移动，避免停留在旧位置无法点击）
+		selFocusX.value = touch.clientX
+		if (isEnd) {
+			handleEndLeft.value = touch.clientX - hotH / 2
+			handleEndTop.value = touch.clientY - hotH / 2
+		} else {
+			handleStartLeft.value = touch.clientX - hotH / 2
+			handleStartTop.value = touch.clientY - hotH / 2
+		}
+	}
+
+	function onStartHandleTouchStart() : void {
+		dragStartActive.value = true
+		lastDragEnd = -1
+		cacheParaRects()
+	}
+
+	function onStartHandleTouchMove(e : UniTouchEvent) : void {
+		if (dragStartActive.value) {
+			applyHandleDrag(e, false)
+		}
+	}
+
+	function onStartHandleTouchEnd() : void {
+		dragStartActive.value = false
+		updatePopover()
+		measureAnchors()
+	}
+
+	function onEndHandleTouchStart() : void {
+		dragEndActive.value = true
+		lastDragEnd = 1
+		cacheParaRects()
+	}
+
+	function onEndHandleTouchMove(e : UniTouchEvent) : void {
+		if (dragEndActive.value) {
+			applyHandleDrag(e, true)
+		}
+	}
+
+	function onEndHandleTouchEnd() : void {
+		dragEndActive.value = false
+		updatePopover()
+		measureAnchors()
+	}
+
+	/** 长按段落：触点位置估算字符索引，定位所在句整句选中并显示拖动手柄（cid=-1 为分页模式，滚动模式传段落所在章 id） */
+	function onLongPress(pi : number, cid : number, e : UniTouchEvent) : void {
+		if (e.touches.length == 0) {
+			return
+		}
 		menuVisible.value = false
 		settingsOpen.value = false
-		if (p.text.length > 8) {
-			const startIdx = Math.floor(p.text.length * 0.22)
-			const endIdx = Math.floor(p.text.length * 0.72)
-			selBefore.value = p.text.slice(0, startIdx)
-			selSelected.value = p.text.slice(startIdx, endIdx)
-			selAfter.value = p.text.slice(endIdx)
-		} else {
-			selBefore.value = ''
-			selSelected.value = p.text
-			selAfter.value = ''
-		}
-		selectedIdx.value = pi
+		const clientX = e.touches[0].clientX
+		const clientY = e.touches[0].clientY
+		uni.createSelectorQuery().select(selectionParaId(pi, cid)).boundingClientRect((rect : NodeInfo | null) : void => {
+			if (rect == null) {
+				return
+			}
+			const p = paragraphs.value[pi]
+			const m = layoutMetrics()
+			const maxRow = Math.max(0, Math.floor((p.text.length - 1) / m.perLine))
+			// 触点相对段落文本区 → 行列估算字符索引（与分页排版同源公式，字距按行取值）
+			let row = Math.floor((clientY - rect.top) / m.lineH)
+			row = Math.max(0, Math.min(row, maxRow))
+			let col = Math.floor((clientX - rect.left) / rowSpacing(m, p.text.length, maxRow, row))
+			col = Math.max(0, Math.min(col, m.perLine - 1))
+			const charIdx = Math.min(row * m.perLine + col, p.text.length - 1)
+			// 滚动模式自动加载相邻章后 currentChapterId 可能跳变，而视口停留内容仍属原章：
+			// 长按段落时把当前章同步为被长按段落所在章，保证选区渲染的章匹配条件成立（用户在哪里操作，哪里即当前阅读章）
+			const spanCid = cid >= 0 ? cid : currentChapterId.value
+			if (spanCid != currentChapterId.value) {
+				currentChapterId.value = spanCid
+				saveProgress()
+			}
+			selRectLeft.value = rect.left
+			selRectTop.value = rect.top
+			// 长按位置落在已有想法区间：恢复该想法的完整选区（含划线区域）；否则按句选取
+			let restored = false
+			for (const t of thoughts.value) {
+				if (thoughtCovers(t, spanCid, pi, charIdx)) {
+					selSpan.value = {
+						fromCid: t.fromCid,
+						fromOrigin: t.fromOrigin,
+						fromStart: t.fromStart,
+						toCid: t.toCid,
+						toOrigin: t.toOrigin,
+						toEnd: t.toEnd
+					} as SelSpan
+					restored = true
+					break
+				}
+			}
+			if (!restored) {
+				const range = sentenceRange(p.text, charIdx)
+				selSpan.value = {
+					fromCid: spanCid,
+					fromOrigin: pi,
+					fromStart: range[0],
+					toCid: spanCid,
+					toOrigin: pi,
+					toEnd: range[1]
+				} as SelSpan
+			}
+			// 箭头初始指向长按触点位置
+			selFocusX.value = clientX
+			lastDragEnd = 0
+			// 复位定位标记：手柄与气泡等锚点实测完成后才出现（估算位置仅作兜底，避免先显示估算位置再跳到实测位置）
+			selectionLaidOut.value = false
+			updateHandles()
+			updatePopover()
+			setTimeout(() => {
+				measureAnchors()
+			}, 60)
+			// 锚点测量异常兜底：仍以估算位置显示手柄与气泡，保证功能可用
+			setTimeout(() => {
+				if (selSpan.value != null && !selectionLaidOut.value) {
+					selectionLaidOut.value = true
+				}
+			}, 250)
+		}).exec()
 	}
 
 	function clearSelection() : void {
-		selectedIdx.value = -1
+		selSpan.value = null
+		selectionLaidOut.value = false
+		thoughtViewOpen.value = false
 	}
 
-	/** 划词气泡操作（Stitch: 复制/写想法/划线） */
-	function onPopoverAction(action: string) : void {
+	/** 想法编辑器（多行输入框浮层）：确认后保存想法并同步将选中区域划线 */
+	const thoughtEditorOpen = ref(false)
+	const thoughtInput = ref('')
+	/** textarea 聚焦控制：微信端打开后延时置 true 拉起键盘（渲染期设置无效） */
+	const thoughtInputFocus = ref(false)
+	/** 想法输入框最大高度（px）：屏高的 40%，auto-height 随内容增长到此封顶（内部滚动） */
+	const thoughtInputMaxH = computed(() : number => pageH.value * 0.4)
+	/** 选区快照：打开时立即记录（微信端事件冒泡会先触发容器清选区，编辑器期间使用快照） */
+	const thoughtSpan = ref<SelSpan | null>(null)
+	const thoughtQuote = ref('')
+
+	function openThoughtEditor() : void {
+		const s = selSpan.value
+		if (s == null) {
+			return
+		}
+		thoughtSpan.value = { fromCid: s.fromCid, fromOrigin: s.fromOrigin, fromStart: s.fromStart, toCid: s.toCid, toOrigin: s.toOrigin, toEnd: s.toEnd } as SelSpan
+		thoughtQuote.value = selectionText()
+		thoughtInput.value = ''
+		thoughtInputFocus.value = false
+		thoughtEditorOpen.value = true
+		setTimeout(() => {
+			thoughtInputFocus.value = true
+		}, 150)
+	}
+
+	function confirmThought() : void {
+		const content = thoughtInput.value.trim()
+		const sp = thoughtSpan.value
+		if (content.length == 0) {
+			showToast('请输入想法内容')
+			return
+		}
+		if (sp == null) {
+			thoughtEditorOpen.value = false
+			thoughtInputFocus.value = false
+			return
+		}
+		thoughts.value.push({
+			fromCid: sp.fromCid,
+			fromOrigin: sp.fromOrigin,
+			fromStart: sp.fromStart,
+			toCid: sp.toCid,
+			toOrigin: sp.toOrigin,
+			toEnd: sp.toEnd,
+			quote: thoughtQuote.value,
+			content: content
+		} as Thought)
+		saveThoughts()
+		// 同步将选中区域划线（已划线则保持）并持久化
+		applySpanUnderline(sp, true)
+		thoughtEditorOpen.value = false
+		thoughtInputFocus.value = false
+		thoughtInput.value = ''
+		clearSelection()
+	}
+
+	/** 取消写想法：关闭编辑器并清除选区 */
+	function cancelThought() : void {
+		thoughtEditorOpen.value = false
+		thoughtInputFocus.value = false
+		thoughtInput.value = ''
+		clearSelection()
+	}
+
+	/** 划词气泡操作（Stitch: 复制/写想法/划线/查询/分享）；拦截冒泡避免触发容器点击清选区，选区延迟 500ms 清除 */
+	function onPopoverAction(e : UniPointerEvent, action : string) : void {
+		e.stopPropagation()
 		if (action === 'copy') {
+			const content = selectionText()
+			if (content.length == 0) {
+				return
+			}
+			// #ifdef MP-WEIXIN
+			// 微信端系统强制弹出「内容已复制」提示且 showToast 参数无效，只保留系统提示、不叠加页面内提示
 			uni.setClipboardData({
-				data: selSelected.value,
-				success: () => {
-					showToast('已复制到剪贴板')
+				data: content,
+				fail: () => {
+					showToast('复制失败，请重试')
 				}
 			})
+			// #endif
+			// #ifndef MP-WEIXIN
+			uni.setClipboardData({
+				data: content,
+				showToast: false,
+				success: () => {
+					showToast('已复制到剪贴板')
+				},
+				fail: () => {
+					showToast('复制失败，请重试')
+				}
+			})
+			// #endif
 			setTimeout(() => {
 				clearSelection()
 			}, 500)
 		} else if (action === 'idea') {
-			showToast('进入想法编辑器')
+			// 打开想法编辑器（多行输入框），确认后保存想法并同步划线；编辑期间保留选区
+			openThoughtEditor()
+		} else if (action === 'underline') {
+			// 跨段划线切换（各段记录到所在章）：已划线区域再划即取消；取消高亮，不做提示
+			const s = selSpan.value
+			if (s != null) {
+				applySpanUnderline(s, false)
+			}
+			clearSelection()
+		} else if (action === 'query') {
+			showToast('查询功能即将上线')
 			setTimeout(() => {
 				clearSelection()
 			}, 500)
-		} else {
-			const p = paragraphs.value[selectedIdx.value]
-			if (p != null) {
-				p.underlined = true
-			}
-			showToast('已划线标注')
-			selectedIdx.value = -1
+		} else if (action === 'share') {
+			// 打开分享卡片预览（快照选区与上下文，微信端冒泡清选区不影响）
+			openSharePreview()
 		}
 	}
 
@@ -1429,6 +3112,7 @@
 		}
 		fontSize.value = next
 		clampPageIndex()
+		clearSelection()
 		saveReaderSettings()
 	}
 
@@ -1508,7 +3192,7 @@
 	function toggleNightMode() : void {
 		applyReaderTheme(nightMode.value ? 'light' : 'night')
 		saveReaderSettings()
-		showToast(nightMode.value ? '已切换至夜间模式' : '已切换至日间模式')
+		showToast(nightMode.value ? '已切换至夜晚模式' : '已切换至白天模式')
 	}
 
 	/** 目录抽屉（Stitch: 遮罩渐显 + 抽屉顶部下滑 0.32s） */
@@ -1713,11 +3397,17 @@
 		text-align: justify;
 	}
 
-	/* 划线标注（Stitch: 划线持久为下划线样式，颜色取弱文本 mute） */
+	/* 划线标注（Stitch: 划线持久为波浪下划线样式，颜色取弱文本 mute） */
 	.para-underlined {
 		text-decoration: underline;
 		text-decoration-style: wavy;
 		text-decoration-color: $bai-mute;
+	}
+
+	/* 想法段：实线下划线（正蓝色），与划线波浪线区分，点击可查看想法 */
+	.para-thought {
+		text-decoration: underline;
+		text-decoration-color: $bai-positive;
 	}
 
 	/* 划词高亮（Stitch: 正蓝 14% 背景；微圆角 2px，rounded 令牌未覆盖，保留字面值） */
@@ -1841,6 +3531,281 @@
 	.bookmark-empty-text {
 		font-size: 27rpx;
 		text-align: center;
+	}
+
+	/* 划线记录卡片（抽屉想法/划线页签）：左竖条装饰，文本颜色内联绑定跟随主题 */
+	.note-item {
+		margin: 15rpx 38rpx;
+		padding: 20rpx 25rpx;
+		border-left-width: 6rpx;
+		border-left-style: solid;
+		border-left-color: $bai-neutral;
+		border-radius: 8rpx;
+		background-color: rgba($bai-ink, 0.04);
+	}
+
+	/* 引用文本（原文摘录）弱化：弱色小字；想法内容为主文字 */
+	.note-item-text {
+		font-size: 25rpx;
+		line-height: 38rpx;
+	}
+
+	.note-item-content {
+		font-size: 27rpx;
+		line-height: 42rpx;
+		margin-top: 10rpx;
+	}
+
+	/* 想法查看（锚定划线上/下方只读浮层：透明遮罩点击关闭，面板位置/宽度内联绑定，内容超长内部滚动） */
+	.thought-view-mask {
+		position: fixed;
+		left: 0;
+		right: 0;
+		top: 0;
+		bottom: 0;
+		z-index: 92;
+	}
+
+	.thought-view-panel {
+		position: fixed;
+		/* 背景内联绑定（夜间深色浮层，与底部控制栏一致） */
+		border-radius: $bai-rounded-lg;
+		padding: 31rpx;
+		z-index: 93;
+	}
+
+	.thought-view-scroll {
+		flex-direction: column;
+	}
+
+	.thought-view-content {
+		font-size: 29rpx;
+		line-height: 46rpx;
+	}
+
+	/* 想法编辑器（多行输入框浮层：遮罩居中卡片，textarea 多行输入，取消/保存） */
+	.thought-mask {
+		position: fixed;
+		left: 0;
+		right: 0;
+		top: 0;
+		bottom: 0;
+		background-color: rgba($bai-ink, 0.5);
+		z-index: 95;
+		justify-content: center;
+		align-items: center;
+	}
+
+	.thought-dialog {
+		width: 590rpx;
+		border-radius: $bai-rounded-lg;
+		background-color: $bai-canvas;
+		padding: 31rpx 31rpx 23rpx 31rpx;
+	}
+
+	.thought-title {
+		font-size: 40rpx;
+		font-weight: 800;
+		color: $bai-ink;
+		margin-bottom: 19rpx;
+		text-align: center;
+	}
+
+	/* 引用块：超大双引号行内混排装饰（引号随字体度量自动基线对齐），无背景 */
+	.thought-quote {
+		margin-bottom: 15rpx;
+	}
+
+	.thought-quote-text {
+		font-size: 25rpx;
+		line-height: 38rpx;
+	}
+
+	.thought-quote-mark {
+		font-size: 56rpx;
+		font-weight: 800;
+		color: rgba($bai-ink, 0.18);
+	}
+
+	.thought-input {
+		width: 528rpx;
+		min-height: 160rpx;
+		font-size: 27rpx;
+		line-height: 42rpx;
+		color: $bai-ink;
+		padding: 19rpx;
+		background-color: $bai-pale;
+		border-radius: $bai-rounded-sm;
+	}
+
+	.thought-actions {
+		flex-direction: row;
+		justify-content: flex-end;
+		gap: 15rpx;
+		margin-top: 19rpx;
+	}
+
+	.thought-btn-cancel {
+		padding: 12rpx 38rpx;
+		border-radius: $bai-rounded-pill;
+		border: 1px solid $bai-pale;
+	}
+
+	.thought-btn-cancel-text {
+		font-size: 25rpx;
+		color: $bai-mute;
+	}
+
+	.thought-btn-confirm {
+		padding: 12rpx 38rpx;
+		border-radius: $bai-rounded-pill;
+		background-color: $bai-ink;
+	}
+
+	.thought-btn-confirm-text {
+		font-size: 25rpx;
+		color: $bai-on-primary;
+	}
+
+	/* 分享卡片预览（居中白卡：头像/引文渐出/想法/出处，固定日间配色便于分享） */
+	.share-mask {
+		position: fixed;
+		left: 0;
+		right: 0;
+		top: 0;
+		bottom: 0;
+		background-color: rgba($bai-ink, 0.6);
+		z-index: 96;
+		justify-content: center;
+		align-items: center;
+		/* 头像环一半出弹窗容器，沿途容器不裁剪 */
+		overflow: visible;
+	}
+
+	.share-pop {
+		position: relative;
+		flex-direction: column;
+		align-items: center;
+		overflow: visible;
+	}
+
+	.share-card {
+		width: 590rpx;
+		background-color: #ffffff;
+		border-radius: $bai-rounded-lg;
+		padding: 62rpx 31rpx 31rpx 31rpx;
+	}
+
+	/* 头像圆环包裹（环色与卡片一致）：绝对定位钉在卡片上边框正中，一半出卡，绘制于卡片上层 */
+	.share-card-logo-ring {
+		position: absolute;
+		top: -46rpx;
+		left: 50%;
+		margin-left: -46rpx;
+		width: 92rpx;
+		height: 92rpx;
+		border-radius: $bai-rounded-pill;
+		background-color: #ffffff;
+		padding: 6rpx;
+		z-index: 2;
+	}
+
+	.share-card-logo {
+		width: 80rpx;
+		height: 80rpx;
+		border-radius: $bai-rounded-pill;
+	}
+
+	.share-card-app {
+		font-size: 25rpx;
+		color: rgba(14, 15, 12, 0.45);
+		text-align: center;
+		margin-bottom: 23rpx;
+	}
+
+	.share-card-scroll {
+		flex-direction: column;
+	}
+
+	.share-card-text {
+		font-size: 25rpx;
+		line-height: 42rpx;
+	}
+
+	.share-ctx-far {
+		color: rgba(14, 15, 12, 0.18);
+	}
+
+	.share-ctx-near {
+		color: rgba(14, 15, 12, 0.4);
+	}
+
+	.share-quote-mark {
+		font-size: 40rpx;
+		font-weight: 800;
+		color: rgba(14, 15, 12, 0.25);
+	}
+
+	.share-quote-main {
+		font-size: 27rpx;
+		font-weight: 700;
+		color: #0e0f0c;
+	}
+
+	.share-card-thought {
+		margin-top: 23rpx;
+	}
+
+	.share-card-thought-text {
+		font-size: 25rpx;
+		line-height: 42rpx;
+		color: $bai-positive;
+	}
+
+	.share-card-source {
+		font-size: 21rpx;
+		color: rgba(14, 15, 12, 0.4);
+		margin-top: 23rpx;
+	}
+
+	.share-actions {
+		flex-direction: row;
+		gap: 15rpx;
+		margin-top: 31rpx;
+		width: 590rpx;
+	}
+
+	.share-action {
+		flex: 1;
+		height: 80rpx;
+		border-radius: $bai-rounded-pill;
+		background-color: #ffffff;
+		border: 1px solid rgba(14, 15, 12, 0.15);
+		align-items: center;
+		justify-content: center;
+	}
+
+	.share-action-text {
+		font-size: 27rpx;
+		color: #0e0f0c;
+	}
+
+	.share-action-share {
+		background-color: #0e0f0c;
+		border-color: #0e0f0c;
+	}
+
+	.share-action-text-primary {
+		color: #ffffff;
+	}
+
+	/* 分享卡片绘制画布（移出屏幕外，仅用于导出图片） */
+	.share-canvas {
+		position: fixed;
+		left: -9999px;
+		top: 0;
+		width: 375px;
+		height: 500px;
 	}
 
 	.bookmark-item {
@@ -2185,14 +4150,59 @@
 		font-size: 21rpx;
 	}
 
-	/* 划词气泡（Stitch: 黑底圆角 12px 内边距 12x8，操作项竖排图标+文字，底部 7px 三角） */
+	/* 划词手柄（选区两端水滴形大手柄：圆头+三角尖，色取正蓝与高亮呼应；热区 76rpx 大于视觉体 50rpx 便于拖动，起点柄贴行顶、终点柄贴行底） */
+	.sel-handle {
+		position: fixed;
+		width: 76rpx;
+		height: 76rpx;
+		flex-direction: column;
+		align-items: center;
+		z-index: 55;
+	}
+
+	.sel-handle-start {
+		justify-content: flex-start;
+	}
+
+	.sel-handle-end {
+		justify-content: flex-end;
+	}
+
+	.sel-handle-drop {
+		width: 38rpx;
+		height: 38rpx;
+		border-radius: $bai-rounded-pill;
+		background-color: $bai-positive;
+	}
+
+	.sel-handle-tip {
+		width: 0;
+		height: 0;
+		border-left-width: 12rpx;
+		border-left-style: solid;
+		border-left-color: transparent;
+		border-right-width: 12rpx;
+		border-right-style: solid;
+		border-right-color: transparent;
+	}
+
+	.sel-handle-tip-down {
+		border-top-width: 16rpx;
+		border-top-style: solid;
+		border-top-color: $bai-positive;
+		margin-top: -4rpx;
+	}
+
+	.sel-handle-tip-up {
+		border-bottom-width: 16rpx;
+		border-bottom-style: solid;
+		border-bottom-color: $bai-positive;
+		margin-bottom: -4rpx;
+	}
+
+	/* 划词气泡（Stitch: 黑底圆角 12px 内边距 12x8，操作项竖排图标+文字；位置由内联绑定——水平对准选区中心、垂直置于选区上/下侧，箭头随朝向指向选区） */
 	.selection-popover {
 		position: fixed;
-		left: 0;
-		right: 0;
-		top: 480rpx;
-		flex-direction: row;
-		justify-content: center;
 		z-index: 60;
 	}
 
@@ -2200,18 +4210,37 @@
 		position: relative;
 		flex-direction: row;
 		align-items: center;
-		gap: 23rpx;
-		padding: 15rpx 23rpx;
+		gap: 6rpx;
+		padding: 12rpx 15rpx;
 		/* 背景内联绑定（夜间提亮一档与暗底区分，日间墨黑） */
 		border-radius: $bai-rounded-md;
-		box-shadow: $bai-shadow-popover;
+	}
+
+	/* 双行布局（屏宽不足以单行展开时）：行靠左、各行与按钮宽度均自适应内容，行间水平细分隔线（stretch 横贯） */
+	.popover-body-two {
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 0;
+	}
+
+	.popover-row {
+		flex-direction: row;
+		align-items: center;
+		gap: 6rpx;
+	}
+
+	.popover-divider-h {
+		align-self: stretch;
+		height: 1px;
+		margin: 10rpx 15rpx;
+		background-color: rgba($bai-on-primary, 0.2);
 	}
 
 	.popover-btn {
 		flex-direction: column;
 		align-items: center;
 		gap: 6rpx;
-		padding: 8rpx 23rpx;
+		padding: 6rpx 14rpx;
 	}
 
 	.popover-icon {
@@ -2231,22 +4260,21 @@
 		background-color: rgba($bai-on-primary, 0.2);
 	}
 
+	/* 气泡箭头（体旁旋转 45° 实色小方块：一半与体重叠（同色无缝）、露出一半形成三角尖，规避 border 三角 hack 与体圆角裁剪；水平 margin-left 内联绑定指向按住位置，颜色内联绑定与体一致） */
 	.popover-arrow {
-		position: absolute;
-		left: 50%;
-		bottom: -12rpx;
-		margin-left: -13rpx;
-		width: 0;
-		height: 0;
-		border-left-width: 13rpx;
-		border-left-style: solid;
-		border-left-color: transparent;
-		border-right-width: 13rpx;
-		border-right-style: solid;
-		border-right-color: transparent;
-		border-top-width: 13rpx;
-		border-top-style: solid;
-		border-top-color: $bai-ink;
+		width: 20rpx;
+		height: 20rpx;
+		transform: rotate(45deg);
+	}
+
+	/* 气泡在选区上方：方块贴体底，上移半格与体重叠，露出下半菱形为朝下尖 */
+	.popover-arrow-below {
+		margin-top: -10rpx;
+	}
+
+	/* 气泡在选区下方：方块贴体顶，下移半格与体重叠，露出下半菱形为朝上尖 */
+	.popover-arrow-above {
+		margin-bottom: -10rpx;
 	}
 
 	/* 目录抽屉（控制栏内容块：与设置面板一致随控制栏从底部弹出，高度内联绑定恢复独立浮层时期尺寸；顶部间距与设置面板一致） */

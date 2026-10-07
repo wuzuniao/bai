@@ -478,6 +478,7 @@
 	const avatarOptions = ref<AvatarOption[]>([
 		{ key: 'hei', src: '/static/touxiang/hei.png' } as AvatarOption,
 		{ key: 'hong', src: '/static/touxiang/hong.png' } as AvatarOption,
+		{ key: 'huang', src: '/static/touxiang/huang.png' } as AvatarOption,
 		{ key: 'lan', src: '/static/touxiang/lan.png' } as AvatarOption
 	])
 
@@ -492,6 +493,9 @@
 		const url = info.avatar_url
 		if (url == 'hei' || url.includes('hei')) {
 			return 'hei'
+		}
+		if (url == 'huang' || url.includes('huang')) {
+			return 'huang'
 		}
 		if (url == 'lan' || url.includes('lan')) {
 			return 'lan'
