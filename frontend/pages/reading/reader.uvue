@@ -34,9 +34,9 @@
 							<view class="chapter-header">
 								<view class="chapter-label-row">
 									<view class="chapter-label-dot"></view>
-									<text class="chapter-label" :style="'color:' + labelColor">{{ chapters[cid].label }}</text>
+									<text class="chapter-label" :style="'color:' + labelColor">{{ chapterAt(cid).label }}</text>
 								</view>
-								<text class="chapter-title" :style="'color:' + titleColor">{{ chapters[cid].contentTitle }}</text>
+								<text class="chapter-title" :style="'color:' + titleColor">{{ chapterAt(cid).contentTitle }}</text>
 								<view class="chapter-divider"></view>
 							</view>
 							<view class="novel-body" :style="'font-size:' + fontSize + 'px;color:' + bodyColor + ';font-family:' + fontFamily">
@@ -583,9 +583,9 @@
 
 	type Chapter = {
 		id: number
-		/** 目录标题（第1章 灵魂融合） */
+		/** 目录标题（如：第1章 章节名） */
 		title: string
-		/** 正文页章节标签（第 1 章 / 扉页） */
+		/** 正文页章节标签（如：第 1 章） */
 		label: string
 		/** 正文页大标题 */
 		contentTitle: string
@@ -593,44 +593,27 @@
 		active: boolean
 	}
 
-	/** 章节正文示例内容（Stitch 原型 7 段 + 剧情延续示例；后续接入后端按章加载） */
-	const paragraphs = ref<Paragraph[]>([
-		{ text: '深秋时节，黄叶飘落，恰逢秋雨绵绵，冷风一吹，怎一个愁字了得。' } as Paragraph,
-		{ text: '李唯独自一人走在公园的小路上，就像是一只被遗弃的流浪狗，从里到外，都是湿漉漉，冰凉凉的。' } as Paragraph,
-		{ text: '灰败的心情，灰败的天地，像极了他注定灰败的一生。' } as Paragraph,
-		{ text: '正麻木时。' } as Paragraph,
-		{ text: '“嘀！”的一声在耳畔响起，这本是寻常的声音，但不知为何，他却有一种时间都被暂停的错觉。' } as Paragraph,
-		{ text: '连那细密的雨雾，在此刻都清晰可见的被定住。' } as Paragraph,
-		{ text: '然后，一张灰扑扑的卡片出现在眼前。' } as Paragraph,
-		{ text: '李唯怔怔地望着那张卡片，卡片表面粗糙得像是被砂纸打磨过，边角处还沾着一点怎么也洗不掉的泥渍。' } as Paragraph,
-		{ text: '他下意识地环顾四周，公园里空无一人，连方才那种雨雾凝滞的错觉也消失得无影无踪。' } as Paragraph,
-		{ text: '就在他以为自己出现了幻觉的时候，卡片正中央忽然亮起了一行淡金色的字。' } as Paragraph,
-		{ text: '【签到成功，获得新手礼包一份】' } as Paragraph,
-		{ text: '字迹浮现的瞬间，一段陌生的记忆如同潮水般涌进了他的脑海。' } as Paragraph
-	])
+	/** 章节正文（默认空；真实书籍数据统一经 loadBookContent 注入，段落索引是划线/想法/进度的定位键） */
+	const paragraphs = ref<Paragraph[]>([])
 
-	/** 目录章节与正文页章节信息（Stitch 示例） */
-	const chapters = ref<Chapter[]>([
-		{ id: 0, title: '扉页', label: '扉页', contentTitle: '扉页', active: false } as Chapter,
-		{ id: 1, title: '第1章 灵魂融合', label: '第 1 章', contentTitle: '灵魂融合', active: false } as Chapter,
-		{ id: 2, title: '第2章 必须要挖到的第一桶金', label: '第 2 章', contentTitle: '农夫卡', active: true } as Chapter,
-		{ id: 3, title: '第3章 临江道院', label: '第 3 章', contentTitle: '临江道院', active: false } as Chapter,
-		{ id: 4, title: '第4章 论知识的重要性', label: '第 4 章', contentTitle: '论知识的重要性', active: false } as Chapter,
-		{ id: 5, title: '第5章 灵能手臂', label: '第 5 章', contentTitle: '灵能手臂', active: false } as Chapter,
-		{ id: 6, title: '第6章 噬生魔', label: '第 6 章', contentTitle: '噬生魔', active: false } as Chapter,
-		{ id: 7, title: '第7章 天眷之火', label: '第 7 章', contentTitle: '天眷之火', active: false } as Chapter,
-		{ id: 8, title: '第8章 孤注一掷', label: '第 8 章', contentTitle: '孤注一掷', active: false } as Chapter,
-		{ id: 9, title: '第9章 第一单买卖', label: '第 9 章', contentTitle: '第一单买卖', active: false } as Chapter,
-		{ id: 10, title: '第10章 事实俱在', label: '第 10 章', contentTitle: '事实俱在', active: false } as Chapter,
-		{ id: 11, title: '第11章 未来之路', label: '第 11 章', contentTitle: '未来之路', active: false } as Chapter
-	])
+	/** 目录章节（默认空；真实书籍数据统一经 loadBookContent 注入，id 即章序号） */
+	const chapters = ref<Chapter[]>([])
 
-	/** 当前阅读章节 id（Stitch 展示态：第 2 章 农夫卡；左右滑动翻页切换） */
-	const currentChapterId = ref(2)
+	/** 当前阅读章节 id（滚动/翻页/进度均以此为准） */
+	const currentChapterId = ref(0)
+
+	/** 章节安全读取：越界或数据未注入时返回空壳章（页眉/页脚/预渲染层/分享出处统一兜底） */
+	function chapterAt(id : number) : Chapter {
+		const c = chapters.value[id]
+		if (c != null) {
+			return c
+		}
+		return { id: id, title: '', label: '', contentTitle: '', active: false } as Chapter
+	}
 
 	/** 当前章节信息（标签/标题/底部进度均由此派生） */
 	const currentChapter = computed(() : Chapter => {
-		return chapters.value[currentChapterId.value]
+		return chapterAt(currentChapterId.value)
 	})
 
 	const chapterLabel = computed(() : string => {
@@ -642,11 +625,14 @@
 	})
 
 	const footerProgress = computed(() : string => {
-		return currentChapter.value.label + ' / 共 150 章'
+		return currentChapter.value.label + ' / 共 ' + chapters.value.length + ' 章'
 	})
 
 	const footerPercent = computed(() : string => {
-		const percent = currentChapterId.value / 150 * 100
+		if (chapters.value.length == 0) {
+			return '0.0%'
+		}
+		const percent = currentChapterId.value / chapters.value.length * 100
 		return percent.toFixed(1) + '%'
 	})
 
@@ -734,9 +720,23 @@
 	/** 滚动锚点：前插上一章后定位回原首章顶部，视口保持不跳 */
 	const scrollIntoView = ref('')
 
+	/** ===== 书籍内容接入点 ===== */
+	/** 注入真实书籍数据（章节目录 + 段落正文）并重置阅读位置：接入后端/文件加载完成后调用一次即可，目录、分页、划线/想法/书签渲染全部基于注入后的数据重建 */
+	function loadBookContent(chs : Chapter[], paras : Paragraph[]) : void {
+		chapters.value = chs
+		paragraphs.value = paras
+		currentChapterId.value = 0
+		pageIndex.value = 0
+		scrollChapters.value = [0]
+		scrollModeTop.value = 0
+		scrollModePos.value = 0
+		clampPageIndex()
+		saveProgress()
+	}
+
 	/** ===== 阅读进度（书名/章节/页码/滚动位置）本地持久化 ===== */
 	/** 当前书籍名（进度存储与顶栏展示唯一定义处；后续接入真实书籍数据时由数据驱动） */
-	const BOOK_TITLE = '星渊行者'
+	const BOOK_TITLE = '无足鸟'
 
 	type ReaderProgress = {
 		/** 书名：恢复进度时校验，避免不同书之间串用进度 */
@@ -877,16 +877,16 @@
 	})
 
 	/** 上一层章节头文案（跨章时为上一章） */
-	const prevChapterLabel = computed(() : string => chapters.value[prevPageChapterId.value].label)
+	const prevChapterLabel = computed(() : string => chapterAt(prevPageChapterId.value).label)
 
 	/** 上一层章节头大标题 */
-	const prevChapterTitle = computed(() : string => chapters.value[prevPageChapterId.value].contentTitle)
+	const prevChapterTitle = computed(() : string => chapterAt(prevPageChapterId.value).contentTitle)
 
 	/** 下层章节头文案（跨章时为下一章） */
-	const nextChapterLabel = computed(() : string => chapters.value[nextPageChapterId.value].label)
+	const nextChapterLabel = computed(() : string => chapterAt(nextPageChapterId.value).label)
 
 	/** 下层章节头大标题 */
-	const nextChapterTitle = computed(() : string => chapters.value[nextPageChapterId.value].contentTitle)
+	const nextChapterTitle = computed(() : string => chapterAt(nextPageChapterId.value).contentTitle)
 
 	/** 跟手方向上是否存在目标页（书首/末章边界为 false，松手回弹并提示） */
 	const flipHasTarget = computed(() : boolean => {
@@ -1008,10 +1008,12 @@
 	const pageTurnModes = ref<string[]>(['滚动', '覆盖', '平移'])
 	// #endif
 	const pageTurn = ref('滚动')
+	/** 是否上下滚动模式（语义化别名，正文手势/定位/渲染均按此分支） */
+	const scrollMode = computed(() : boolean => scrollMode.value)
 
 	/** 页脚浮层透明度：滚动模式由滚动/控制项状态驱动（footerVisible），其他模式常驻显示 */
 	const footerOpacity = computed(() : number => {
-		return (pageTurn.value == '滚动' && !footerVisible.value) ? 0 : 1
+		return (scrollMode.value && !footerVisible.value) ? 0 : 1
 	})
 	/** 当前主题 key：light / night / paper */
 	const themeKey = ref('light')
@@ -1240,7 +1242,7 @@
 
 	/** 书签标记（右上角旗帜）是否展示：滚动模式无页码概念，仅分页模式展示 */
 	const bookmarkFlagVisible = computed(() : boolean => {
-		if (pageTurn.value == '滚动') {
+		if (scrollMode.value) {
 			return false
 		}
 		return indexOfBookmark() >= 0
@@ -1373,7 +1375,7 @@
 
 	/** 书签条目文案（章节标签 · 第 N 页，页码 1-based 展示） */
 	function bookmarkLabel(bm : Bookmark) : string {
-		const ch = bm.chapterId >= 0 && bm.chapterId < chapters.value.length ? chapters.value[bm.chapterId] : chapters.value[0]
+		const ch = chapterAt(bm.chapterId)
 		return ch.title + ' · 第 ' + (bm.pageIndex + 1) + ' 页'
 	}
 
@@ -1387,7 +1389,7 @@
 
 	/** 跳转到划线记录位置并关闭抽屉：分页定位到记录章的所在页（跨章先切章），滚动模式定位到记录章的段落锚点（章未加载时先重置加载该章） */
 	function goToUnderline(r : NoteRecord) : void {
-		if (pageTurn.value == '滚动') {
+		if (scrollMode.value) {
 			if (scrollChapters.value.indexOf(r.cid) < 0) {
 				// 记录章未在滚动序列中：重置为仅加载该章，从头定位
 				scrollChapters.value = [r.cid]
@@ -1693,6 +1695,23 @@
 	}
 
 	/** ===== 分享卡片（预览弹窗 + canvas 保存到相册 + 微信端转发） ===== */
+	/** 绘制排版常量（与预览 CSS 逐项换算：rpx 值减半为 px） */
+	const SHARE_CARD_W = 295.0
+	const SHARE_CARD_TOP = 29.0
+	const SHARE_HEADER_H = 30.0
+	const SHARE_PAD = 15.5
+	const SHARE_TEXT_X = SHARE_PAD
+	const SHARE_TEXT_W = SHARE_CARD_W - SHARE_PAD * 2
+	const SHARE_QUOTE_W = SHARE_TEXT_W - 18.0
+	const SHARE_LINE_H = 21.0
+	const SHARE_BASE12 = 10.0
+	const SHARE_BASE13 = 11.0
+	const SHARE_BASE20 = 16.0
+	const SHARE_BASE10 = 8.5
+	const SHARE_RING_R = 23.0
+	const SHARE_LOGO_R = 20.0
+	const SHARE_INK = '#0e0f0c'
+
 	const userStore = useUserStore()
 	const shareOpen = ref(false)
 	/** 卡片正文：上/下文各拆两档透明度实现渐出，选中文本实色 */
@@ -1745,7 +1764,7 @@
 				break
 			}
 		}
-		shareSource.value = chapters.value[s.toCid].title
+		shareSource.value = chapterAt(s.toCid).title
 		thoughtViewOpen.value = false
 		shareOpen.value = true
 	}
@@ -1864,7 +1883,121 @@
 		return top
 	}
 
-	/** 绘制分享卡片到隐藏 canvas 并保存为长图（排版参数与预览 CSS 精确换算：卡片宽 295/边距 40/内边距 15.5/字号减半/行盒顶模型/出处左对齐；头像半出卡片顶部白环包裹；想法全量渲染不截断） */
+	/** 构建引文富文本运行段（上/下文渐出 + 大引号 + 选中文本） */
+	function buildShareQuoteRuns() : ShareRun[] {
+		const runs : ShareRun[] = [] as ShareRun[]
+		if (shareCtxFarBefore.value.length > 0) {
+			runs.push({ text: shareCtxFarBefore.value, fs: 12.5, bold: false, color: 'rgba(14, 15, 12, 0.18)' } as ShareRun)
+		}
+		if (shareCtxNearBefore.value.length > 0) {
+			runs.push({ text: shareCtxNearBefore.value, fs: 12.5, bold: false, color: 'rgba(14, 15, 12, 0.4)' } as ShareRun)
+		}
+		runs.push({ text: '“', fs: 20, bold: true, color: 'rgba(14, 15, 12, 0.25)' } as ShareRun)
+		runs.push({ text: shareQuote.value, fs: 13.5, bold: true, color: SHARE_INK } as ShareRun)
+		runs.push({ text: '”', fs: 20, bold: true, color: 'rgba(14, 15, 12, 0.25)' } as ShareRun)
+		if (shareCtxNearAfter.value.length > 0) {
+			runs.push({ text: shareCtxNearAfter.value, fs: 12.5, bold: false, color: 'rgba(14, 15, 12, 0.4)' } as ShareRun)
+		}
+		if (shareCtxFarAfter.value.length > 0) {
+			runs.push({ text: shareCtxFarAfter.value, fs: 12.5, bold: false, color: 'rgba(14, 15, 12, 0.18)' } as ShareRun)
+		}
+		return runs
+	}
+
+	/** 分享卡片布局：各块行盒顶位置与卡片/画布高度（想法块按行数占位，间距与预览 CSS 换算一致） */
+	type ShareCardLayout = {
+		quoteTop : number
+		thoughtTop : number
+		sourceTop : number
+		cardH : number
+		H : number
+	}
+
+	function layoutShareCard(quoteLines : RenderLine[], thL : string[]) : ShareCardLayout {
+		const quoteTop = SHARE_CARD_TOP + SHARE_HEADER_H + SHARE_LINE_H + 11.5
+		const quoteBlockH = quoteLines.length * SHARE_LINE_H
+		let thoughtTop = quoteTop + quoteBlockH + 11.5
+		if (thL.length > 0) {
+			thoughtTop += 1 + 9.5
+		}
+		const sourceTop = thoughtTop + (thL.length > 0 ? thL.length * SHARE_LINE_H : 0) + 11.5
+		const cardH = sourceTop + 15.0 - SHARE_CARD_TOP
+		return { quoteTop: quoteTop, thoughtTop: thoughtTop, sourceTop: sourceTop, cardH: cardH, H: SHARE_CARD_TOP + cardH } as ShareCardLayout
+	}
+
+	/** 绘制卡片底（顶部头像带浅灰 + 卡片白底）与产品名 */
+	function drawShareCardBase(ctx : CanvasRenderingContext2D, cardH : number) : void {
+		ctx.fillStyle = '#efefec'
+		ctx.fillRect(0, 0, SHARE_CARD_W, SHARE_CARD_TOP)
+		ctx.fillStyle = '#ffffff'
+		ctx.fillRect(0, SHARE_CARD_TOP, SHARE_CARD_W, cardH)
+		ctx.fillStyle = 'rgba(14, 15, 12, 0.45)'
+		ctx.font = '12.5px sans-serif'
+		ctx.textAlign = 'center'
+		ctx.fillText('无足鸟古诗词学习助手', SHARE_CARD_W / 2, SHARE_CARD_TOP + SHARE_HEADER_H + SHARE_BASE12)
+		ctx.textAlign = 'left'
+	}
+
+	/** 绘制引文块（富文本流式：大引号 + 上/下文渐出 + 选中文本加粗） */
+	function drawShareQuoteBlock(ctx : CanvasRenderingContext2D, quoteLines : RenderLine[]) : void {
+		drawRenderLines(ctx, quoteLines, SHARE_TEXT_X, SHARE_CARD_TOP + SHARE_HEADER_H + SHARE_LINE_H + 11.5, SHARE_LINE_H)
+	}
+
+	/** 绘制想法块（蓝色） */
+	function drawShareThoughtBlock(ctx : CanvasRenderingContext2D, thL : string[], top : number) : void {
+		drawCanvasLines(ctx, thL, SHARE_TEXT_X, top, SHARE_LINE_H, '12.5px sans-serif', '#1e40af', SHARE_BASE12)
+	}
+
+	/** 绘制出处（左对齐，与预览一致） */
+	function drawShareSource(ctx : CanvasRenderingContext2D, top : number) : void {
+		ctx.fillStyle = 'rgba(14, 15, 12, 0.4)'
+		ctx.font = '10.5px sans-serif'
+		ctx.fillText('《' + BOOK_TITLE + '》 · ' + shareSource.value, SHARE_TEXT_X, top + SHARE_BASE10)
+	}
+
+	/** 绘制头像（白环包裹跨卡片顶边；withLogo=false 时以浅色圆替代） */
+	function drawShareLogo(ctx : CanvasRenderingContext2D, logo : CanvasImage, withLogo : boolean) : void {
+		ctx.fillStyle = '#ffffff'
+		ctx.beginPath()
+		ctx.arc(SHARE_CARD_W / 2, SHARE_CARD_TOP, SHARE_RING_R, 0, Math.PI * 2)
+		ctx.fill()
+		if (withLogo) {
+			ctx.save()
+			ctx.beginPath()
+			ctx.arc(SHARE_CARD_W / 2, SHARE_CARD_TOP, SHARE_LOGO_R, 0, Math.PI * 2)
+			ctx.clip()
+			ctx.drawImage(logo, SHARE_CARD_W / 2 - SHARE_LOGO_R, SHARE_CARD_TOP - SHARE_LOGO_R, SHARE_LOGO_R * 2, SHARE_LOGO_R * 2)
+			ctx.restore()
+		} else {
+			ctx.fillStyle = '#d9d9d5'
+			ctx.beginPath()
+			ctx.arc(SHARE_CARD_W / 2, SHARE_CARD_TOP, SHARE_LOGO_R, 0, Math.PI * 2)
+			ctx.fill()
+		}
+	}
+
+	/** 导出画布为临时图并保存到相册（单次） */
+	function exportShareCanvas(canvas : CanvasNode) : void {
+		uni.canvasToTempFilePath({
+			canvas: canvas,
+			success: (res2) => {
+				uni.saveImageToPhotosAlbum({
+					filePath: res2.tempFilePath,
+					success: () => {
+						showToast('已保存到相册')
+					},
+					fail: () => {
+						showToast('保存失败，请检查相册权限')
+					}
+				})
+			},
+			fail: () => {
+				showToast('保存失败，请重试')
+			}
+		})
+	}
+
+	/** 绘制分享卡片到隐藏 canvas 并保存为长图（排版与预览 CSS 换算一致；头像半出卡片顶部白环包裹；想法全量渲染不截断） */
 	function saveShareImage() : void {
 		uni.createSelectorQuery().select('#share-canvas').fields({ node: true, size: true }, (res : any) : void => {
 			if (res == null || res.node == null) {
@@ -1873,82 +2006,25 @@
 			}
 			const canvas = res.node as CanvasNode
 			const dpr = uni.getWindowInfo().pixelRatio
-			// 画布与排版参数（与预览 CSS 逐项换算：rpx 值减半为 px；画布即卡片宽，无灰边）
-			const W = 295.0
-			const pad = 15.5
-			const tx = pad
-			const textW = W - pad * 2
-			const lineH = 21.0
-			const base12 = 10.0
-			const base13 = 11.0
-			const base20 = 16.0
-			const base10 = 8.5
-			// 画布上下文先用于行数预算（height 赋值会重置状态，随后重新 scale）
 			const ctx = canvas.getContext('2d')
 			if (ctx == null) {
 				showToast('保存失败，请重试')
 				return
 			}
-			// 引文富文本运行段（上/下文渐出 + 大引号 + 选中文本加粗）
-			const quoteRuns : ShareRun[] = [] as ShareRun[]
-			if (shareCtxFarBefore.value.length > 0) {
-				quoteRuns.push({ text: shareCtxFarBefore.value, fs: 12.5, bold: false, color: 'rgba(14, 15, 12, 0.18)' } as ShareRun)
-			}
-			if (shareCtxNearBefore.value.length > 0) {
-				quoteRuns.push({ text: shareCtxNearBefore.value, fs: 12.5, bold: false, color: 'rgba(14, 15, 12, 0.4)' } as ShareRun)
-			}
-			quoteRuns.push({ text: '“', fs: 20, bold: true, color: 'rgba(14, 15, 12, 0.25)' } as ShareRun)
-			quoteRuns.push({ text: shareQuote.value, fs: 13.5, bold: true, color: '#0e0f0c' } as ShareRun)
-			quoteRuns.push({ text: '”', fs: 20, bold: true, color: 'rgba(14, 15, 12, 0.25)' } as ShareRun)
-			if (shareCtxNearAfter.value.length > 0) {
-				quoteRuns.push({ text: shareCtxNearAfter.value, fs: 12.5, bold: false, color: 'rgba(14, 15, 12, 0.4)' } as ShareRun)
-			}
-			if (shareCtxFarAfter.value.length > 0) {
-				quoteRuns.push({ text: shareCtxFarAfter.value, fs: 12.5, bold: false, color: 'rgba(14, 15, 12, 0.18)' } as ShareRun)
-			}
-			// 富文本流式排版（引号与文本连续、跨段 \n 换行）
-			const quoteLines = layoutShareRuns(ctx, quoteRuns, textW)
-			const quoteBlockH = quoteLines.length * lineH
-			// 想法行（纯文本段，支持换行）
-			const thL = shareThought.value.length > 0 ? wrapCanvasLines(ctx, shareThought.value, textW, '12.5px sans-serif') : ([] as string[])
-			// 画布顶部留白(6) + 头像环上半(23) → 卡片顶 = 29；卡片高度按内容行盒累计
-			const cardTop = 29.0
-			let yTop = cardTop + 30.0
-			yTop += lineH + 11.5
-			yTop += quoteBlockH
-			if (thL.length > 0) {
-				yTop += 11.5 + 1 + 9.5 + thL.length * lineH
-			}
-			yTop += 11.5 + 15
-			const cardH = yTop - cardTop
-			const H = cardTop + cardH
-			canvas.width = W * dpr
-			canvas.height = H * dpr
+			// 排版：富文本折行 + 想法折行 + 各块位置（测量在画布尺寸设定前完成，赋值后重新 scale）
+			const quoteLines = layoutShareRuns(ctx, buildShareQuoteRuns(), SHARE_TEXT_W)
+			const thL = shareThought.value.length > 0 ? wrapCanvasLines(ctx, shareThought.value, SHARE_TEXT_W, '12.5px sans-serif') : ([] as string[])
+			const L = layoutShareCard(quoteLines, thL)
+			canvas.width = SHARE_CARD_W * dpr
+			canvas.height = L.H * dpr
 			ctx.scale(dpr, dpr)
-			// 顶部头像带（浅灰，衬托白环与出卡头像的半圆）+ 卡片白底（左右紧贴无灰边）
-			ctx.fillStyle = '#efefec'
-			ctx.fillRect(0, 0, W, cardTop)
-			ctx.fillStyle = '#ffffff'
-			ctx.fillRect(0, cardTop, W, H - cardTop)
-			// 产品名（头像下方居中）
-			ctx.fillStyle = 'rgba(14, 15, 12, 0.45)'
-			ctx.font = '12.5px sans-serif'
-			ctx.textAlign = 'center'
-			ctx.fillText('无足鸟古诗词学习助手', W / 2, cardTop + 30 + base12)
-			ctx.textAlign = 'left'
-			// 引文（富文本流式：大引号 + 上/下文渐出 + 选中文本加粗）
-			drawRenderLines(ctx, quoteLines, tx, cardTop + 30.0 + lineH + 11.5, lineH)
-			// 想法（全量渲染，蓝色）
+			drawShareCardBase(ctx, L.cardH)
+			drawShareQuoteBlock(ctx, quoteLines)
 			if (thL.length > 0) {
-				const thoughtTop = cardTop + 30.0 + lineH + 11.5 + quoteBlockH + 11.5 + 1 + 9.5
-				drawCanvasLines(ctx, thL, tx, thoughtTop, lineH, '12.5px sans-serif', '#1e40af', base12)
+				drawShareThoughtBlock(ctx, thL, L.thoughtTop)
 			}
-			// 出处（左对齐，与预览一致）
-			const sourceTop = cardTop + 30.0 + lineH + 11.5 + quoteBlockH + (thL.length > 0 ? 11.5 + 1 + 9.5 + thL.length * lineH : 0) + 11.5
-			ctx.fillStyle = 'rgba(14, 15, 12, 0.4)'
-			ctx.font = '10.5px sans-serif'
-			ctx.fillText('《' + BOOK_TITLE + '》 · ' + shareSource.value, tx, sourceTop + base10)
-			// 头像（白环包裹，跨卡片顶边：一半在卡片外浅灰底上，环色与卡片一致）
+			drawShareSource(ctx, L.sourceTop)
+			// 头像（异步加载，完成后导出；加载失败/超时以浅色圆替代）
 			let headerDrawn = false
 			let exported = false
 			const drawLogo = (withLogo : boolean) : void => {
@@ -1956,48 +2032,14 @@
 					return
 				}
 				headerDrawn = true
-				// 白环（与卡片同色，包裹头像）
-				ctx.fillStyle = '#ffffff'
-				ctx.beginPath()
-				ctx.arc(W / 2, cardTop, 23, 0, Math.PI * 2)
-				ctx.fill()
-				if (withLogo) {
-					ctx.save()
-					ctx.beginPath()
-					ctx.arc(W / 2, cardTop, 20, 0, Math.PI * 2)
-					ctx.clip()
-					ctx.drawImage(logo, W / 2 - 20, cardTop - 20, 40, 40)
-					ctx.restore()
-				} else {
-					// 浅色圆替代
-					ctx.fillStyle = '#d9d9d5'
-					ctx.beginPath()
-					ctx.arc(W / 2, cardTop, 20, 0, Math.PI * 2)
-					ctx.fill()
-				}
+				drawShareLogo(ctx, logo, withLogo)
 			}
 			const exportCanvas = () : void => {
 				if (exported) {
 					return
 				}
 				exported = true
-				uni.canvasToTempFilePath({
-					canvas: canvas,
-					success: (res2) => {
-						uni.saveImageToPhotosAlbum({
-							filePath: res2.tempFilePath,
-							success: () => {
-								showToast('已保存到相册')
-							},
-							fail: () => {
-								showToast('保存失败，请检查相册权限')
-							}
-						})
-					},
-					fail: () => {
-						showToast('保存失败，请重试')
-					}
-				})
+				exportShareCanvas(canvas)
 			}
 			const logo = canvas.createImage()
 			logo.src = shareLogoSrc.value
@@ -2266,7 +2308,7 @@
 	}
 
 	function onContentTouchMove(e: UniTouchEvent) : void {
-		if (e.touches.length == 0 || pageTurn.value == '滚动') {
+		if (e.touches.length == 0 || scrollMode.value) {
 			// 上下滚动模式：滚动由 scroll-view 原生处理，不启用翻页/书签手势
 			return
 		}
@@ -2277,7 +2319,7 @@
 		const dx = e.touches[0].clientX - touchStartX
 		const dy = e.touches[0].clientY - touchStartY
 		// 翻页跟手：按模式取主轴（上下模式取纵向，其余取横向）
-		const verticalMode = pageTurn.value == '滚动'
+		const verticalMode = scrollMode.value
 		const primary = verticalMode ? dy : dx
 		const secondary = verticalMode ? dx : dy
 		const gesture = Math.abs(primary) > 20 && Math.abs(primary) > Math.abs(secondary) * 1.5
@@ -2327,7 +2369,7 @@
 	}
 
 	function onContentTouchEnd(e: UniTouchEvent) : void {
-		if (pageTurn.value == '滚动') {
+		if (scrollMode.value) {
 			return
 		}
 		const dx = e.changedTouches[0].clientX - touchStartX
@@ -2423,6 +2465,10 @@
 
 	/** 切换章节并定位页（进入新章默认首页，回退上一章定位末页；滚动模式复位章节序列与滚动位置） */
 	function goToChapter(id: number, atLastPage: boolean) : void {
+		// 章界防御：书签/进度等存量索引可能指向未注入数据中不存在的章
+		if (id < 0 || id >= chapters.value.length) {
+			return
+		}
 		currentChapterId.value = id
 		pageIndex.value = atLastPage ? pageBreaks.value.length - 1 : 0
 		scrollChapters.value = [id]
@@ -2721,7 +2767,7 @@
 	/** 缓存正文段落视口矩形（滚动模式含已加载各章，分页模式仅当前页段落；rect 顺序与段序一致） */
 	function cacheParaRects() : void {
 		dragParaRects = []
-		if (pageTurn.value == '滚动') {
+		if (scrollMode.value) {
 			uni.createSelectorQuery().selectAll('.para-scroll').boundingClientRect((rects : NodeInfo[]) : void => {
 				if (rects == null) {
 					return
