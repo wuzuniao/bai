@@ -586,23 +586,6 @@
 		}, 1500)
 	}
 
-	/** 启动恢复上次阅读进度（书名匹配才恢复，避免不同书之间串用；章节/页码/滚动位置） */
-	{
-		const stored : any = uni.getStorageSync(STORAGE_PROGRESS)
-		if (typeof stored == 'string' && (stored as string).length > 0) {
-			const p = JSON.parse<ReaderProgress>(stored as string)
-			if (p != null && p.bookTitle == BOOK_TITLE && p.chapterId >= 0 && p.chapterId < chapters.value.length) {
-				currentChapterId.value = p.chapterId
-				if (p.pageIndex >= 0 && p.pageIndex < pageBreaks.value.length) {
-					pageIndex.value = p.pageIndex
-				}
-				scrollChapters.value = [p.chapterId]
-				scrollModeTop.value = p.scrollTop > 0 ? p.scrollTop : 0
-				scrollModePos.value = scrollModeTop.value
-			}
-		}
-	}
-
 	onUnload(() => {
 		saveProgress()
 	})
@@ -1108,6 +1091,23 @@
 				if (s.theme == 'night' || s.theme == 'paper') {
 					applyReaderTheme(s.theme)
 				}
+			}
+		}
+	}
+
+	/** 启动恢复上次阅读进度（书名匹配才恢复，避免不同书之间串用；章节/页码/滚动位置）。必须置于窗口尺寸与全部阅读设置恢复之后：pageBreaks 依赖 pageW/pageH/fontSize 等后置声明的 ref，过早读取会因未初始化而报错（微信端曾报 undefined.value），且恢复页码需按真实分页校验 */
+	{
+		const stored : any = uni.getStorageSync(STORAGE_PROGRESS)
+		if (typeof stored == 'string' && (stored as string).length > 0) {
+			const p = JSON.parse<ReaderProgress>(stored as string)
+			if (p != null && p.bookTitle == BOOK_TITLE && p.chapterId >= 0 && p.chapterId < chapters.value.length) {
+				currentChapterId.value = p.chapterId
+				if (p.pageIndex >= 0 && p.pageIndex < pageBreaks.value.length) {
+					pageIndex.value = p.pageIndex
+				}
+				scrollChapters.value = [p.chapterId]
+				scrollModeTop.value = p.scrollTop > 0 ? p.scrollTop : 0
+				scrollModePos.value = scrollModeTop.value
 			}
 		}
 	}
