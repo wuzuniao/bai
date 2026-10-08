@@ -1,0 +1,327 @@
+/**
+ * 阅读共享类型与常量（reader 页面与阅读组件共用）
+ * 跨章说明：同一本书各章段落数不同，凡「按段索引取内容」处必须携带章 id 并按所在章取段落。
+ */
+
+/** 目录章节（目录列表与正文页头共用） */
+export type Chapter = {
+	id: number
+	/** 目录标题（如：第1章 章节名） */
+	title: string
+	/** 正文页章节标签（如：第 1 章） */
+	label: string
+	/** 正文页大标题 */
+	contentTitle: string
+	/** 当前阅读章节高亮（由阅读页 currentChapterId 驱动） */
+	active: boolean
+}
+
+/** 书签（正文下滑切换添加/移除） */
+export type Bookmark = {
+	chapterId: number
+	/** 章内页码（0-based） */
+	pageIndex: number
+}
+
+/** 想法/划线卡片（目录抽屉卡片列表项） */
+export type NoteRecord = {
+	cid: number
+	origin: number
+	qStart: number
+	quote: string
+	content: string
+}
+
+/** 正文字体选项（设置面板字体列表） */
+export type FontOption = {
+	key: string
+	label: string
+	/** CSS 字体栈：缺失字体自动回退到后续项，末位 sans-serif 即系统黑体 */
+	family: string
+}
+
+/** 字体选项表（默认思源黑体，未安装时经回退链落到系统黑体） */
+export const FONT_OPTIONS : FontOption[] = [
+	{ key: 'sourcehan', label: '思源黑体', family: "'Source Han Sans SC', 'Noto Sans SC', sans-serif" } as FontOption,
+	{ key: 'system', label: '系统黑体', family: 'sans-serif' } as FontOption,
+	{ key: 'songti', label: '宋体', family: "'Source Han Serif SC', 'SimSun', serif" } as FontOption,
+	{ key: 'kaiti', label: '楷体', family: 'KaiTi, STKaiti, serif' } as FontOption
+]
+
+/** 按 key 取字体选项（未命中回退默认项） */
+export function fontOptionOf(key : string) : FontOption {
+	for (let i = 0; i < FONT_OPTIONS.length; i++) {
+		if (FONT_OPTIONS[i].key == key) {
+			return FONT_OPTIONS[i]
+		}
+	}
+	return FONT_OPTIONS[0]
+}
+
+/** ===== 划线与想法（本地存储真源：SelectionPopover 组件写入，阅读页/目录抽屉读取） ===== */
+
+/** 划线记录：按「章+段落」记录（跨章划线的段索引属于各自章） */
+export type UnderlineEntry = {
+	/** 划线发生所在章 */
+	cid: number
+	origin: number
+	/** 段内字符索引闭区间 [start, end] 列表 */
+	ranges: number[][]
+}
+
+/** 想法记录：关联到选区区间（跨段跨章） */
+export type Thought = {
+	fromCid : number
+	fromOrigin : number
+	fromStart : number
+	toCid : number
+	toOrigin : number
+	toEnd : number
+	/** 保存时的划线文本快照 */
+	quote: string
+	content: string
+}
+
+/** 选区覆盖段序列项（页面 spanSegs 展开结果，划线按项写入所在章） */
+export type SpanSeg = {
+	cid : number
+	origin : number
+	start : number
+	end : number
+}
+
+/** 划词选区（跨段跨章）：从起点段/字符到终点段/字符的闭区间，手柄拖动可跨段落选择 */
+export type SelSpan = {
+	fromCid : number
+	fromOrigin : number
+	fromStart : number
+	toCid : number
+	toOrigin : number
+	toEnd : number
+}
+
+/** 位置比较（章/段/字符字典序，章 id 升序即阅读顺序）：负=前小于后，0=相等 */
+export function comparePos(cid1 : number, origin1 : number, idx1 : number, cid2 : number, origin2 : number, idx2 : number) : number {
+	if (cid1 != cid2) {
+		return cid1 - cid2
+	}
+	if (origin1 != origin2) {
+		return origin1 - origin2
+	}
+	return idx1 - idx2
+}
+
+/** 选区规范化：保证 from 端点在 to 端点之前（拖动反向越过时端点互换后的防御） */
+export function normalizeSpan(s : SelSpan) : SelSpan {
+	if (comparePos(s.fromCid, s.fromOrigin, s.fromStart, s.toCid, s.toOrigin, s.toEnd) > 0) {
+		return {
+			fromCid: s.toCid,
+			fromOrigin: s.toOrigin,
+			fromStart: s.toEnd,
+			toCid: s.fromCid,
+			toOrigin: s.fromOrigin,
+			toEnd: s.fromStart
+		} as SelSpan
+	}
+	return s
+}
+
+/** 分享卡片内容快照（点分享时由页面按选区计算，组件渲染与绘制共用） */
+export type ShareQuoteCtx = {
+	/** 引文前上/下文（两档透明度渐出） */
+	farBefore: string
+	nearBefore: string
+	/** 选中文本 */
+	quote: string
+	/** 引文后上/下文（两档透明度渐出） */
+	nearAfter: string
+	farAfter: string
+	/** 选区关联想法内容（空=纯划线分享） */
+	thoughtText: string
+	/** 出处（选区终点章标题） */
+	source: string
+	/** 书名 */
+	bookTitle: string
+}
+
+export const UNDERLINE_STORAGE_KEY = 'reader_underlines'
+export const THOUGHT_STORAGE_KEY = 'reader_thoughts'
+export const BOOKMARK_STORAGE_KEY = 'reader_bookmarks'
+export const SETTINGS_STORAGE_KEY = 'reader_settings'
+
+/** 阅读设置（字号/翻页模式/主题/字体，真源本地存储：ReaderControl 组件读写，页面应用渲染） */
+export type ReaderSettings = {
+	fontSize: number
+	pageTurn: string
+	theme: string
+	fontKey: string
+}
+
+/** 读取本地阅读设置（损坏/缺项容错返回默认值） */
+export function loadSettings() : ReaderSettings {
+	let s = { fontSize: 18, pageTurn: '滚动', theme: 'light', fontKey: 'sourcehan' } as ReaderSettings
+	const stored : any = uni.getStorageSync(SETTINGS_STORAGE_KEY)
+	if (typeof stored == 'string' && (stored as string).length > 0) {
+		const parsed = JSON.parse<ReaderSettings>(stored as string)
+		if (parsed != null) {
+			s = parsed
+		}
+	}
+	// 字号钳制到有效范围，防止外部修改导致排版异常
+	if (s.fontSize < 12) {
+		s.fontSize = 12
+	}
+	if (s.fontSize > 36) {
+		s.fontSize = 36
+	}
+	return s
+}
+
+/** 持久化阅读设置 */
+export function saveSettings(s : ReaderSettings) : void {
+	uni.setStorageSync(SETTINGS_STORAGE_KEY, JSON.stringify(s))
+}
+
+/** 读取本地书签列表（空/损坏容错返回空表） */
+export function loadBookmarks() : Bookmark[] {
+	const stored : any = uni.getStorageSync(BOOKMARK_STORAGE_KEY)
+	if (typeof stored == 'string' && (stored as string).length > 0) {
+		const list = JSON.parse<Array<Bookmark>>(stored as string)
+		if (list != null) {
+			return list
+		}
+	}
+	return [] as Bookmark[]
+}
+
+/** 持久化书签列表 */
+export function saveBookmarksToStorage(list : Bookmark[]) : void {
+	uni.setStorageSync(BOOKMARK_STORAGE_KEY, JSON.stringify(list))
+}
+
+/** 排版度量（正文分页/划词换算共用的行参数） */
+export type TextMetrics = {
+	/** 每行字数 */
+	perLine: number
+	/** 行高（px） */
+	lineH: number
+	/** 自然字距（=字号；0.4rpx 字距在原生渲染实测未生效，按 APP 端实测每行字数校准） */
+	charW: number
+	/** 满行实际字距（正文两端对齐拉伸后按行宽均分） */
+	fullCharW: number
+}
+
+/** 指定行的字距：满行经两端对齐拉伸按行宽均分，末行未满不拉伸按自然字距（与渲染排版对齐） */
+export function rowSpacing(m : TextMetrics, len : number, maxRow : number, row : number) : number {
+	const rest = len - maxRow * m.perLine
+	return (row < maxRow || rest == m.perLine) ? m.fullCharW : m.charW
+}
+
+/** 拖动中的段落视口矩形缓存项（触点→段落映射，支撑跨段拖动；len 为段落文本长度供字符换算） */
+export type ParaRect = {
+	cid : number
+	origin : number
+	left : number
+	top : number
+	bottom : number
+	len : number
+}
+
+/** 读取本地划线记录（空/损坏容错返回空表） */
+export function loadUnderlines() : UnderlineEntry[] {
+	const stored : any = uni.getStorageSync(UNDERLINE_STORAGE_KEY)
+	if (typeof stored == 'string' && (stored as string).length > 0) {
+		const list = JSON.parse<Array<UnderlineEntry>>(stored as string)
+		if (list != null) {
+			return list
+		}
+	}
+	return [] as UnderlineEntry[]
+}
+
+/** 读取本地想法记录（空/损坏容错返回空表） */
+export function loadThoughts() : Thought[] {
+	const stored : any = uni.getStorageSync(THOUGHT_STORAGE_KEY)
+	if (typeof stored == 'string' && (stored as string).length > 0) {
+		const list = JSON.parse<Array<Thought>>(stored as string)
+		if (list != null) {
+			return list
+		}
+	}
+	return [] as Thought[]
+}
+
+/** 查找章+段落的划线记录 */
+export function findUnderlineEntry(list : UnderlineEntry[], cid : number, origin : number) : UnderlineEntry | null {
+	for (let i = 0; i < list.length; i++) {
+		const e = list[i]
+		if (e.cid == cid && e.origin == origin) {
+			return e
+		}
+	}
+	return null
+}
+
+/**
+ * 对划线记录表应用单段区间（原地修改并返回是否需要持久化）：
+ * add=true 恒并入（写想法时确保划线），add=false 为切换（选中区域已完全划线则取消）；
+ * 区间清空的记录整条移除，避免存储留空壳
+ */
+export function applySegUnderline(list : UnderlineEntry[], cid : number, origin : number, start : number, end : number, add : boolean) : void {
+	let entry = findUnderlineEntry(list, cid, origin)
+	if (entry == null) {
+		entry = { cid: cid, origin: origin, ranges: [] } as UnderlineEntry
+		list.push(entry)
+	}
+	let covered = 0
+	for (const u of entry.ranges) {
+		const lo = Math.max(u[0], start)
+		const hi = Math.min(u[1] + 1, end + 1)
+		if (hi > lo) {
+			covered += hi - lo
+		}
+	}
+	const isCovered = covered == end - start + 1
+	const result : number[][] = []
+	for (const u of entry.ranges) {
+		if (u[1] < start || u[0] > end) {
+			result.push(u)
+			continue
+		}
+		if (u[0] < start) {
+			result.push([u[0], start - 1])
+		}
+		if (u[1] > end) {
+			result.push([end + 1, u[1]])
+		}
+	}
+	if (add || !isCovered) {
+		result.push([start, end])
+	}
+	entry.ranges = result
+	if (entry.ranges.length == 0) {
+		const idx = list.indexOf(entry)
+		if (idx >= 0) {
+			list.splice(idx, 1)
+		}
+	}
+}
+
+/** 选区跨段划线应用：按段序列逐段写入并持久化（划线/写想法共用收口） */
+export function applySpanUnderlineToStorage(segs : SpanSeg[], add : boolean) : void {
+	const list = loadUnderlines()
+	for (const seg of segs) {
+		if (seg.end < seg.start) {
+			continue
+		}
+		applySegUnderline(list, seg.cid, seg.origin, seg.start, seg.end, add)
+	}
+	uni.setStorageSync(UNDERLINE_STORAGE_KEY, JSON.stringify(list))
+}
+
+/** 想法记录写入（持久化到本地存储） */
+export function saveThought(t : Thought) : void {
+	const list = loadThoughts()
+	list.push(t)
+	uni.setStorageSync(THOUGHT_STORAGE_KEY, JSON.stringify(list))
+}

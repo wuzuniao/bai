@@ -1,0 +1,293 @@
+// 书籍导入管线：文件编码识别 → 章节解析 → 沙盒落盘入库
+// 端差异收口：文件选择由调用方（书架页）按端条件编译完成，本文件只处理已选中的本地文件
+
+import { LocalBook, loadBooks, saveBooks } from './books'
+// #ifdef APP
+import { openPdfSession } from './pdfrender'
+// #endif
+// #ifdef APP-ANDROID
+import Charset from 'java.nio.charset.Charset'
+// #endif
+
+/** 解析后的章（目录标题 + 正文页眉/大标题拆分 + 该章段落） */
+export type ParsedChapter = {
+	/** 目录标题（完整标题行） */
+	title: string
+	/** 正文页章节标签（如：第 12 章；无编号章为整行标题） */
+	label: string
+	/** 正文页大标题（编号后标题部分） */
+	contentTitle: string
+	/** 章内段落（非空行） */
+	paragraphs: string[]
+}
+
+/** 标题行拆分结果（raw=原始行，label=编号前缀，contentTitle=编号后标题） */
+type ParsedTitleParts = {
+	raw : string
+	label : string
+	contentTitle : string
+}
+
+/** 导入最大文件体积（字节，16MB，对齐官方「避免一次性读取大文件」建议） */
+const MAX_IMPORT_SIZE = 16 * 1024 * 1024
+
+/** 采样检测字符串中是否存在 UTF-8 解码替换符（出现即视为非 UTF-8 编码，大概率 GBK） */
+function looksMisencoded(text : string) : boolean {
+	const sampleLen = text.length < 20000 ? text.length : 20000
+	let bad = 0
+	for (let i = 0; i < sampleLen; i++) {
+		if (text.charCodeAt(i) == 0xFFFD) {
+			bad++
+			if (bad > 5) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+/** 读取文本文件并自动识别编码（utf-8 优先，含替换符时按 GBK 重读） */
+export function readTextFile(path : string) : Promise<string> {
+	return new Promise<string>((resolve, reject) => {
+		let text = ''
+		try {
+			const raw = uni.getFileSystemManager().readFileSync(path, 'utf-8')
+			text = raw as string
+		} catch (e) {
+			reject(new Error('文件读取失败'))
+			return
+		}
+		if (!looksMisencoded(text)) {
+			resolve(text)
+			return
+		}
+		// 非 UTF-8（大概率 GBK）：微信端原生 gbk 解码；Android 端经 ByteBuffer 调 java.nio GBK 解码
+		// #ifdef MP-WEIXIN
+		try {
+			const gbk = uni.getFileSystemManager().readFileSync(path, 'gbk')
+			resolve(gbk as string)
+		} catch (e) {
+			reject(new Error('当前微信版本暂不支持该文件编码'))
+		}
+		// #endif
+		// #ifdef APP-ANDROID
+		try {
+			const ab = uni.getFileSystemManager().readFileSync(path) as ArrayBuffer
+			const bb = ab.toByteBuffer()
+			bb.rewind()
+			resolve(Charset.forName('GBK').decode(bb).toString())
+		} catch (e) {
+			reject(new Error('该文件编码暂不支持'))
+		}
+		// #endif
+		// #ifdef APP-IOS
+		reject(new Error('该文件编码暂不支持'))
+		// #endif
+		// #ifndef MP-WEIXIN || APP
+		reject(new Error('该文件编码暂不支持'))
+		// #endif
+	})
+}
+
+/** 编号章前缀（第X章/回/节/卷/部/篇/集幕；Chapter n） */
+const RE_NUMBERED = /^第[0-9一二三四五六七八九十百千万零〇两]+\s*[章回节卷部篇集幕]/
+const RE_CHAPTER_EN = /^(Chapter|CHAPTER)\s*\d+/
+/** 常见特殊章（序章/楔子等，仅短行视为标题避免误判正文） */
+const RE_SPECIAL = /^(序章|楔子|引子|前言|序言|尾声|终章|后记|番外|外传|附录)/
+
+/** 章节标题行判定 */
+function isChapterLine(t : string) : boolean {
+	if (t.length > 50) {
+		return false
+	}
+	if (RE_NUMBERED.test(t)) {
+		return true
+	}
+	if (RE_CHAPTER_EN.test(t)) {
+		return true
+	}
+	return RE_SPECIAL.test(t) && t.length <= 30
+}
+
+/** 从标题行拆分章节标签与大标题（无编号章标签=整行） */
+function splitChapterTitle(t : string) : ParsedTitleParts {
+	const m = RE_NUMBERED.exec(t)
+	if (m != null) {
+		const label = m[0]
+		const rest = t.substring(label.length).trim().replace(/^[\s．.、:：\-—～~]+/, '').trim()
+		return { raw: t, label: label, contentTitle: rest.length > 0 ? rest : label } as ParsedTitleParts
+	}
+	const mc = RE_CHAPTER_EN.exec(t)
+	if (mc != null) {
+		const label2 = mc[0]
+		const rest2 = t.substring(label2.length).trim().replace(/^[\s．.、:：\-—～~]+/, '').trim()
+		return { raw: t, label: label2, contentTitle: rest2.length > 0 ? rest2 : label2 } as ParsedTitleParts
+	}
+	return { raw: t, label: t, contentTitle: t } as ParsedTitleParts
+}
+
+/** 从纯文本解析章节：标题行扫为候选起点，候选间无正文的连续标题（目录块）自动剔除 */
+export function parseChapters(text : string, bookTitle : string) : ParsedChapter[] {
+	const normalized = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+	const lines = normalized.split('\n')
+	// 候选章节起点（行索引 + 标题拆分）
+	const startIdx : number[] = []
+	const starts : ParsedTitleParts[] = []
+	for (let i = 0; i < lines.length; i++) {
+		const t = lines[i].trim()
+		if (t.length == 0 || !isChapterLine(t)) {
+			continue
+		}
+		startIdx.push(i)
+		starts.push(splitChapterTitle(t))
+	}
+	const result : ParsedChapter[] = []
+	if (startIdx.length == 0) {
+		// 无章节标题：全书单章
+		result.push({ title: bookTitle, label: '', contentTitle: bookTitle, paragraphs: collectParagraphs(lines, 0, lines.length) } as ParsedChapter)
+		return result
+	}
+	for (let k = 0; k < startIdx.length; k++) {
+		const from = startIdx[k] + 1
+		const to = k < startIdx.length - 1 ? startIdx[k + 1] : lines.length
+		// 章起点与下一章起点之间无正文 → 目录块标题行：剔除（不生成章，标题行丢弃）
+		let hasBody = false
+		for (let i = from; i < to; i++) {
+			if (lines[i].trim().length > 0) {
+				hasBody = true
+				break
+			}
+		}
+		if (!hasBody) {
+			continue
+		}
+		result.push({ title: starts[k].raw, label: starts[k].label, contentTitle: starts[k].contentTitle, paragraphs: collectParagraphs(lines, from, to) } as ParsedChapter)
+	}
+	if (result.length == 0) {
+		// 全部候选均为目录块：按单章兜底
+		result.push({ title: bookTitle, label: '', contentTitle: bookTitle, paragraphs: collectParagraphs(lines, 0, lines.length) } as ParsedChapter)
+	}
+	return result
+}
+
+/** 收集 [from, to) 行区间内的非空行（trim 后） */
+function collectParagraphs(lines : string[], from : number, to : number) : string[] {
+	const paras : string[] = []
+	for (let i = from; i < to && i < lines.length; i++) {
+		const t = lines[i].trim()
+		if (t.length > 0) {
+			paras.push(t)
+		}
+	}
+	return paras
+}
+
+/** 确保沙盒书籍目录存在（已存在时忽略） */
+function ensureBooksDir(dir : string) : Promise<void> {
+	return new Promise<void>((resolve, reject) => {
+		uni.getFileSystemManager().mkdir({
+			dirPath: dir,
+			recursive: true,
+			success: (_res) => { resolve() },
+			fail: (err) => {
+				// 目录已存在属正常（1301005 文件已存在）
+				if (err.errCode == 1301005) {
+					resolve()
+				} else {
+					reject(new Error('本地目录创建失败'))
+				}
+			}
+		})
+	})
+}
+
+/** 复制选中的文件到沙盒（临时路径会被系统回收，必须先落盘） */
+function copyToSandbox(srcPath : string, destPath : string) : Promise<void> {
+	return new Promise<void>((resolve, reject) => {
+		uni.getFileSystemManager().copyFile({
+			srcPath: srcPath,
+			destPath: destPath,
+			success: (_res) => { resolve() },
+			fail: (_err) => { reject(new Error('文件保存失败')) }
+		})
+	})
+}
+
+/** 从文件名提取书名（去扩展名，去首尾空白） */
+function titleFromFileName(fileName : string) : string {
+	const dot = fileName.lastIndexOf('.')
+	const base = dot > 0 ? fileName.substring(0, dot) : fileName
+	const title = base.trim()
+	return title.length > 0 ? title : '未命名书籍'
+}
+
+/** 清理导入中途落盘的文件（失败路径回收） */
+function discardFile(path : string) : void {
+	try {
+		uni.getFileSystemManager().unlinkSync(path)
+	} catch (e) {
+		// 忽略
+	}
+}
+
+/** 导入一本书：复制落盘 → txt 读文本解析章节 / PDF 取页数（原文件保留）→ 入库 */
+export async function importBook(fileName : string, tempPath : string, size : number) : Promise<void> {
+	const dot = fileName.lastIndexOf('.')
+	const ext = dot >= 0 ? fileName.substring(dot + 1).toLowerCase() : ''
+	if (ext != 'txt' && ext != 'pdf') {
+		throw new Error('暂不支持该格式，当前支持 TXT / PDF')
+	}
+	if (size > MAX_IMPORT_SIZE) {
+		throw new Error('文件超过 16MB，暂不支持导入')
+	}
+	const id = 'bk' + Date.now().toString() + (Math.floor(Math.random() * 900) + 100).toString()
+	const dir = uni.env.USER_DATA_PATH + '/books'
+	await ensureBooksDir(dir)
+	const bodyPath = dir + '/' + id + '.' + ext
+	await copyToSandbox(tempPath, bodyPath)
+	let chapterCount = 0
+	if (ext == 'txt') {
+		// txt：读文本（含编码识别）解析章节
+		let text = ''
+		try {
+			text = await readTextFile(bodyPath)
+		} catch (e) {
+			discardFile(bodyPath)
+			throw e
+		}
+		chapterCount = parseChapters(text, titleFromFileName(fileName)).length
+	} else {
+		// PDF：原文件保留，仅取页数用于书架展示（首次阅读时按页渲染为图片缓存）
+		// #ifdef APP
+		try {
+			const session = await openPdfSession(bodyPath)
+			chapterCount = session.pageCount
+			session.close()
+		} catch (e) {
+			discardFile(bodyPath)
+			// 透传渲染器文案（损坏 / 端不支持）
+			throw e
+		}
+		// #endif
+		// #ifndef APP
+		discardFile(bodyPath)
+		throw new Error('当前端暂不支持 PDF 导入，请使用 APP 端')
+		// #endif
+	}
+	const book = {
+		id: id,
+		title: titleFromFileName(fileName),
+		author: '',
+		format: ext.toUpperCase(),
+		path: bodyPath,
+		size: size,
+		addedAt: Date.now(),
+		lastReadAt: 0,
+		lastChapter: -1,
+		lastPercent: 0,
+		chapterCount: chapterCount
+	} as LocalBook
+	const list = loadBooks()
+	list.push(book)
+	saveBooks(list)
+}

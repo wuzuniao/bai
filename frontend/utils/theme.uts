@@ -36,6 +36,12 @@ export type ReaderTheme = {
 	popoverBg: string
 	/** 底部控制栏投影（夜间切换为白色微光） */
 	panelShadow: string
+	/** 设置面板控件背景（夜间灰底，日间白底） */
+	controlBg: string
+	/** 设置面板控件描边 */
+	controlBorder: string
+	/** 设置面板控件文字色（夜间白字突出） */
+	controlText: string
 }
 
 /** 日间主题（画布 canvas-soft + 墨色文字，取自 DESIGN_bai.md） */
@@ -56,7 +62,11 @@ export const READER_THEME_LIGHT: ReaderTheme = {
 	/** 划词气泡：日间墨黑卡片 */
 	popoverBg: '#0e0f0c',
 	/** 书签遮罩同款深色投影（向上） */
-	panelShadow: '0px -5px 20px rgba(0, 0, 0, 0.1)'
+	panelShadow: '0px -5px 20px rgba(0, 0, 0, 0.1)',
+	/** 日间控件：白底墨字 */
+	controlBg: '#ffffff',
+	controlBorder: '#e9e9e6',
+	controlText: '#0e0f0c'
 } as ReaderTheme
 
 /** 夜间主题（深色纸面） */
@@ -78,7 +88,11 @@ export const READER_THEME_NIGHT: ReaderTheme = {
 	/** 划词气泡：夜间提亮一档与暗底区分 */
 	popoverBg: '#2c2c2c',
 	/** 控制栏投影：暗底上切换为白色光晕，强度足以与背景区分 */
-	panelShadow: '0px -8px 36px rgba(255, 255, 255, 0.18)'
+	panelShadow: '0px -8px 36px rgba(255, 255, 255, 0.18)',
+	/** 夜间控件：灰底白字，与暗面板区分且文字突出 */
+	controlBg: '#3a3a3a',
+	controlBorder: 'rgba(255, 255, 255, 0.12)',
+	controlText: '#f3f4f6'
 } as ReaderTheme
 
 /** 暖米黄纸张主题（阅读背景色板第二选项，浮层与弱化色同日间） */
@@ -96,7 +110,11 @@ export const READER_THEME_PAPER: ReaderTheme = {
 	maskBg: 'rgba(14, 15, 12, 0.65)',
 	maskTextColor: '#ffffff',
 	popoverBg: '#0e0f0c',
-	panelShadow: '0px -5px 20px rgba(0, 0, 0, 0.1)'
+	panelShadow: '0px -5px 20px rgba(0, 0, 0, 0.1)',
+	/** 纸张主题浮层与弱化色同日间，控件同为白底墨字 */
+	controlBg: '#ffffff',
+	controlBorder: '#e9e9e6',
+	controlText: '#0e0f0c'
 } as ReaderTheme
 
 /** 输入框占位内联样式（placeholder-style 仅接受字符串，无法引用 SCSS 变量） */

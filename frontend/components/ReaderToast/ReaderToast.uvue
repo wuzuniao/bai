@@ -1,0 +1,62 @@
+<template>
+	<!-- 全局提示（页面正中卡片弹窗，1.5s 自动消失；夜间提亮卡片底色） -->
+	<view v-if="visible" class="reader-toast">
+		<text class="reader-toast-text" :style="night ? 'background-color:rgba(44, 44, 44, 0.98)' : ''">{{ msg }}</text>
+	</view>
+</template>
+
+<script setup lang="uts">
+	/**
+	 * ReaderToast —— 阅读页全局信息提示卡片（可复用组件）
+	 * --------------------------------------------------------------
+	 * 职责：页面正中卡片弹窗的展示/文案/自动消失计时全部内聚。
+	 * 宿主经 ref 调 show(msg) 弹出（重复调用重置 1.5s 计时）；
+	 * night 下行控制夜间提亮卡片底色。
+	 */
+	const props = defineProps<{
+		/** 夜间模式（提亮卡片底色与暗底区分） */
+		night: boolean
+	}>()
+
+	const visible = ref(false)
+	const msg = ref('')
+	let hideTimer = -1
+
+	/** 弹出提示（1.5s 自动消失，重复调用重置计时） */
+	function show(text : string) : void {
+		msg.value = text
+		visible.value = true
+		if (hideTimer >= 0) {
+			clearTimeout(hideTimer)
+		}
+		hideTimer = setTimeout(() => {
+			visible.value = false
+		}, 1500)
+	}
+
+	defineExpose({
+		show
+	})
+</script>
+
+<style lang="scss">
+	/* 全局提示（页面正中卡片弹窗：视口居中、圆角卡片、日间墨底/夜间深灰底白字） */
+	.reader-toast {
+		position: fixed;
+		left: 50%;
+		top: 50%;
+		transform: translate(-50%, -50%);
+		z-index: 90;
+		max-width: 70%;
+	}
+
+	.reader-toast-text {
+		font-size: 27rpx;
+		line-height: 42rpx;
+		color: $bai-on-primary;
+		padding: 27rpx 38rpx;
+		border-radius: $bai-rounded-lg;
+		background-color: rgba($bai-ink, 0.85);
+		text-align: center;
+	}
+</style>

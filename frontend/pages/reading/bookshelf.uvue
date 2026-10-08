@@ -46,7 +46,7 @@
 				<view class="stats-card">
 					<view class="stats-left">
 						<view class="stats-num-row">
-							<text class="stats-num">11</text>
+							<text class="stats-num">{{ todayMinutes }}</text>
 							<text class="stats-unit">分钟</text>
 						</view>
 						<text class="stats-label">今日已读</text>
@@ -74,27 +74,23 @@
 						<text class="edit-delete-text">删除 {{ selectedKeys.length }} 本</text>
 					</view>
 				</view>
-				<!-- 书架网格（3 列，编辑模式可选可拖拽） -->
+				<!-- 书架网格（3 列，编辑模式可选可拖拽；添加格独立于数据循环渲染，固定在网格末尾） -->
 				<view class="shelf-grid">
 					<view v-for="(row, ri) in shelfRows" :key="ri" class="shelf-row" :class="ri > 0 ? 'shelf-row-gap' : ''">
 						<view
 							v-for="(book, bi) in row"
-							:key="book.key"
+							:key="book.id"
 							class="book-item"
 							:class="cardClass(ri * 3 + bi, book)"
-							:id="book.key === 'add' ? 'book-card-add' : 'book-card-' + (ri * 3 + bi)"
+							:id="'book-card-' + (ri * 3 + bi)"
 							:style="cardStyle(ri * 3 + bi)"
 							@click="onCardTap(book)"
 							@touchstart="onCardTouchStart($event, ri * 3 + bi)"
 							@touchmove="onCardTouchMove($event, ri * 3 + bi)"
 							@touchend="onCardTouchEnd"
 						>
-							<!-- 添加格（固定末尾） -->
-							<view v-if="book.key === 'add'" class="cover-add">
-								<image class="cover-add-icon" src="/static/icons/plus-large.svg" />
-							</view>
 							<!-- 书籍封面（包装层承载右下角勾选点） -->
-							<view v-else class="cover-wrap">
+							<view class="cover-wrap">
 								<!-- 白卡样式 -->
 								<view v-if="shelfStyle === 'plain'" class="cover-plain">
 									<text class="cover-plain-title">{{ book.title }}</text>
@@ -118,10 +114,35 @@
 									<text v-if="isSelected(book)" class="card-check-icon">✓</text>
 								</view>
 							</view>
-							<!-- 书名与阅读进度（添加格不显示） -->
-							<view v-if="book.key !== 'add'" class="book-text">
+							<!-- 书名与阅读进度 -->
+							<view class="book-text">
 								<text class="book-title">{{ book.title }}</text>
-								<text class="book-meta">{{ book.meta }}</text>
+								<text class="book-meta">{{ metaOf(book) }}</text>
+							</view>
+						</view>
+						<!-- 末行有空位：行内补添加格 -->
+						<view
+							v-if="addCellInLastRow && ri == shelfRows.length - 1"
+							class="book-item"
+							:class="editMode ? 'book-item-dim' : ''"
+							id="book-card-add"
+							@click="onAddCellTap"
+						>
+							<view class="cover-add">
+								<image class="cover-add-icon" src="/static/icons/plus-large.svg" />
+							</view>
+						</view>
+					</view>
+					<!-- 空书架或末行满员：新起一行放添加格 -->
+					<view v-if="addCellNewRow" class="shelf-row" :class="shelfRows.length > 0 ? 'shelf-row-gap' : ''">
+						<view
+							class="book-item"
+							:class="editMode ? 'book-item-dim' : ''"
+							id="book-card-add"
+							@click="onAddCellTap"
+						>
+							<view class="cover-add">
+								<image class="cover-add-icon" src="/static/icons/plus-large.svg" />
 							</view>
 						</view>
 					</view>
@@ -159,70 +180,45 @@
 <script setup lang="uts">
 	import BottomNavBar from '@/components/BottomNavBar/BottomNavBar.uvue'
 	import { PLACEHOLDER_STYLE } from '@/utils/theme.uts'
+	import { LocalBook, loadBooks, saveBooks, removeBookData, getTodayMinutes } from '@/utils/books.uts'
+	import { importBook } from '@/utils/bookparse.uts'
 
-	type BookItem = {
-		/** 唯一标识（add 为固定末尾的添加格占位） */
-		key: string
-		title: string
-		/** 阅读进度或"未读" */
-		meta: string
-		/** 作者署名（深灰卡底部展示） */
-		author: string
-		/** 导入文件格式（TXT/EPUB），封面角落水印展示 */
-		format: string
-	}
-
-	/** 本地存储键：书籍顺序 / 卡片样式 */
-	const STORAGE_BOOKS = 'bookshelf_books'
+	/** 书架卡片统一样式：plain 白卡 / photo 深灰卡 */
 	const STORAGE_STYLE = 'bookshelf_style'
 
-	/** 添加格占位数据（固定网格末尾，不参与排序与删除） */
-	const ADD_CELL : BookItem = { key: 'add', title: '', meta: '', author: '', format: '' } as BookItem
-
-	/** 默认书架（示例数据） */
-	function defaultBooks() : BookItem[] {
-		return [
-			{ key: 'xingyuan', title: '星渊行者', meta: '第 12 章 / 共 1420 章', author: '', format: 'TXT' } as BookItem,
-			{ key: 'qinglan', title: '青岚志', meta: '第 128 章 / 共 128 章', author: '', format: 'EPUB' } as BookItem,
-			{ key: 'fusheng', title: '浮生微澜', meta: '未读', author: '', format: 'TXT' } as BookItem,
-			{ key: 'wanxiang', title: '万象织梦', meta: '第 42 章 / 共 5621 章', author: '', format: 'EPUB' } as BookItem,
-			{ key: 'jiuyu', title: '九域风雷', meta: '第 1 章 / 共 3210 章', author: '', format: 'TXT' } as BookItem,
-			{ key: 'muxue', title: '暮雪归舟', meta: '未读', author: '', format: 'EPUB' } as BookItem,
-			{ key: 'shanyu', title: '山海余晖', meta: '第 88 章 / 共 620 章', author: '无足鸟 著', format: 'TXT' } as BookItem,
-			{ key: 'youming', title: '幽冥幻旅', meta: '未读', author: '蜜蜂 著', format: 'EPUB' } as BookItem
-		]
-	}
-
-	/** 书架书籍（扁平有序列表，拖拽调整后本地持久化） */
-	const books = ref<BookItem[]>(defaultBooks())
+	/** 书架书籍（本地导入列表，顺序即手动排序结果；未导入时仅显示添加格） */
+	const books = ref<LocalBook[]>([])
+	/** 今日已读分钟数（阅读页结算，onShow 刷新） */
+	const todayMinutes = ref(0)
 	/** 书架卡片统一样式：plain 白卡 / photo 深灰卡 */
 	const shelfStyle = ref('plain')
 
-	/** 网格分行（每行 3 本），添加格固定末尾占位 */
-	const shelfRows = computed<BookItem[][]>(() : BookItem[][] => {
-		const rows : BookItem[][] = []
+	/** 网格分行（每行 3 本，仅真实书籍；添加格在模板中独立于数据渲染） */
+	const shelfRows = computed<LocalBook[][]>(() : LocalBook[][] => {
+		const rows : LocalBook[][] = []
 		const list = books.value
 		const n = list.length
-		const rowCount = Math.ceil((n + 1) / 3)
-		for (let r = 0; r < rowCount; r++) {
-			const row : BookItem[] = list.slice(r * 3, Math.min(n, r * 3 + 3))
-			if (r == rowCount - 1 && row.length < 3) {
-				row.push(ADD_CELL)
-			}
-			rows.push(row)
+		for (let r = 0; r < Math.ceil(n / 3); r++) {
+			rows.push(list.slice(r * 3, Math.min(n, r * 3 + 3)))
 		}
 		return rows
 	})
 
-	/** 读取本地保存的书架（顺序与样式）；无数据或解析失败时用默认示例 */
+	/** 末行是否行内补添加格（有书且末行未满 3；条件在 UTS 侧算好，模板仅消费布尔） */
+	const addCellInLastRow = computed(() : boolean => {
+		const n = books.value.length
+		return n > 0 && n % 3 != 0
+	})
+
+	/** 是否新起一行放添加格（空书架或末行满员；与 addCellInLastRow 恒互斥） */
+	const addCellNewRow = computed(() : boolean => {
+		return books.value.length % 3 == 0
+	})
+
+	/** 读取本地书架与样式（onShow 每次刷新：阅读返回后进度/时长/新增书均同步） */
 	function loadShelf() : void {
-		const stored : any = uni.getStorageSync(STORAGE_BOOKS)
-		if (typeof stored == 'string' && (stored as string).length > 0) {
-			const list = JSON.parse<Array<BookItem>>(stored as string)
-			if (list != null && list.length > 0) {
-				books.value = list
-			}
-		}
+		books.value = loadBooks()
+		todayMinutes.value = getTodayMinutes()
 		const storedStyle : any = uni.getStorageSync(STORAGE_STYLE)
 		if (typeof storedStyle == 'string' && ((storedStyle as string) == 'plain' || (storedStyle as string) == 'photo')) {
 			shelfStyle.value = storedStyle as string
@@ -231,8 +227,22 @@
 
 	/** 书架顺序与样式本地持久化 */
 	function saveShelf() : void {
-		uni.setStorageSync(STORAGE_BOOKS, JSON.stringify(books.value))
+		saveBooks(books.value)
 		uni.setStorageSync(STORAGE_STYLE, shelfStyle.value)
+	}
+
+	/** 书架卡片下方的进度文案（txt：未读 / 第 N 章 / 共 M 章；PDF：共 N 页 / 已读 X% · 共 N 页） */
+	function metaOf(book : LocalBook) : string {
+		if (book.format == 'PDF') {
+			if (book.lastReadAt > 0 && book.lastPercent > 0) {
+				return '已读 ' + Math.round(book.lastPercent) + '% · 共 ' + book.chapterCount + ' 页'
+			}
+			return '共 ' + book.chapterCount + ' 页'
+		}
+		if (book.lastReadAt <= 0 || book.lastChapter < 0) {
+			return '未读'
+		}
+		return '第 ' + (book.lastChapter + 1) + ' 章 / 共 ' + book.chapterCount + ' 章'
 	}
 
 	/** 切换书架卡片统一样式并保存 */
@@ -260,19 +270,19 @@
 
 	/** 编辑模式：卡片可勾选删除、可拖拽调序 */
 	const editMode = ref(false)
-	/** 编辑模式选中的书籍 key 集合 */
+	/** 编辑模式选中的书籍 id 集合 */
 	const selectedKeys = ref<string[]>([])
 
-	function isSelected(book : BookItem) : boolean {
-		return selectedKeys.value.indexOf(book.key) >= 0
+	function isSelected(book : LocalBook) : boolean {
+		return selectedKeys.value.indexOf(book.id) >= 0
 	}
 
-	function toggleSelect(book : BookItem) : void {
-		const i = selectedKeys.value.indexOf(book.key)
+	function toggleSelect(book : LocalBook) : void {
+		const i = selectedKeys.value.indexOf(book.id)
 		if (i >= 0) {
 			selectedKeys.value.splice(i, 1)
 		} else {
-			selectedKeys.value.push(book.key)
+			selectedKeys.value.push(book.id)
 		}
 	}
 
@@ -291,12 +301,18 @@
 		saveShelf()
 	}
 
-	/** 删除选中书籍并保存 */
+	/** 删除选中书籍（正文文件与阅读进度一并清理）并保存 */
 	function deleteSelected() : void {
 		if (selectedKeys.value.length == 0) {
 			return
 		}
-		books.value = books.value.filter((b : BookItem) : boolean => selectedKeys.value.indexOf(b.key) < 0)
+		for (let i = 0; i < books.value.length; i++) {
+			const b = books.value[i]
+			if (b.id != 'add' && selectedKeys.value.indexOf(b.id) >= 0) {
+				removeBookData(b)
+			}
+		}
+		books.value = books.value.filter((b : LocalBook) : boolean => selectedKeys.value.indexOf(b.id) < 0)
 		selectedKeys.value = []
 		saveShelf()
 	}
@@ -318,7 +334,7 @@
 	let dragOriginReady = false
 
 	/** 勾选点点击：阻止冒泡后切换选中（避免触发卡片自身点击） */
-	function onCheckTap(book : BookItem, e : UniPointerEvent) : void {
+	function onCheckTap(book : LocalBook, e : UniPointerEvent) : void {
 		e.stopPropagation()
 		if (!editMode.value) {
 			return
@@ -327,7 +343,7 @@
 	}
 
 	/** 卡片动态 class：编辑模式的暗显/选中/拖拽态 */
-	function cardClass(gi : number, book : BookItem) : string {
+	function cardClass(gi : number, book : LocalBook) : string {
 		if (!editMode.value) {
 			return ''
 		}
@@ -419,11 +435,8 @@
 		}
 	}
 
-	/** 卡片点击：编辑模式切换选中（拦截拖拽后误触），非编辑模式进入阅读（添加格无动作） */
-	function onCardTap(book : BookItem) : void {
-		if (book.key == 'add') {
-			return
-		}
+	/** 卡片点击：编辑模式切换选中（拦截拖拽后误触），非编辑模式进入阅读 */
+	function onCardTap(book : LocalBook) : void {
 		if (dragMoved) {
 			dragMoved = false
 			return
@@ -433,6 +446,13 @@
 			return
 		}
 		toggleSelect(book)
+	}
+
+	/** 添加格点击：非编辑模式下触发导入（与 + 菜单同功能）；编辑模式无动作 */
+	function onAddCellTap() : void {
+		if (!editMode.value) {
+			startImport()
+		}
 	}
 
 	/** 排序下拉菜单（Stitch: 手动顺序/最近阅读/添加时间，默认手动顺序） */
@@ -447,7 +467,6 @@
 	const searchFocused = ref(false)
 
 	onLoad(() => {
-		loadShelf()
 		const win = uni.getWindowInfo()
 		// #ifdef MP-WEIXIN
 		// 胶囊按钮矩形：导航行与胶囊同行（顶部/高度对齐），右侧按钮避让到胶囊左边 8px
@@ -463,6 +482,10 @@
 		// #ifdef APP-ANDROID || APP-IOS
 		navTop.value = win.statusBarHeight + 14
 		// #endif
+	})
+
+	onShow(() => {
+		loadShelf()
 	})
 
 	/** 关闭全部浮层（点击遮罩或底部导航触发） */
@@ -486,9 +509,63 @@
 		menuOpen.value = false
 	}
 
-	/** 加号菜单「导入书籍」：收起菜单（导入功能占位） */
-	function onImportTap() : void {
+	/** ===== 导入书籍（+ 菜单与书架添加格同入口） ===== */
+	/** 导入进行中（防重复触发） */
+	const importing = ref(false)
+
+	/** 按当前端唤起文件选择：微信小程序=聊天会话文件（wx.chooseMessageFile），App=系统文件选择器；选择后统一落盘解析入库 */
+	function startImport() : void {
+		if (importing.value) {
+			return
+		}
 		plusMenuOpen.value = false
+		closeMenus()
+		// #ifdef MP-WEIXIN || APP-ANDROID || APP-IOS
+		uni.chooseFile({
+			count: 9,
+			success: (res : ChooseFileSuccess) => {
+				handlePickedFiles(res.tempFiles)
+			},
+			fail: (_e) => {
+				// 用户取消静默
+			}
+		})
+		// #endif
+	}
+
+	/** 逐本导入所选文件并汇总结果（扩展名过滤与格式提示在 importBook 内统一处理） */
+	async function handlePickedFiles(files : ChooseFileTempFile[]) : Promise<void> {
+		if (files.length == 0) {
+			return
+		}
+		importing.value = true
+		uni.showLoading({ title: '正在导入', mask: true })
+		let okCount = 0
+		let firstErr = ''
+		for (let i = 0; i < files.length; i++) {
+			const f = files[i]
+			try {
+				await importBook(f.name, f.path, f.size)
+				okCount++
+			} catch (e) {
+				if (firstErr.length == 0) {
+					firstErr = e instanceof Error ? e.message : '导入失败'
+				}
+			}
+		}
+		uni.hideLoading()
+		importing.value = false
+		loadShelf()
+		if (okCount > 0 && firstErr.length == 0) {
+			uni.showToast({ title: '已导入 ' + okCount + ' 本', icon: 'none' })
+		} else if (firstErr.length > 0) {
+			uni.showToast({ title: firstErr + (okCount > 0 ? '（其余 ' + okCount + ' 本已导入）' : ''), icon: 'none', duration: 2500 })
+		}
+	}
+
+	/** 加号菜单「导入书籍」 */
+	function onImportTap() : void {
+		startImport()
 	}
 
 	function openSearch() : void {
@@ -514,10 +591,16 @@
 		searchFocused.value = false
 	}
 
-	/** 点击书籍进入阅读正文页 */
-	function openBook(book: BookItem) : void {
+	/** 点击书籍进入阅读：txt 进文本阅读器，PDF 进原文件渲染页（携带书籍 id） */
+	function openBook(book: LocalBook) : void {
+		if (book.format == 'PDF') {
+			uni.navigateTo({
+				url: '/pages/reading/pdfreader?bookId=' + book.id
+			})
+			return
+		}
 		uni.navigateTo({
-			url: '/pages/reading/reader'
+			url: '/pages/reading/reader?bookId=' + book.id
 		})
 	}
 

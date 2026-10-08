@@ -1,0 +1,150 @@
+<template>
+	<!-- 底部进度（Stitch: 时间 + 章节进度 + 百分比标签；文字行底仅比手势条横条高一点；滚动模式随滚动淡入、停止淡出） -->
+	<view class="reader-footer" :style="'padding-bottom:' + bottomPx + 'px;opacity:' + opacity">
+		<view class="footer-left">
+			<view class="footer-dot"></view>
+			<text class="footer-time">14:30</text>
+		</view>
+		<view class="footer-right">
+			<text class="footer-progress">{{ progress }}</text>
+			<text class="footer-percent">{{ percent }}</text>
+		</view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	/**
+	 * ReaderFooterBar —— 阅读页底部信息栏（可复用组件）
+	 * --------------------------------------------------------------
+	 * 职责：进度文案/百分比/贴底避让的计算与出现时机全部内聚。
+	 * 进度文案：当前章标签 + 总章数（未加载时仅显示总章数）；
+	 * 百分比：章序 / 总章数；贴底内边距：安全区高度下沉 10px（不低于 4px）。
+	 * 出现时机：滚动模式滚动时淡入、停止 1.5s 后淡出（宿主滚动回调经
+	 * ref 调 notifyScroll() 驱动，计时内聚组件内）；分页/翻页模式常驻；
+	 * 模式切换时自动重置（进滚动隐藏、退出滚动常显）。
+	 */
+	const props = defineProps<{
+		/** 是否上下滚动模式（滚动模式按出现时机显隐，其他模式常驻） */
+		scrollMode: boolean
+		/** 当前章标签（如：第 1 章，空=书籍未加载） */
+		chapterLabel: string
+		/** 总章数 */
+		chapterCount: number
+		/** 当前章序（章 id，百分比按其占总章数计算） */
+		chapterIndex: number
+		/** 底部安全区高度（px，全面屏手势条避让） */
+		safeBottom: number
+	}>()
+
+	/** 进度文案（章节标签 / 共 N 章） */
+	const progress = computed(() : string => {
+		if (props.chapterLabel.length == 0) {
+			return '共 ' + props.chapterCount + ' 章'
+		}
+		return props.chapterLabel + ' / 共 ' + props.chapterCount + ' 章'
+	})
+
+	/** 全书百分比（章序/总章数，一位小数） */
+	const percent = computed(() : string => {
+		if (props.chapterCount == 0) {
+			return '0.0%'
+		}
+		const p = props.chapterIndex / props.chapterCount * 100
+		return p.toFixed(1) + '%'
+	})
+
+	/** 页脚贴底内边距（px）：文字行底仅比手势条横条高一点（下沉 10px，不低于 4px 兜底） */
+	const bottomPx = computed(() : number => Math.max(4, props.safeBottom - 10))
+
+	/** ===== 出现时机（滚动模式淡入淡出计时内聚） ===== */
+	const visible = ref(false)
+	let hideTimer = -1
+
+	/** 透明度：滚动模式由显隐状态驱动，其他模式常驻显示 */
+	const opacity = computed(() : number => {
+		return (props.scrollMode && !visible.value) ? 0 : 1
+	})
+
+	/** 宿主滚动回调：淡入并重置 1.5s 淡出计时 */
+	function notifyScroll() : void {
+		visible.value = true
+		if (hideTimer >= 0) {
+			clearTimeout(hideTimer)
+		}
+		hideTimer = setTimeout(() => {
+			visible.value = false
+		}, 1500)
+	}
+
+	/** 模式切换重置：进滚动立即隐藏（清计时防悬挂），退出滚动恢复常显 */
+	watch(() => props.scrollMode, (mode : boolean) => {
+		if (mode) {
+			if (hideTimer >= 0) {
+				clearTimeout(hideTimer)
+				hideTimer = -1
+			}
+			visible.value = false
+		} else {
+			visible.value = true
+		}
+	})
+
+	defineExpose({
+		notifyScroll
+	})
+</script>
+
+<style lang="scss">
+	/* 底部进度（浮于翻页层之上：尽量贴近屏幕底部，底部内边距内联绑定避让手势条；滚动模式透明度过渡淡入淡出；z 序高于页层、低于顶栏/面板/书签遮罩） */
+	.reader-footer {
+		position: absolute;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		padding-top: 40rpx;
+		padding-left: 70rpx;
+		padding-right: 70rpx;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		z-index: 20;
+		transition: opacity 0.3s ease-in-out;
+	}
+
+	.footer-left {
+		flex-direction: row;
+		align-items: center;
+		gap: 15rpx;
+	}
+
+	.footer-dot {
+		width: 12rpx;
+		height: 12rpx;
+		border-radius: $bai-rounded-pill;
+		background-color: rgba($bai-mute, 0.4);
+	}
+
+	.footer-time {
+		font-size: 25rpx;
+		color: $bai-mute;
+	}
+
+	.footer-right {
+		flex-direction: row;
+		align-items: center;
+		gap: 15rpx;
+	}
+
+	.footer-progress {
+		font-size: 25rpx;
+		color: $bai-mute;
+	}
+
+	.footer-percent {
+		font-size: 21rpx;
+		color: $bai-mute;
+		padding: 4rpx 12rpx;
+		border-radius: $bai-rounded-sm;
+		background-color: $bai-pale;
+	}
+</style>

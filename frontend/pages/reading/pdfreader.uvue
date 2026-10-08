@@ -1,0 +1,421 @@
+<template>
+	<view class="page">
+		<!-- 正文：逐页等比图（渲染完成后展示） -->
+		<scroll-view
+			class="content"
+			direction="vertical"
+			:show-scrollbar="false"
+			:scroll-into-view="scrollIntoView"
+			@scroll="onScroll"
+			@click="onContentTap"
+		>
+			<view v-for="p in pageItems" :key="p.num" class="pdf-page" :id="'pdf-page-' + p.num" :style="'height:' + pageWrapperH + 'px'">
+				<image class="pdf-page-image" :src="p.src" mode="aspectFit" :style="'height:' + pageWrapperH + 'px'" />
+			</view>
+		</scroll-view>
+
+		<!-- 渲染中提示（覆盖内容区中央；渲染完成前无内容可滚） -->
+		<view v-if="!ready" class="pdf-loading">
+			<text class="pdf-loading-text">{{ renderTip }}</text>
+		</view>
+
+		<!-- 顶栏：返回 + 书名（呼出态滑入） -->
+		<view class="topbar" :class="menuVisible ? '' : 'topbar-hidden'" :style="'padding-top:' + navTop + 'px'">
+			<view class="topbar-inner" :style="'height:' + navHeight + 'px'">
+				<view class="topbar-back" @click="goBack">
+					<image class="topbar-back-icon" src="/static/icons/arrow-back.svg" />
+				</view>
+				<text class="topbar-title">{{ bookTitle }}</text>
+			</view>
+		</view>
+
+		<!-- 底部进度（与顶栏同呼出态） -->
+		<view class="footer" :class="menuVisible ? '' : 'footer-hidden'">
+			<text class="footer-text">第 {{ curPage }} 页 · {{ percentLabel }}</text>
+		</view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { findBook, loadPdfProgress, savePdfProgress, updateBookReading, addTodayMinutes } from '@/utils/books.uts'
+	import { openPdfSession } from '@/utils/pdfrender.uts'
+
+	/** 页渲染数据（渲染就绪后填充） */
+	type PageEntry = {
+		num: number
+		src: string
+	}
+
+	const bookId = ref('')
+	const bookTitle = ref('')
+	/** 总页数 */
+	const pageCount = ref(0)
+	/** 首页高/宽比（页 wrapper 等比布局依据；宽=屏宽铺满，高=屏宽×ratio） */
+	const pageRatio = ref(0)
+	const pageItems = ref<PageEntry[]>([])
+	/** 渲染就绪（完成前内容区显示进度提示） */
+	const ready = ref(false)
+	const renderTip = ref('正在准备阅读')
+	/** 当前阅读状态（onScroll 实时计算，onHide/onUnload 落库） */
+	const curPercent = ref(0)
+	const curPage = ref(1)
+	/** 顶栏/底栏呼出态（点击内容切换；滚动收起） */
+	const menuVisible = ref(true)
+	/** 程序定位目标页（恢复进度一次性设置） */
+	const scrollIntoView = ref('')
+
+	/** 顶栏避让（px）：小程序端与胶囊对齐，其余端状态栏下 */
+	const navTop = ref(44)
+	const navHeight = ref(40)
+	/** 窗口尺寸（px，onLoad 固化） */
+	let winW = 0
+	let winH = 0
+	/** 页面已卸载（渲染调度中断标志） */
+	let disposed = false
+	/** 阅读时长起算（onShow 起算，onHide/onUnload 结算，与 reader 一致） */
+	let enterAt = 0
+
+	/** 页 wrapper 高（px）：屏宽 × 页比例，等比缩放的布局基准（固定高保证 scroll-into-view 定位与页码推算准确） */
+	const pageWrapperH = computed(() : number => {
+		if (pageRatio.value > 0 && winW > 0) {
+			return Math.round(winW * pageRatio.value)
+		}
+		return 0
+	})
+
+	const percentLabel = computed(() : string => {
+		return Math.round(curPercent.value) + '%'
+	})
+
+	/** 页图缓存目录 */
+	function cacheDirOf(bid : string) : string {
+		return uni.env.USER_DATA_PATH + '/pdf_cache/' + bid
+	}
+
+	onLoad((options : OnLoadOptions) : void => {
+		const win = uni.getWindowInfo()
+		winW = win.windowWidth
+		winH = win.windowHeight
+		// #ifdef MP-WEIXIN
+		const capsule = uni.getMenuButtonBoundingClientRect()
+		if (capsule.height > 0) {
+			navTop.value = capsule.top
+			navHeight.value = capsule.height
+		} else if (win.statusBarHeight > 0) {
+			navTop.value = win.statusBarHeight
+		}
+		// #endif
+		// #ifdef APP-ANDROID || APP-IOS
+		if (win.statusBarHeight > 0) {
+			navTop.value = win.statusBarHeight
+		}
+		// #endif
+		const bid = options['bookId']
+		if (bid == null || bid.length == 0) {
+			uni.showToast({ title: '书籍不存在', icon: 'none' })
+			setTimeout(() => {
+				uni.navigateBack()
+			}, 1200)
+			return
+		}
+		openPdfBook(bid)
+	})
+
+	onShow(() => {
+		enterAt = Date.now()
+	})
+
+	onHide(() => {
+		persistReading()
+	})
+
+	onUnload(() => {
+		disposed = true
+		persistReading()
+	})
+
+	/** 打开 PDF 书：校验 → 恢复布局参数 → 补渲染缺失页 → 构建页列表 → 定位恢复进度 */
+	async function openPdfBook(bid : string) : Promise<void> {
+		const book = findBook(bid)
+		if (book == null || book.format != 'PDF') {
+			uni.showToast({ title: '书籍不存在或已删除', icon: 'none' })
+			setTimeout(() => {
+				uni.navigateBack()
+			}, 1200)
+			return
+		}
+		bookId.value = book.id
+		bookTitle.value = book.title
+		pageCount.value = book.chapterCount
+		if (pageCount.value <= 0) {
+			renderTip.value = '书籍数据异常，请删除后重新导入'
+			return
+		}
+		// 恢复上次布局与进度（页比例在渲染前就绪，页高确定后才能准确定位）
+		const saved = loadPdfProgress(bid)
+		if (saved != null && saved.ratio > 0) {
+			pageRatio.value = saved.ratio
+		}
+		const dir = cacheDirOf(book.id)
+		const have = countCached(dir)
+		if (have < pageCount.value) {
+			const ok = await renderAll(book.path, dir)
+			if (!ok) {
+				if (!disposed) {
+					renderTip.value = '渲染失败，请重新打开'
+				}
+				return
+			}
+		}
+		// 无历史比例时取首页尺寸兜底
+		if (pageRatio.value <= 0) {
+			try {
+				const session = await openPdfSession(book.path)
+				const dim = await session.pageSize(0)
+				session.close()
+				pageRatio.value = dim.h / dim.w
+			} catch (e) {
+				renderTip.value = 'PDF 打开失败，文件可能已损坏'
+				return
+			}
+		}
+		buildPages(dir)
+		ready.value = true
+		if (saved != null && saved.percent > 0) {
+			const target = Math.min(pageCount.value, Math.max(1, Math.round(saved.percent / 100 * pageCount.value)))
+			// 布局完成后再定位（scroll-into-view 需目标节点已挂载）
+			setTimeout(() => {
+				scrollIntoView.value = 'pdf-page-' + target
+				curPage.value = target
+				curPercent.value = saved.percent
+			}, 150)
+		}
+	}
+
+	/** 统计已缓存的页图数（缓存齐全则跳过渲染） */
+	function countCached(dir : string) : number {
+		try {
+			const files = uni.getFileSystemManager().readdirSync(dir)
+			return files != null ? files.length : 0
+		} catch (e) {
+			return 0
+		}
+	}
+
+	/** 构建逐页渲染项（src 指向沙盒页图缓存） */
+	function buildPages(dir : string) : void {
+		const items : PageEntry[] = []
+		for (let i = 1; i <= pageCount.value; i++) {
+			items.push({ num: i, src: dir + '/p' + i + '.jpg' } as PageEntry)
+		}
+		pageItems.value = items
+	}
+
+	/** 逐页渲染全部缺失页：主线程 setTimeout 分片调度（单页数十毫秒，间歇让出保持交互），中断（页面卸载）即停 */
+	function renderAll(pdfPath : string, dir : string) : Promise<boolean> {
+		return new Promise<boolean>((resolve) => {
+			try {
+				uni.getFileSystemManager().mkdirSync(dir, true)
+			} catch (e) {
+				// 目录已存在属正常
+			}
+			openPdfSession(pdfPath).then((session) => {
+				if (session.pageCount != pageCount.value) {
+					// 以实际页数为准（书架记录异常时自愈）
+					pageCount.value = session.pageCount
+				}
+				const total = session.pageCount
+				session.pageSize(0).then((dim) => {
+					if (pageRatio.value <= 0) {
+						pageRatio.value = dim.h / dim.w
+					}
+					// 渲染分辨率：屏逻辑宽 × dpr，上限 1440（清晰度与体积平衡）
+					const dpr = uni.getWindowInfo().devicePixelRatio
+					const targetW = Math.min(1440, Math.max(720, Math.round(winW * (dpr > 0 ? dpr : 2))))
+					const renderNext = (index : number) : void => {
+						if (disposed) {
+							session.close()
+							resolve(false)
+							return
+						}
+						if (index >= total) {
+							session.close()
+							resolve(true)
+							return
+						}
+						renderTip.value = '正在渲染 ' + (index + 1) + ' / ' + total
+						session.renderPage(index, dir + '/p' + (index + 1) + '.jpg', targetW).then(() => {
+							setTimeout(() => {
+								renderNext(index + 1)
+							}, 0)
+						}, (_e) => {
+							session.close()
+							resolve(false)
+						})
+					}
+					renderNext(0)
+				}, (_e) => {
+					session.close()
+					resolve(false)
+				})
+			}, (_e) => {
+				resolve(false)
+			})
+		})
+	}
+
+	/** 滚动实时记录阅读位置（百分比 + 当前页码；滚动收起顶栏/底栏） */
+	function onScroll(e : UniScrollEvent) : void {
+		const maxScroll = e.detail.scrollHeight - winH
+		if (maxScroll > 0) {
+			curPercent.value = Math.min(100, Math.max(0, e.detail.scrollTop / maxScroll * 100))
+		}
+		if (pageWrapperH.value > 0) {
+			curPage.value = Math.min(pageCount.value, Math.max(1, Math.floor(e.detail.scrollTop / pageWrapperH.value) + 1))
+		}
+		if (menuVisible.value) {
+			menuVisible.value = false
+		}
+	}
+
+	/** 点击内容切换顶栏/底栏呼出态 */
+	function onContentTap() : void {
+		menuVisible.value = !menuVisible.value
+	}
+
+	/** 结算阅读：进度百分比落库 + 回写书架最近阅读状态 + 累计今日时长（onHide 先于 onUnload，enterAt 置零防双计） */
+	function persistReading() : void {
+		if (bookId.value.length == 0) {
+			return
+		}
+		savePdfProgress(bookId.value, { percent: curPercent.value, ratio: pageRatio.value } as PdfProgress)
+		updateBookReading(bookId.value, -1, Math.round(curPercent.value))
+		if (enterAt > 0) {
+			const mins = Math.floor((Date.now() - enterAt) / 60000)
+			if (mins > 0) {
+				addTodayMinutes(mins)
+			}
+		}
+		enterAt = 0
+	}
+
+	/** 返回书架 */
+	function goBack() : void {
+		uni.navigateBack()
+	}
+</script>
+
+<style lang="scss">
+	.page {
+		flex: 1;
+		position: relative;
+		background-color: $bai-canvas-soft;
+	}
+
+	.content {
+		flex: 1;
+	}
+
+	/* 页容器：高按首页比例等比换算（px 内联绑定），白底页图与软灰底区分页界 */
+	.pdf-page {
+		width: 750rpx;
+		background-color: $bai-canvas;
+	}
+
+	.pdf-page-image {
+		width: 750rpx;
+		height: 750rpx;
+	}
+
+	/* 渲染中提示：覆盖内容区中央 */
+	.pdf-loading {
+		position: absolute;
+		left: 0;
+		right: 0;
+		top: 0;
+		bottom: 0;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.pdf-loading-text {
+		font-size: 27rpx;
+		font-weight: 500;
+		color: $bai-mute;
+	}
+
+	/* 顶栏（对齐 reader 顶栏：白底浮层，呼出态滑入） */
+	.topbar {
+		position: absolute;
+		left: 0;
+		right: 0;
+		top: 0;
+		background-color: $bai-canvas;
+		border-bottom: 1px solid $bai-pale;
+		z-index: 20;
+		transition-property: transform;
+		transition-duration: 200ms;
+	}
+
+	.topbar-hidden {
+		transform: translateY(-150%);
+	}
+
+	.topbar-inner {
+		flex-direction: row;
+		align-items: center;
+		padding-left: 23rpx;
+	}
+
+	.topbar-back {
+		width: 77rpx;
+		height: 77rpx;
+		border-radius: $bai-rounded-pill;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.topbar-back-icon {
+		width: 40rpx;
+		height: 40rpx;
+	}
+
+	.topbar-title {
+		flex: 1;
+		font-size: 31rpx;
+		font-weight: 700;
+		color: $bai-ink;
+		margin-right: 38rpx;
+		/* 单行省略：长书名（app 端 lines 生效，小程序端 white-space 系生效） */
+		lines: 1;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	/* 底部进度条（与顶栏同呼出态） */
+	.footer {
+		position: absolute;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		padding-top: 15rpx;
+		padding-bottom: 15rpx;
+		align-items: center;
+		background-color: $bai-canvas;
+		border-top: 1px solid $bai-pale;
+		z-index: 20;
+		transition-property: transform;
+		transition-duration: 200ms;
+	}
+
+	.footer-hidden {
+		transform: translateY(150%);
+	}
+
+	.footer-text {
+		font-size: 23rpx;
+		font-weight: 500;
+		color: $bai-mute;
+	}
+</style>

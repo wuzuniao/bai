@@ -1,0 +1,237 @@
+// 书籍本地数据层：书架/阅读页共享收口（模型、持久化、阅读进度、今日阅读时长）
+// 书籍文件保存于应用沙盒 uni.env.USER_DATA_PATH/books/ 下，不上传云端；
+// 目录与进度按 bookId 隔离存储，正文解析与导入流程见 bookparse.uts
+
+/** 书架书籍（书架页展示与排序的唯一数据源） */
+export type LocalBook = {
+	/** 唯一标识（导入时生成，add 为书架末尾添加格占位） */
+	id: string
+	/** 书名（导入时取文件名去扩展名） */
+	title: string
+	/** 作者署名（本地导入无作者信息，恒为空串；封面深灰卡布局位） */
+	author: string
+	/** 导入文件格式大写水印（TXT/PDF），封面角落展示 */
+	format: string
+	/** 正文文件在沙盒中的路径（PDF 导入时转存为同名 txt） */
+	path: string
+	/** 文件字节数 */
+	size: number
+	/** 导入时间戳（ms） */
+	addedAt: number
+	/** 最近阅读时间戳（ms，0=未读） */
+	lastReadAt: number
+	/** 上次阅读到的章节 id（-1=未读；PDF 书恒为 -1，进度用 lastPercent） */
+	lastChapter: number
+	/** 最近阅读百分比（0-100，仅 PDF 书使用；txt 书恒为 0） */
+	lastPercent: number
+	/** 章节总数（txt=解析章节数；PDF=页数） */
+	chapterCount: number
+}
+
+/** 阅读进度（按 bookId 隔离存储，避免多本书串用） */
+export type BookProgress = {
+	chapterId: number
+	/** 章内页码（0-based） */
+	pageIndex: number
+	/** 滚动模式的滚动位置（px） */
+	scrollTop: number
+}
+
+/** PDF 阅读进度（滚动位置百分比 + 首页宽高比，用于布局与恢复定位） */
+export type PdfProgress = {
+	percent: number
+	/** 首页高/宽比（页面 wrapper 等比布局依据） */
+	ratio: number
+}
+
+const STORAGE_BOOKS = 'bookshelf_books'
+const KEY_PROGRESS_PREFIX = 'reader_progress_'
+const KEY_PDF_PROGRESS_PREFIX = 'pdf_progress_'
+const KEY_TODAY_MINUTES_PREFIX = 'reading_minutes_'
+
+/** 从宽松 JSON 对象还原 LocalBook（字段缺失/类型不符返回 null，兼容历史示例数据自动失效） */
+function bookFromObject(obj : UTSJSONObject) : LocalBook | null {
+	const id = obj.getString('id')
+	const title = obj.getString('title')
+	const format = obj.getString('format')
+	const path = obj.getString('path')
+	if (id == null || id.length == 0 || title == null || format == null || path == null) {
+		return null
+	}
+	const size = obj.getNumber('size')
+	const addedAt = obj.getNumber('addedAt')
+	const lastReadAt = obj.getNumber('lastReadAt')
+	const lastChapter = obj.getNumber('lastChapter')
+	const lastPercent = obj.getNumber('lastPercent')
+	const chapterCount = obj.getNumber('chapterCount')
+	return {
+		id: id,
+		title: title,
+		author: obj.getString('author') ?? '',
+		format: format,
+		path: path,
+		size: size == null ? 0 : size,
+		addedAt: addedAt == null ? 0 : addedAt,
+		lastReadAt: lastReadAt == null ? 0 : lastReadAt,
+		lastChapter: lastChapter == null ? -1 : lastChapter,
+		lastPercent: lastPercent == null ? 0 : lastPercent,
+		chapterCount: chapterCount == null ? 0 : chapterCount
+	} as LocalBook
+}
+
+/** 读取书架书籍列表（顺序即手动排序结果）；历史脏数据（旧示例/结构不符）自动清除 */
+export function loadBooks() : LocalBook[] {
+	const stored : any = uni.getStorageSync(STORAGE_BOOKS)
+	if (typeof stored != 'string' || (stored as string).length == 0) {
+		return []
+	}
+	const result : LocalBook[] = []
+	const arr = JSON.parse<UTSJSONObject[]>(stored as string)
+	if (arr != null) {
+		for (let i = 0; i < arr.length; i++) {
+			const book = bookFromObject(arr[i])
+			if (book != null) {
+				result.push(book)
+			}
+		}
+	}
+	// 全部条目均无效但 storage 有历史数据（如旧版示例数据）：清掉残留，避免反复干扰
+	if (result.length == 0 && arr != null && arr.length > 0) {
+		try {
+			uni.removeStorageSync(STORAGE_BOOKS)
+		} catch (e) {
+			// 忽略
+		}
+	}
+	return result
+}
+
+/** 书架书籍列表持久化 */
+export function saveBooks(list : LocalBook[]) : void {
+	uni.setStorageSync(STORAGE_BOOKS, JSON.stringify(list))
+}
+
+/** 按书架顺序查找书籍（不存在返回 null） */
+export function findBook(bookId : string) : LocalBook | null {
+	const list = loadBooks()
+	for (let i = 0; i < list.length; i++) {
+		if (list[i].id == bookId) {
+			return list[i]
+		}
+	}
+	return null
+}
+
+/** 阅读进度持久化（key 按 bookId 隔离） */
+export function saveBookProgress(bookId : string, p : BookProgress) : void {
+	uni.setStorageSync(KEY_PROGRESS_PREFIX + bookId, JSON.stringify(p))
+}
+
+/** 读取阅读进度（无记录返回 null） */
+export function loadBookProgress(bookId : string) : BookProgress | null {
+	const stored : any = uni.getStorageSync(KEY_PROGRESS_PREFIX + bookId)
+	if (typeof stored != 'string' || (stored as string).length == 0) {
+		return null
+	}
+	const obj = JSON.parse<UTSJSONObject>(stored as string)
+	if (obj == null) {
+		return null
+	}
+	const chapterId = obj.getNumber('chapterId')
+	const pageIndex = obj.getNumber('pageIndex')
+	const scrollTop = obj.getNumber('scrollTop')
+	if (chapterId == null || pageIndex == null || scrollTop == null) {
+		return null
+	}
+	return { chapterId: chapterId, pageIndex: pageIndex, scrollTop: scrollTop } as BookProgress
+}
+
+/** PDF 阅读进度持久化（百分比 0-100 + 首页宽高比） */
+export function savePdfProgress(bookId : string, p : PdfProgress) : void {
+	uni.setStorageSync(KEY_PDF_PROGRESS_PREFIX + bookId, JSON.stringify(p))
+}
+
+/** 读取 PDF 阅读进度（无记录返回 null） */
+export function loadPdfProgress(bookId : string) : PdfProgress | null {
+	const stored : any = uni.getStorageSync(KEY_PDF_PROGRESS_PREFIX + bookId)
+	if (typeof stored != 'string' || (stored as string).length == 0) {
+		return null
+	}
+	const obj = JSON.parse<UTSJSONObject>(stored as string)
+	if (obj == null) {
+		return null
+	}
+	const percent = obj.getNumber('percent')
+	const ratio = obj.getNumber('ratio')
+	if (percent == null || ratio == null) {
+		return null
+	}
+	return { percent: percent, ratio: ratio } as PdfProgress
+}
+
+/** 回写阅读状态到书架元数据（最近阅读时间 + 章节位置，书架 meta 与最近阅读排序依据） */
+export function updateBookReading(bookId : string, chapterId : number, percent : number = -1) : void {
+	const list = loadBooks()
+	for (let i = 0; i < list.length; i++) {
+		if (list[i].id == bookId) {
+			list[i].lastReadAt = Date.now()
+			if (chapterId >= 0) {
+				list[i].lastChapter = chapterId
+			}
+			if (percent >= 0) {
+				list[i].lastPercent = percent
+			}
+			saveBooks(list)
+			return
+		}
+	}
+}
+
+/** 删除书籍的全部本地数据（正文文件 + 进度 + PDF 页图缓存；文件不存在时静默忽略） */
+export function removeBookData(book : LocalBook) : void {
+	try {
+		uni.getFileSystemManager().unlinkSync(book.path)
+	} catch (e) {
+		// 文件可能已被系统清理，忽略
+	}
+	try {
+		uni.removeStorageSync(KEY_PROGRESS_PREFIX + book.id)
+	} catch (e) {
+		// 忽略
+	}
+	try {
+		uni.removeStorageSync(KEY_PDF_PROGRESS_PREFIX + book.id)
+	} catch (e) {
+		// 忽略
+	}
+	try {
+		uni.getFileSystemManager().rmdirSync(uni.env.USER_DATA_PATH + '/pdf_cache/' + book.id, true)
+	} catch (e) {
+		// 缓存目录不存在（txt 书）忽略
+	}
+}
+
+/** 今日阅读时长的存储键（按日滚动） */
+function todayKey() : string {
+	const d = new Date()
+	const m = d.getMonth() + 1
+	const day = d.getDate()
+	return KEY_TODAY_MINUTES_PREFIX + d.getFullYear() + '-' + (m < 10 ? '0' + m : '' + m) + '-' + (day < 10 ? '0' + day : '' + day)
+}
+
+/** 今日已读分钟数（书架统计卡展示） */
+export function getTodayMinutes() : number {
+	const stored : any = uni.getStorageSync(todayKey())
+	if (typeof stored == 'number') {
+		return stored as number
+	}
+	return 0
+}
+
+/** 累计今日阅读分钟数（阅读页 onHide/onUnload 结算） */
+export function addTodayMinutes(mins : number) : void {
+	if (mins <= 0) {
+		return
+	}
+	uni.setStorageSync(todayKey(), getTodayMinutes() + mins)
+}

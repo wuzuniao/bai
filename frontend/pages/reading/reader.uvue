@@ -169,310 +169,63 @@
 					<view v-if="pageTurn === '覆盖' && flipDir == 1" class="page-cover-mask" :class="flipSettling ? 'page-cover-mask-settle' : ''" :style="'background-color:' + coverMaskBg + ';opacity:' + coverNextMaskOpacity"></view>
 				</view>
 			</view>
-			<!-- 底部进度（Stitch: 时间 + 章节进度 + 百分比标签；文字行底仅比手势条横条高一点；滚动模式随滚动淡入、停止淡出） -->
-			<view class="reader-footer" :style="'padding-bottom:' + footerBottomPx + 'px;opacity:' + footerOpacity">
-				<view class="footer-left">
-					<view class="footer-dot"></view>
-					<text class="footer-time">14:30</text>
-				</view>
-				<view class="footer-right">
-					<text class="footer-progress">{{ footerProgress }}</text>
-					<text class="footer-percent">{{ footerPercent }}</text>
-				</view>
+			<!-- 底部信息栏（组件化：进度/百分比/贴底计算与滚动淡入淡出出现时机内聚 ReaderFooterBar，滚动信号经 ref 驱动） -->
+			<ReaderFooterBar
+				ref="footerRef"
+				:scroll-mode="scrollMode"
+				:chapter-label="currentChapter.label"
+				:chapter-count="chapters.length"
+				:chapter-index="currentChapterId"
+				:safe-bottom="safeAreaBottomPx"
+			/>
 			</view>
-		</view>
 
-		<!-- 划词手柄（选区两端水滴形大手柄：拖动调节选中范围，触摸热区大于视觉体便于拖动；锚点实测完成后才显示，避免位置跳变） -->
-		<template v-if="selectionLaidOut">
-			<view
-				id="sel-handle-start"
-				class="sel-handle sel-handle-start"
-				:style="'left:' + handleStartLeft + 'px;top:' + handleStartTop + 'px'"
-				@touchstart="onStartHandleTouchStart"
-				@touchmove="onStartHandleTouchMove"
-				@touchend="onStartHandleTouchEnd"
-				@touchcancel="onStartHandleTouchEnd"
-			>
-				<view class="sel-handle-drop"></view>
-				<view class="sel-handle-tip sel-handle-tip-down"></view>
-			</view>
-			<view
-				id="sel-handle-end"
-				class="sel-handle sel-handle-end"
-				:style="'left:' + handleEndLeft + 'px;top:' + handleEndTop + 'px'"
-				@touchstart="onEndHandleTouchStart"
-				@touchmove="onEndHandleTouchMove"
-				@touchend="onEndHandleTouchEnd"
-				@touchcancel="onEndHandleTouchEnd"
-			>
-				<view class="sel-handle-tip sel-handle-tip-up"></view>
-				<view class="sel-handle-drop"></view>
-			</view>
-		</template>
+		<!-- 划词气泡（组件化：划词子系统[选区/手柄/拖动/吸附]与五项功能实现/想法查看卡片全部内聚 SelectionPopover；划线/想法写本地存储后经 sync 通知页面重读，选区清除经 dismiss，高亮经 spanChanged 镜像） -->
+		<SelectionPopover
+			ref="popoverRef"
+			:bg="popoverBg"
+			:nav-top="navTop"
+			:page-w="pageW"
+			:page-h="pageH"
+			:metrics="metrics"
+			:segs="selSegs"
+			:text="selText"
+			:share-ctx="shareCtx"
+			:logo-src="shareLogoSrc"
+			:quote-color="mutedColor"
+			:panel-bg="thoughtCardPanelBg"
+			:content-color="titleColor"
+			:shadow="panelShadow"
+			@sync="onPopoverSync"
+			@dismiss="clearSelection"
+			@toast="showToast"
+			@thought-view-closed="onThoughtViewClosed"
+			@span-changed="onSpanChanged"
+			@drag-started="onDragStarted"
+			@query-anchors="measureAnchors"
+		/>
 
-		<!-- 划词气泡（Stitch: 黑底圆角 12px，复制/写想法/划线竖排图标+文字；三角为体旁旋转方块，动态指向按住位置，拖动手柄中隐藏） -->
-		<view
-			v-if="popoverVisible"
-			class="selection-popover"
-			:style="'left:' + popoverLeft + 'px;top:' + popoverTop + 'px'"
-			@click="clearSelection"
-		>
-			<!-- 气泡在选区下方时三角贴体顶朝上 -->
-			<view
-				v-if="popoverBelow"
-				class="popover-arrow popover-arrow-above"
-				:style="'margin-left:' + arrowLeft + 'px;background-color:' + popoverBg"
-			></view>
-			<view class="popover-body" :class="popoverTwoLine ? 'popover-body-two' : ''" :style="'background-color:' + popoverBg">
-				<template v-if="popoverTwoLine">
-					<view class="popover-row">
-						<view class="popover-btn" @click="onPopoverAction($event, 'copy')">
-							<image class="popover-icon" src="/static/icons/popover-copy.svg" />
-							<text class="popover-text">复制</text>
-						</view>
-						<view class="popover-divider"></view>
-						<view class="popover-btn" @click="onPopoverAction($event, 'idea')">
-							<image class="popover-icon" src="/static/icons/popover-idea.svg" />
-							<text class="popover-text">写想法</text>
-						</view>
-						<view class="popover-divider"></view>
-						<view class="popover-btn" @click="onPopoverAction($event, 'underline')">
-							<image class="popover-icon" src="/static/icons/popover-underline.svg" />
-							<text class="popover-text">划线</text>
-						</view>
-					</view>
-					<view class="popover-divider-h"></view>
-					<view class="popover-row">
-						<view class="popover-btn" @click="onPopoverAction($event, 'query')">
-							<image class="popover-icon" src="/static/icons/popover-query.svg" />
-							<text class="popover-text">查询</text>
-						</view>
-						<view class="popover-divider"></view>
-						<view class="popover-btn" @click="onPopoverAction($event, 'share')">
-							<image class="popover-icon" src="/static/icons/popover-share.svg" />
-							<text class="popover-text">分享</text>
-						</view>
-					</view>
-				</template>
-				<template v-else>
-					<view class="popover-btn" @click="onPopoverAction($event, 'copy')">
-						<image class="popover-icon" src="/static/icons/popover-copy.svg" />
-						<text class="popover-text">复制</text>
-					</view>
-					<view class="popover-divider"></view>
-					<view class="popover-btn" @click="onPopoverAction($event, 'idea')">
-						<image class="popover-icon" src="/static/icons/popover-idea.svg" />
-						<text class="popover-text">写想法</text>
-					</view>
-					<view class="popover-divider"></view>
-					<view class="popover-btn" @click="onPopoverAction($event, 'underline')">
-						<image class="popover-icon" src="/static/icons/popover-underline.svg" />
-						<text class="popover-text">划线</text>
-					</view>
-					<view class="popover-divider"></view>
-					<view class="popover-btn" @click="onPopoverAction($event, 'query')">
-						<image class="popover-icon" src="/static/icons/popover-query.svg" />
-						<text class="popover-text">查询</text>
-					</view>
-					<view class="popover-divider"></view>
-					<view class="popover-btn" @click="onPopoverAction($event, 'share')">
-						<image class="popover-icon" src="/static/icons/popover-share.svg" />
-						<text class="popover-text">分享</text>
-					</view>
-				</template>
-			</view>
-			<!-- 气泡在选区上方时三角贴体底朝下 -->
-			<view
-				v-if="!popoverBelow"
-				class="popover-arrow popover-arrow-below"
-				:style="'margin-left:' + arrowLeft + 'px;background-color:' + popoverBg"
-			></view>
-		</view>
-
-		<!-- 顶部导航菜单（Stitch: 返回/书名，呼出态从顶部滑入；内容行与小程序胶囊同行） -->
-		<view
-			class="menu-top"
-			:class="menuVisible && !settingsOpen ? '' : 'menu-top-hidden'"
-			:style="'background-color:' + menuTopBg + ';border-color:' + menuBorderColor + ';padding-top:' + navTop + 'px'"
-		>
-			<view class="menu-top-inner" :style="'height:' + navHeight + 'px'">
-				<view class="menu-top-left">
-					<view class="round-btn" @click="onBackTap">
-						<image class="round-btn-icon" :src="themeIcon('arrow-back')" />
-					</view>
-					<text class="book-name" :style="'color:' + titleColor">{{ BOOK_TITLE }}</text>
-				</view>
-			</view>
-		</view>
-
-		<!-- 底部控制面板（Stitch: 设置面板 + 听书悬浮球 + 三项导航，呼出态从底部滑入；抽屉打开时保持显示，三控制项不随子项变化） -->
-		<view
-			class="menu-bottom"
-			:class="menuVisible || drawerOpen ? '' : 'menu-bottom-hidden'"
-			:style="'background-color:' + menuBottomBg + ';border-color:' + menuBorderColor + ';box-shadow:' + panelShadow"
-		>
-			<!-- 目录抽屉（与设置面板一致：作为控制栏内容块向上弹出，与设置面板互斥） -->
-			<view v-if="drawerOpen" class="drawer-panel" :style="'height:' + drawerPanelHeight + 'px'">
-					<view class="settings-grip-row">
-						<view class="settings-grip"></view>
-					</view>
-					<view class="drawer-header">
-					<view :class="drawerTab === 'catalog' ? 'drawer-tab-active' : 'drawer-tab-plain'" @click="switchDrawerTab('catalog')">
-						<text :class="drawerTab === 'catalog' ? 'drawer-tab-title' : 'drawer-tab-plain'">目录</text>
-						<text v-if="drawerTab === 'catalog'" class="drawer-tab-sort" @click="onSortTap($event)">{{ orderDesc ? '↓↑' : '⇅' }}</text>
-					</view>
-					<view :class="drawerTab === 'note' ? 'drawer-tab-active' : 'drawer-tab-plain'" @click="switchDrawerTab('note')">
-						<text :class="drawerTab === 'note' ? 'drawer-tab-title' : 'drawer-tab-plain'">想法/划线</text>
-					</view>
-					<view :class="drawerTab === 'bookmark' ? 'drawer-tab-active' : 'drawer-tab-plain'" @click="switchDrawerTab('bookmark')">
-						<text :class="drawerTab === 'bookmark' ? 'drawer-tab-title' : 'drawer-tab-plain'">书签</text>
-					</view>
-				</view>
-				<scroll-view class="drawer-list" direction="vertical" :show-scrollbar="false">
-					<!-- 目录页 -->
-					<view v-if="drawerTab === 'catalog'">
-						<view
-							v-for="(ch, ci) in displayChapters"
-							:key="ch.id"
-							class="chapter-item"
-							@click="selectChapter(ch)"
-						>
-							<text class="chapter-item-text" :class="ch.active ? 'chapter-item-text-active' : ''" :style="'color:' + (ch.active ? activeBlue : chapterTextColor)">{{ ch.title }}</text>
-						</view>
-					</view>
-					<!-- 想法/划线页：划线记录卡片（随划线与取消划线实时同步） -->
-					<view v-else-if="drawerTab === 'note'">
-						<view v-if="noteRecords.length == 0" class="bookmark-empty">
-							<text class="bookmark-empty-text" :style="'color:' + mutedColor">暂无划线记录，长按正文即可划线</text>
-						</view>
-						<view
-							v-for="(r, ri) in noteRecords"
-							:key="ri"
-							class="note-item"
-							@click="goToUnderline(r)"
-						>
-							<text class="note-item-text" :style="'color:' + mutedColor">{{ r.quote }}</text>
-							<text v-if="r.content.length > 0" class="note-item-content" :style="'color:' + chapterTextColor">{{ r.content }}</text>
-						</view>
-					</view>
-					<!-- 书签页 -->
-					<view v-else>
-						<view v-if="bookmarks.length == 0" class="bookmark-empty">
-							<text class="bookmark-empty-text" :style="'color:' + mutedColor">书签列表为空，正文下滑即可添加书签</text>
-						</view>
-						<view
-							v-for="(bm, bi) in bookmarks"
-							:key="bi"
-							class="bookmark-item"
-							@click="goToBookmark(bm)"
-						>
-							<image class="bookmark-item-icon" :src="themeIcon('reader-bookmark-active')" />
-							<text class="bookmark-item-text" :style="'color:' + chapterTextColor">{{ bookmarkLabel(bm) }}</text>
-						</view>
-					</view>
-				</scroll-view>
-			</view>
-			<!-- 设置面板（Stitch: 字号/背景/翻页，展开时隐藏顶栏与听书球） -->
-			<view v-if="settingsOpen" class="settings-panel">
-				<view class="settings-grip-row">
-					<view class="settings-grip"></view>
-				</view>
-				<view class="settings-row">
-					<text class="settings-label" :style="'color:' + mutedColor">字号</text>
-					<view class="settings-row-body">
-						<view class="stepper-group">
-							<view class="stepper-btn" :style="'background-color:' + controlBg + ';border-color:' + controlBorder" @click="changeFontSize(-1)">
-								<text class="stepper-text" :style="'color:' + controlText">A⁻</text>
-							</view>
-							<text class="stepper-val" :style="'color:' + titleColor">{{ fontSize }}</text>
-							<view class="stepper-btn" :style="'background-color:' + controlBg + ';border-color:' + controlBorder" @click="changeFontSize(1)">
-								<text class="stepper-text" :style="'color:' + controlText">A⁺</text>
-							</view>
-						</view>
-						<view class="font-btn" :style="'background-color:' + controlBg + ';border-color:' + controlBorder" @click="toggleFontList">
-							<text class="font-btn-text" :style="'color:' + controlText">{{ fontListOpen ? '请选择' : currentFontLabel }}</text>
-						</view>
-					</view>
-				</view>
-				<!-- 字体选择列表（选择后点保存本地持久化） -->
-				<view v-if="fontListOpen" class="font-select">
-					<view class="font-select-list">
-						<view
-							v-for="(f, fi) in fontOptions"
-							:key="f.key"
-							class="page-turn-btn font-option"
-							:class="pendingFontKey === f.key ? 'page-turn-active' : 'page-turn-idle'"
-							:style="pendingFontKey === f.key ? '' : 'background-color:' + controlBg + ';border-color:' + controlBorder"
-							@click="selectFont(f.key)"
-						>
-							<text class="page-turn-text" :class="pendingFontKey === f.key ? 'page-turn-text-active' : ''" :style="pendingFontKey === f.key ? '' : 'color:' + controlText">{{ f.label }}</text>
-						</view>
-					</view>
-					<view class="font-save-row">
-						<view class="font-cancel-btn" @click="cancelFontSelect">
-							<text class="font-cancel-btn-text">取消</text>
-						</view>
-						<view class="font-save-btn" :style="nightMode ? 'background-color:#f3f4f6' : ''" @click="saveFont">
-							<text class="font-save-btn-text" :style="nightMode ? 'color:#0e0f0c' : ''">保存</text>
-						</view>
-					</view>
-				</view>
-				<view class="settings-row">
-					<text class="settings-label" :style="'color:' + mutedColor">背景</text>
-					<view class="settings-row-body">
-						<view class="swatch-group">
-							<view
-								class="swatch swatch-white"
-								:class="selectedBg === READER_THEME_LIGHT.readerBg ? 'swatch-active' : ''"
-								@click="changeReaderBg(READER_THEME_LIGHT.readerBg, READER_THEME_LIGHT.bodyColor)"
-							></view>
-							<view
-								class="swatch swatch-milky"
-								:class="selectedBg === READER_THEME_PAPER.readerBg ? 'swatch-active' : ''"
-								@click="changeReaderBg(READER_THEME_PAPER.readerBg, READER_THEME_PAPER.bodyColor)"
-							></view>
-						</view>
-					</view>
-				</view>
-				<view class="settings-row">
-					<text class="settings-label" :style="'color:' + mutedColor">翻页</text>
-					<view class="page-turn-group">
-						<view
-							v-for="(m, mi) in pageTurnModes"
-							:key="mi"
-							class="page-turn-btn"
-							:class="pageTurn === m ? 'page-turn-active' : 'page-turn-idle'"
-							:style="pageTurn === m ? '' : 'background-color:' + controlBg + ';border-color:' + controlBorder"
-							@click="selectPageTurn(m)"
-						>
-							<text class="page-turn-text" :class="pageTurn === m ? 'page-turn-text-active' : ''" :style="pageTurn === m ? '' : 'color:' + controlText">{{ m }}</text>
-						</view>
-					</view>
-				</view>
-			</view>
-			<!-- 听书悬浮球（Stitch: 黑底 64px 圆，"听" 28px/900，设置/抽屉展开时隐藏） -->
-			<view v-if="!settingsOpen && !drawerOpen" class="listen-wrap">
-				<view class="listen-btn" @click="showToast('听书模式即将上线')">
-					<text class="listen-text">听</text>
-				</view>
-			</view>
-			<!-- 底部三项导航（Stitch: 目录/夜间/设置） -->
-			<view class="bottom-nav">
-				<view class="bottom-nav-btn" @click="toggleDrawer">
-					<image class="bottom-nav-icon" :src="themeIcon('reader-catalog')" />
-					<text class="bottom-nav-text" :style="'color:' + titleColor">目录</text>
-				</view>
-				<view class="bottom-nav-btn" @click="toggleNightMode">
-					<image class="bottom-nav-icon" :src="nightMode ? '/static/icons/reader-sun.svg' : themeIcon('reader-moon')" />
-					<text class="bottom-nav-text" :style="'color:' + titleColor">{{ nightMode ? '白天' : '夜晚' }}</text>
-				</view>
-				<view class="bottom-nav-btn" @click="toggleSettings">
-					<image class="bottom-nav-icon" :src="themeIcon('reader-settings')" />
-					<text class="bottom-nav-text" :style="'color:' + titleColor">设置</text>
-				</view>
-			</view>
-		</view>
-
+		<!-- 上下控制框（组件化：顶栏/目录抽屉/设置面板/听书球/三项导航与设置/书签功能内聚 ReaderControl；设置变更经 change 应用渲染，书签变更经 bookmarksChanged 重读） -->
+		<ReaderControl
+			ref="controlRef"
+			:visible="menuVisible"
+			:settings-open="settingsOpen"
+			:drawer-open="drawerOpen"
+			:book-title="bookTitle"
+			:chapters="chapters"
+			:active-chapter-id="currentChapterId"
+			:notes="noteRecords"
+			@back="onBackTap"
+			@toggle-drawer="toggleDrawer"
+			@toggle-settings="toggleSettings"
+			@listen="onListenTap"
+			@select-chapter="selectChapterById"
+			@go-bookmark="goToBookmark"
+			@go-note="goToUnderline"
+			@change="onControlChange"
+			@bookmarks-changed="onBookmarksChanged"
+			@toast="onControlToast"
+		/>
 		<!-- 书签下拉/移除遮罩（顶部半透明提示条：高度即内容位移量，填补内容下移留出的空白；书签图标在遮罩内右上角随动作变化） -->
 			<view
 				v-if="pullState != 'none' || pullSettling"
@@ -486,90 +239,32 @@
 				</view>
 			</view>
 
-		<!-- 想法编辑器（多行输入框浮层：上方双引号引用高亮文本，确认后保存想法并同步划线；点击拦截已移除避免微信端 textarea 聚焦失效） -->
-		<view v-if="thoughtEditorOpen" class="thought-mask">
-			<view class="thought-dialog">
-				<text class="thought-title">写想法</text>
-				<view class="thought-quote">
-					<text class="thought-quote-text" :style="'color:' + mutedColor"><text class="thought-quote-mark">“</text>{{ thoughtQuote }}<text class="thought-quote-mark">”</text></text>
-				</view>
-				<textarea
-					class="thought-input"
-					v-model="thoughtInput"
-					placeholder="写下你的想法…"
-					:maxlength="10000"
-					:focus="thoughtInputFocus"
-					auto-height
-					:style="'max-height:' + thoughtInputMaxH + 'px'"
-				/>
-				<view class="thought-actions">
-					<view class="thought-btn-cancel" @click="cancelThought">
-						<text class="thought-btn-cancel-text">取消</text>
-					</view>
-					<view class="thought-btn-confirm" @click="confirmThought">
-						<text class="thought-btn-confirm-text">保存</text>
-					</view>
-				</view>
-			</view>
-		</view>
-
-		<!-- 想法查看（锚定划线下方/上方只读浮层：仅展示想法内容，超长内部滚动，点击任意处关闭；配色随主题切换） -->
-		<view v-if="thoughtViewOpen" class="thought-view-mask" @click="closeThoughtView">
-			<view
-				class="thought-view-panel"
-				:style="'left:' + thoughtViewLeft + 'px;top:' + thoughtViewTop + 'px;width:' + thoughtViewW + 'px;background-color:' + thoughtViewPanelBg + ';box-shadow:' + panelShadow"
-				@click="closeThoughtView"
-			>
-				<scroll-view scroll-y class="thought-view-scroll" :style="'max-height:' + thoughtViewMaxH + 'px'">
-					<text class="thought-view-content" :style="'color:' + titleColor">{{ thoughtViewContent }}</text>
-				</scroll-view>
-			</view>
-		</view>
-
-		<!-- 分享卡片预览（头像半出卡片顶部正中/产品名/引文渐出/想法预览限高滚动；导出为全量长图；分享按钮仅微信端） -->
-		<view v-if="shareOpen" class="share-mask" @click="closeShare">
-			<view class="share-pop">
-				<view class="share-card">
-					<text class="share-card-app">无足鸟古诗词学习助手</text>
-					<scroll-view scroll-y class="share-card-scroll" :style="'max-height:' + shareCardMaxH + 'px'">
-						<text class="share-card-text">
-							<text class="share-ctx-far">{{ shareCtxFarBefore }}</text><text class="share-ctx-near">{{ shareCtxNearBefore }}</text><text class="share-quote-mark">“</text><text class="share-quote-main">{{ shareQuote }}</text><text class="share-quote-mark">”</text><text class="share-ctx-near">{{ shareCtxNearAfter }}</text><text class="share-ctx-far">{{ shareCtxFarAfter }}</text>
-						</text>
-						<view v-if="shareThought.length > 0" class="share-card-thought">
-							<text class="share-card-thought-text">{{ shareThought }}</text>
-						</view>
-					</scroll-view>
-					<text class="share-card-source">《{{ BOOK_TITLE }}》 · {{ shareSource }}</text>
-				</view>
-				<view class="share-card-logo-ring">
-					<image class="share-card-logo" :src="shareLogoSrc" />
-				</view>
-				<view class="share-actions">
-					<view class="share-action" @click="saveShareImage">
-						<text class="share-action-text">保存为图片</text>
-					</view>
-					<!-- #ifdef MP-WEIXIN -->
-					<button class="share-action share-action-share" open-type="share">
-						<text class="share-action-text share-action-text-primary">分享</text>
-					</button>
-					<!-- #endif -->
-				</view>
-			</view>
-		</view>
-
-		<!-- 分享卡片绘制画布（隐藏，仅用于导出图片） -->
-		<canvas id="share-canvas" type="2d" class="share-canvas"></canvas>
-
-		<!-- 全局提示（页面正中卡片弹窗，1.5s 自动消失；夜间提亮卡片底色） -->
-		<view v-if="toastVisible" class="reader-toast">
-			<text class="reader-toast-text" :style="nightMode ? 'background-color:rgba(44, 44, 44, 0.98)' : ''">{{ toastMsg }}</text>
-		</view>
+		<!-- 全局信息提示（组件化：文案/显隐/自动消失计时内聚 ReaderToast） -->
+		<ReaderToast ref="toastRef" :night="nightMode" />
 	</view>
 </template>
 
 <script setup lang="uts">
 	import { READER_THEME_LIGHT, READER_THEME_NIGHT, READER_THEME_PAPER } from '@/utils/theme.uts'
 	import { useUserStore, avatarPathOf } from '@/stores/user.uts'
+	import { LocalBook, BookProgress, findBook, loadBookProgress, saveBookProgress, updateBookReading, addTodayMinutes } from '@/utils/books.uts'
+	import { parseChapters, readTextFile } from '@/utils/bookparse.uts'
+	import { Chapter, Bookmark, NoteRecord, SelSpan, SpanSeg, TextMetrics, ParaRect, ReaderSettings, FONT_OPTIONS, fontOptionOf, loadUnderlines, loadThoughts, findUnderlineEntry, loadBookmarks, loadSettings, comparePos, normalizeSpan, rowSpacing } from '@/utils/readerTypes.uts'
+	import SelectionPopover from '@/components/SelectionPopover/SelectionPopover.uvue'
+	import ReaderControl from '@/components/ReaderControl/ReaderControl.uvue'
+	import ReaderFooterBar from '@/components/ReaderFooterBar/ReaderFooterBar.uvue'
+	import ReaderToast from '@/components/ReaderToast/ReaderToast.uvue'
+
+	/** 组件引用：气泡（划词建立/清除与锚点、拖动矩形回传）、控制框（书签增删）、信息栏（滚动信号）、提示卡片 */
+	const popoverRef = ref<SelectionPopover | null>(null)
+	const controlRef = ref<ReaderControl | null>(null)
+	const footerRef = ref<ReaderFooterBar | null>(null)
+	const toastRef = ref<ReaderToast | null>(null)
+
+	/** 想法查看卡片关闭通知：复位划线段点击协调标志（卡片遮罩期间标志残留会吞掉关闭后首次点击） */
+	function onThoughtViewClosed() : void {
+		paragraphTapHandled = false
+	}
 
 	type Paragraph = {
 		text: string
@@ -581,23 +276,22 @@
 		text: string
 	}
 
-	type Chapter = {
-		id: number
-		/** 目录标题（如：第1章 章节名） */
-		title: string
-		/** 正文页章节标签（如：第 1 章） */
-		label: string
-		/** 正文页大标题 */
-		contentTitle: string
-		/** 当前阅读章节高亮（由 currentChapterId 驱动） */
-		active: boolean
-	}
-
 	/** 章节正文（默认空；真实书籍数据统一经 loadBookContent 注入，段落索引是划线/想法/进度的定位键） */
 	const paragraphs = ref<Paragraph[]>([])
 
 	/** 目录章节（默认空；真实书籍数据统一经 loadBookContent 注入，id 即章序号） */
 	const chapters = ref<Chapter[]>([])
+
+	/** 全书各章段落（章 id → 段落文本数组；切章/跨章预渲染按 id 取用） */
+	const chapterParas = ref<string[][]>([])
+
+	/** 指定章的段落文本（越界返回空数组） */
+	function paragraphsOf(cid : number) : string[] {
+		if (cid >= 0 && cid < chapterParas.value.length) {
+			return chapterParas.value[cid]
+		}
+		return []
+	}
 
 	/** 当前阅读章节 id（滚动/翻页/进度均以此为准） */
 	const currentChapterId = ref(0)
@@ -624,26 +318,11 @@
 		return currentChapter.value.contentTitle
 	})
 
-	const footerProgress = computed(() : string => {
-		return currentChapter.value.label + ' / 共 ' + chapters.value.length + ' 章'
-	})
-
-	const footerPercent = computed(() : string => {
-		if (chapters.value.length == 0) {
-			return '0.0%'
-		}
-		const percent = currentChapterId.value / chapters.value.length * 100
-		return percent.toFixed(1) + '%'
-	})
-
 	/** 当前页码（章内 0-based，左右滑动翻页切换） */
 	const pageIndex = ref(0)
 
 	/** 正文区底部留白（px）：页脚浮层文字行之上留足间距，正文与页脚不紧挨 */
 	const contentBottomPx = computed(() : number => safeAreaBottomPx.value + 80)
-
-	/** 页脚贴底内边距（px）：文字行底仅比手势条横条高一点（下沉 10px，不低于 4px 兜底） */
-	const footerBottomPx = computed(() : number => Math.max(4, safeAreaBottomPx.value - 10))
 
 	/** 分页结果：每页的章内段落索引数组——按可用高度百分比做高度预算，段落高度（整行×行高）逐段累计，装不下的段落流到下一页；章首页扣除章节头高度 */
 	const pageBreaks = computed(() : number[][] => {
@@ -721,10 +400,15 @@
 	const scrollIntoView = ref('')
 
 	/** ===== 书籍内容接入点 ===== */
-	/** 注入真实书籍数据（章节目录 + 段落正文）并重置阅读位置：接入后端/文件加载完成后调用一次即可，目录、分页、划线/想法/书签渲染全部基于注入后的数据重建 */
-	function loadBookContent(chs : Chapter[], paras : Paragraph[]) : void {
+	/** 当前书籍（id 用于进度/阅读状态回写；title 用于顶栏与分享展示） */
+	const bookId = ref('')
+	const bookTitle = ref('')
+
+	/** 注入真实书籍数据（章节目录 + 各章段落正文）并重置阅读位置：本地文件解析完成后调用一次，目录、分页、划线/想法/书签渲染全部基于注入后的数据重建 */
+	function loadBookContent(chs : Chapter[], allParas : string[][]) : void {
 		chapters.value = chs
-		paragraphs.value = paras
+		chapterParas.value = allParas
+		paragraphs.value = allParas.length > 0 ? allParas[0] : []
 		currentChapterId.value = 0
 		pageIndex.value = 0
 		scrollChapters.value = [0]
@@ -734,30 +418,17 @@
 		saveProgress()
 	}
 
-	/** ===== 阅读进度（书名/章节/页码/滚动位置）本地持久化 ===== */
-	/** 当前书籍名（进度存储与顶栏展示唯一定义处；后续接入真实书籍数据时由数据驱动） */
-	const BOOK_TITLE = '无足鸟'
-
-	type ReaderProgress = {
-		/** 书名：恢复进度时校验，避免不同书之间串用进度 */
-		bookTitle: string
-		chapterId: number
-		pageIndex: number
-		scrollTop: number
-	}
-
-	const STORAGE_PROGRESS = 'reader_progress'
+	/** ===== 阅读进度（章节/页码/滚动位置，按 bookId 隔离持久化） ===== */
 
 	function saveProgress() : void {
-		const p = { bookTitle: BOOK_TITLE, chapterId: currentChapterId.value, pageIndex: pageIndex.value, scrollTop: scrollModePos.value } as ReaderProgress
-		uni.setStorageSync(STORAGE_PROGRESS, JSON.stringify(p))
+		if (bookId.value.length == 0) {
+			return
+		}
+		const p = { chapterId: currentChapterId.value, pageIndex: pageIndex.value, scrollTop: scrollModePos.value } as BookProgress
+		saveBookProgress(bookId.value, p)
 	}
 
-	/** 滚动模式页脚信息栏显隐：滚动时淡入展示进度，停止滚动后淡出隐藏（不影响阅读） */
-	const footerVisible = ref(false)
-	let footerHideTimer = -1
-
-	/** 滚动模式实时滚动位置（仅内存记录，随 onHide/onUnload 持久化）；滚动阅读时隐藏上下控制项，并淡入页脚、停止后淡出 */
+	/** 滚动模式实时滚动位置（仅内存记录，随 onHide/onUnload 持久化）；滚动阅读时隐藏上下控制项，并通知信息栏淡入（停止后组件内计时淡出） */
 	function onScrollModeScroll(e : UniScrollEvent) : void {
 		scrollModePos.value = e.detail.scrollTop
 		// 滚动使内容位移，选区与手柄位置失效，随滚动清除
@@ -767,21 +438,39 @@
 		if (menuVisible.value) {
 			menuVisible.value = false
 		}
-		footerVisible.value = true
-		if (footerHideTimer >= 0) {
-			clearTimeout(footerHideTimer)
+		footerRef.value?.notifyScroll()
+	}
+
+	/** ===== 阅读时长结算（onShow 起算，onHide/onUnload 落库；书架统计卡展示） ===== */
+	let enterAt = 0
+
+	onShow(() => {
+		enterAt = Date.now()
+	})
+
+	/** 结算本次阅读：累计今日分钟数 + 回写书架最近阅读状态（onHide 先于 onUnload 触发，enterAt 置零防双计） */
+	function recordReadingSession() : void {
+		if (bookId.value.length == 0) {
+			return
 		}
-		footerHideTimer = setTimeout(() => {
-			footerVisible.value = false
-		}, 1500)
+		if (enterAt > 0) {
+			const mins = Math.floor((Date.now() - enterAt) / 60000)
+			if (mins > 0) {
+				addTodayMinutes(mins)
+			}
+		}
+		enterAt = 0
+		updateBookReading(bookId.value, currentChapterId.value)
 	}
 
 	onUnload(() => {
 		saveProgress()
+		recordReadingSession()
 	})
 
 	onHide(() => {
 		saveProgress()
+		recordReadingSession()
 	})
 
 	/** 滚动到底：自动加载下一章；末章给出到底提示 */
@@ -813,10 +502,11 @@
 		}
 	}
 
-	/** 指定章的段落渲染项（key 带章 id 防止多章同段落索引冲突） */
+	/** 指定章的段落渲染项（key 带章 id 防止多章同段落索引冲突；滚动模式多章连续渲染按章取段落） */
 	function chapterParagraphItems(cid : number) : PageItem[] {
-		return paragraphs.value.map((p, i) : PageItem => {
-			return { origin: i, text: p.text } as PageItem
+		const paras = paragraphsOf(cid)
+		return paras.map((p, i) : PageItem => {
+			return { origin: i, text: p } as PageItem
 		})
 	}
 
@@ -828,13 +518,18 @@
 	const flipOffset = ref(0)
 	const flipSettling = ref(false)
 
-	/** 上一页渲染项（常驻预渲染：章内相邻页；章首跨上一章末页；第一章无上一页为空数组）——目标层视图常驻，跟手时零创建延迟，首次翻到新页无渲染空白 */
+	/** 上一页渲染项（常驻预渲染：章内相邻页；章首跨上一章末页——取上一章尾部等量段落近似，落定后按上一章真实分页渲染；第一章无上一页为空数组）——目标层视图常驻，跟手时零创建延迟，首次翻到新页无渲染空白 */
 	const prevPageItems = computed(() : PageItem[] => {
 		if (pageIndex.value > 0) {
 			return pageItemsAt(pageIndex.value - 1)
 		}
 		if (currentChapterId.value > 0) {
-			return pageItemsAt(pageBreaks.value.length - 1)
+			const paras = paragraphsOf(currentChapterId.value - 1)
+			const tailCount = pageBreaks.value.length > 0 ? pageBreaks.value[pageBreaks.value.length - 1].length : 0
+			const start = Math.max(0, paras.length - tailCount)
+			return paras.slice(start).map((p, i) : PageItem => {
+				return { origin: start + i, text: p } as PageItem
+			})
 		}
 		return [] as PageItem[]
 	})
@@ -852,13 +547,17 @@
 		return pageIndex.value > 0 ? currentChapterId.value : (currentChapterId.value > 0 ? currentChapterId.value - 1 : currentChapterId.value)
 	})
 
-	/** 下一页渲染项（常驻预渲染：章内相邻页；章尾跨下一章首页；末章无下一页为空数组） */
+	/** 下一页渲染项（常驻预渲染：章内相邻页；章尾跨下一章首页——取下一章头部等量段落近似，落定后按下一章真实分页渲染；末章无下一页为空数组） */
 	const nextPageItems = computed(() : PageItem[] => {
 		if (pageIndex.value < pageBreaks.value.length - 1) {
 			return pageItemsAt(pageIndex.value + 1)
 		}
 		if (currentChapterId.value < chapters.value.length - 1) {
-			return pageItemsAt(0)
+			const paras = paragraphsOf(currentChapterId.value + 1)
+			const headCount = pageBreaks.value.length > 0 ? pageBreaks.value[0].length : 0
+			return paras.slice(0, headCount).map((p, i) : PageItem => {
+				return { origin: i, text: p } as PageItem
+			})
 		}
 		return [] as PageItem[]
 	})
@@ -972,65 +671,43 @@
 		return nightMode.value ? 'rgba(255, 255, 255, 0.24)' : 'rgba(0, 0, 0, 0.45)'
 	})
 
-	/** 主题状态（色值唯一定义于 utils/theme.uts：日间=画布令牌，夜间/纸张为阅读专用主题） */
+	/** 主题状态（色值唯一定义于 utils/theme.uts：日间=画布令牌，夜间/纸张为阅读专用主题；控制框组件经 themeKey 自行解析） */
 	const nightMode = ref(false)
 	const readerBg = ref(READER_THEME_LIGHT.readerBg)
 	const bodyColor = ref(READER_THEME_LIGHT.bodyColor)
 	const titleColor = ref(READER_THEME_LIGHT.titleColor)
 	/** 章节标签色：原型内联样式为墨色（覆盖灰色类），日间墨色、夜间浅灰 */
 	const labelColor = ref(READER_THEME_LIGHT.labelColor)
+	/** 弱化文字色（想法引用等） */
 	const mutedColor = ref(READER_THEME_LIGHT.mutedColor)
-	const chapterTextColor = ref(READER_THEME_LIGHT.chapterTextColor)
-	const menuTopBg = ref(READER_THEME_LIGHT.menuTopBg)
+	/** 想法查看面板底色取底部面板毛玻璃色 */
 	const menuBottomBg = ref(READER_THEME_LIGHT.menuBottomBg)
-	const menuBorderColor = ref(READER_THEME_LIGHT.menuBorderColor)
-	const activeBlue = ref(READER_THEME_LIGHT.activeBlue)
 	/** 书签遮罩背景与文字色（夜间浅白遮罩 + 深色文字，与暗底视觉区分） */
 	const maskBg = ref(READER_THEME_LIGHT.maskBg)
 	const maskTextColor = ref(READER_THEME_LIGHT.maskTextColor)
 	/** 划词气泡背景（夜间提亮与暗底区分） */
 	const popoverBg = ref(READER_THEME_LIGHT.popoverBg)
-	/** 设置面板控件色（夜间灰底白字突出，日间白底墨字） */
-	const controlBg = ref('#ffffff')
-	const controlBorder = ref('#e9e9e6')
-	const controlText = ref('#0e0f0c')
-	/** 底部控制栏投影（夜间切换白色微光） */
+	/** 底部控制栏投影（夜间切换白色微光，想法查看面板沿用） */
 	const panelShadow = ref(READER_THEME_LIGHT.panelShadow)
 
-	/** 阅读设置（Stitch: 字号 12-36、背景色板、翻页模式） */
+	/** 阅读设置镜像（真源在 ReaderControl 组件：调节/持久化内聚，change 事件同步镜像驱动排版与主题渲染） */
 	const fontSize = ref(18)
 	const selectedBg = ref(READER_THEME_LIGHT.readerBg)
-	// #ifdef APP
-	/** 仿真翻页仅 APP 端提供（原生层实现真实卷曲），小程序/Web 端不出现该选项 */
-	const pageTurnModes = ref<string[]>(['滚动', '仿真', '覆盖', '平移'])
-	// #endif
-	// #ifndef APP
-	const pageTurnModes = ref<string[]>(['滚动', '覆盖', '平移'])
-	// #endif
 	const pageTurn = ref('滚动')
-	/** 是否上下滚动模式（语义化别名，正文手势/定位/渲染均按此分支） */
-	const scrollMode = computed(() : boolean => scrollMode.value)
+	/** 是否上下滚动模式（语义化别名，正文手势/定位/渲染均按此分支；信息栏显隐随其下行组件） */
+	const scrollMode = computed(() : boolean => pageTurn.value == '滚动')
 
-	/** 页脚浮层透明度：滚动模式由滚动/控制项状态驱动（footerVisible），其他模式常驻显示 */
-	const footerOpacity = computed(() : number => {
-		return (scrollMode.value && !footerVisible.value) ? 0 : 1
-	})
 	/** 当前主题 key：light / night / paper */
 	const themeKey = ref('light')
 
-	/** 浮层状态（进入阅读默认正文全屏，点击正文空白切换控制项显隐） */
+	/** 浮层状态（进入阅读默认正文全屏，点击正文空白切换控制项显隐；设置/抽屉开关经 ReaderControl 事件在页面维护） */
 	const menuVisible = ref(false)
 	const settingsOpen = ref(false)
 	const drawerOpen = ref(false)
-	const orderDesc = ref(false)
-	/** 抽屉当前页签：catalog 目录 / bookmark 书签 */
-	const drawerTab = ref('catalog')
 
 	/** 顶部导航内容行（px）：与小程序胶囊同行对齐（同子页 BackButton 口径：状态栏高度起、行高 40px） */
 	const navTop = ref(44)
 	const navHeight = ref(40)
-	/** 目录抽屉高度（px）：抽屉顶对齐小程序控制项（胶囊）下方 8px，并扣除控制行自身高度（152rpx） */
-	const drawerPanelHeight = ref(500)
 	/** 翻页行程：页面全屏宽/高（px，与全屏翻页舞台容器宽一致，prev/next 屏外待命位移同源） */
 	const pageW = ref(0)
 	const pageH = ref(0)
@@ -1051,66 +728,28 @@
 		if (safeArea != null) {
 			safeAreaBottomPx.value = Math.max(0, win.windowHeight - safeArea.bottom)
 		}
-		const navH = uni.upx2px(152)
 		// #ifdef MP-WEIXIN
 		const capsule = uni.getMenuButtonBoundingClientRect()
 		if (capsule.height > 0) {
 			contentTopPx.value = capsule.bottom + 8
-			drawerPanelHeight.value = win.windowHeight - (capsule.top + capsule.height + 8) - navH
-		} else {
-			drawerPanelHeight.value = win.windowHeight - (navTop.value + navHeight.value + 8) - navH
 		}
 		// #endif
-		// #ifndef MP-WEIXIN
-		drawerPanelHeight.value = win.windowHeight - (navTop.value + navHeight.value + 8) - navH
-		// #endif
 	}
 
-	/** ===== 书签（正文下滑切换：无书签时添加、有书签时删除；本地持久化） ===== */
-	type Bookmark = {
-		chapterId: number
-		/** 章内页码（0-based） */
-		pageIndex: number
-	}
-
-	const STORAGE_BOOKMARKS = 'reader_bookmarks'
-
+	/** ===== 书签（真源在 ReaderControl 组件：增删/持久化内聚；页面维护内存镜像供当前页旗帜渲染） ===== */
 	const bookmarks = ref<Bookmark[]>([])
 
-	/** 读取本地书签 */
+	/** 读取本地书签镜像 */
 	{
-		const stored : any = uni.getStorageSync(STORAGE_BOOKMARKS)
-		if (typeof stored == 'string' && (stored as string).length > 0) {
-			const list = JSON.parse<Array<Bookmark>>(stored as string)
-			if (list != null) {
-				bookmarks.value = list
-			}
-		}
+		bookmarks.value = loadBookmarks()
 	}
 
-	/** ===== 划线与想法（本地持久化）：划线按「章+段落」记录（多章共用原型正文时仅划线发生章显示划线），想法关联到记录区间 ===== */
-	type UnderlineEntry = {
-		/** 划线发生所在章 */
-		cid: number
-		origin: number
-		/** 段内字符索引闭区间 [start, end] 列表 */
-		ranges: number[][]
+	/** 控制框组件书签变更通知：重读本地存储刷新当前页书签旗帜 */
+	function onBookmarksChanged() : void {
+		bookmarks.value = loadBookmarks()
 	}
 
-	type Thought = {
-		/** 想法选区（跨段）：从起点段/字符到终点段/字符 */
-		fromCid : number
-		fromOrigin : number
-		fromStart : number
-		toCid : number
-		toOrigin : number
-		toEnd : number
-		/** 保存时的划线文本快照 */
-		quote: string
-		content: string
-	}
-
-	/** 判定想法覆盖某章某段落的某字符（跨段选区） */
+	/** ===== 划线与想法（本地存储真源在 utils/readerTypes.uts：气泡组件写入；页面维护内存副本供渲染与查看，组件 sync 事件时重读） ===== */
 	/** 判定想法覆盖某章某段落的某字符（跨段跨章选区，章 id 升序即阅读顺序） */
 	function thoughtCovers(t : Thought, cid : number, origin : number, charIdx : number) : boolean {
 		if (cid < t.fromCid || cid > t.toCid) {
@@ -1146,31 +785,19 @@
 		return true
 	}
 
-	const STORAGE_UNDERLINES = 'reader_underlines'
-	const STORAGE_THOUGHTS = 'reader_thoughts'
-
 	const underlineStore = ref<UnderlineEntry[]>([])
 	const thoughts = ref<Thought[]>([])
 
-	/** 查找章+段落的划线记录 */
-	function findUnderlineEntry(cid : number, origin : number) : UnderlineEntry | null {
-		for (const e of underlineStore.value) {
-			if (e.cid == cid && e.origin == origin) {
-				return e
-			}
-		}
-		return null
-	}
-
 	/** 读取章+段落的划线区间（无则空列表） */
 	function rangesAt(cid : number, origin : number) : number[][] {
-		const e = findUnderlineEntry(cid, origin)
+		const e = findUnderlineEntry(underlineStore.value, cid, origin)
 		return e != null ? e.ranges : [] as number[][]
 	}
 
 	/** 跨段区间与某章某段落的交集（[start, end] 单元素或空数组）：同章取起点段到终点段之间、起点章取起点段及之后、终点章取终点段及之前、中间章全段 */
 	function spanRangeAt(fromCid : number, fromOrigin : number, fromStart : number, toCid : number, toOrigin : number, toEnd : number, renderCid : number, origin : number) : number[] {
-		const full : number[] = [0, paragraphs.value[origin].text.length - 1]
+		// 段长按渲染章取：跨章预渲染层（上/下一页层）与滚动模式多章下 origin 属于 renderCid 章
+		const full : number[] = [0, paragraphsOf(renderCid)[origin].text.length - 1]
 		if (fromCid == toCid && fromOrigin == toOrigin) {
 			return origin == fromOrigin ? [fromStart, toEnd] : ([] as number[])
 		}
@@ -1202,31 +829,16 @@
 		return [] as number[]
 	}
 
-	/** 恢复本地划线与想法 */
+	/** 恢复本地划线与想法（页面内存副本；气泡组件写入后经 onPopoverSync 重读刷新） */
 	{
-		const storedUl : any = uni.getStorageSync(STORAGE_UNDERLINES)
-		if (typeof storedUl == 'string' && (storedUl as string).length > 0) {
-			const list = JSON.parse<Array<UnderlineEntry>>(storedUl as string)
-			if (list != null) {
-				underlineStore.value = list
-			}
-		}
-		const storedTh : any = uni.getStorageSync(STORAGE_THOUGHTS)
-		if (typeof storedTh == 'string' && (storedTh as string).length > 0) {
-			const list = JSON.parse<Array<Thought>>(storedTh as string)
-			if (list != null) {
-				thoughts.value = list
-			}
-		}
+		underlineStore.value = loadUnderlines()
+		thoughts.value = loadThoughts()
 	}
 
-	/** 持久化划线与想法 */
-	function saveUnderlines() : void {
-		uni.setStorageSync(STORAGE_UNDERLINES, JSON.stringify(underlineStore.value))
-	}
-
-	function saveThoughts() : void {
-		uni.setStorageSync(STORAGE_THOUGHTS, JSON.stringify(thoughts.value))
+	/** 气泡组件划线/想法写入通知：重读本地存储刷新正文划线渲染与目录抽屉卡片 */
+	function onPopoverSync() : void {
+		underlineStore.value = loadUnderlines()
+		thoughts.value = loadThoughts()
 	}
 
 	/** 当前页是否已有书签 */
@@ -1274,112 +886,29 @@
 	})
 
 	/** ===== 正文字体（默认思源黑体，未安装时经回退链落到系统黑体；选择后本地持久化） ===== */
-	type FontOption = {
-		key: string
-		label: string
-		/** CSS 字体栈：缺失字体自动回退到后续项，末位 sans-serif 即系统黑体 */
-		family: string
-	}
-
 	const STORAGE_FONT = 'reader_font'
 
-	const fontOptions : FontOption[] = [
-		{ key: 'sourcehan', label: '思源黑体', family: "'Source Han Sans SC', 'Noto Sans SC', sans-serif" } as FontOption,
-		{ key: 'system', label: '系统黑体', family: 'sans-serif' } as FontOption,
-		{ key: 'songti', label: '宋体', family: "'Source Han Serif SC', 'SimSun', serif" } as FontOption,
-		{ key: 'kaiti', label: '楷体', family: 'KaiTi, STKaiti, serif' } as FontOption
-	]
-
 	const fontKey = ref('sourcehan')
-	/** 字体列表中的待保存选择 */
-	const pendingFontKey = ref('sourcehan')
-	const fontListOpen = ref(false)
 
 	{
 		const stored : any = uni.getStorageSync(STORAGE_FONT)
 		if (typeof stored == 'string') {
 			const key = stored as string
-			for (let i = 0; i < fontOptions.length; i++) {
-				if (fontOptions[i].key == key) {
+			for (let i = 0; i < FONT_OPTIONS.length; i++) {
+				if (FONT_OPTIONS[i].key == key) {
 					fontKey.value = key
-					pendingFontKey.value = key
 					break
 				}
 			}
 		}
 	}
 
-	function fontOptionOf(key : string) : FontOption {
-		for (let i = 0; i < fontOptions.length; i++) {
-			if (fontOptions[i].key == key) {
-				return fontOptions[i]
-			}
-		}
-		return fontOptions[0]
-	}
-
-	/** 当前生效字体名（字体按钮展示） */
-	const currentFontLabel = computed(() : string => {
-		return fontOptionOf(fontKey.value).label
-	})
-
-	/** 当前生效字体栈（应用至正文） */
+	/** 当前生效字体栈（应用至正文；字体真源在 ReaderControl 组件，change 事件同步镜像） */
 	const fontFamily = computed(() : string => {
 		return fontOptionOf(fontKey.value).family
 	})
 
-	/** 展开/收起字体列表（展开时待保存选择重置为当前生效值） */
-	function toggleFontList() : void {
-		fontListOpen.value = !fontListOpen.value
-		pendingFontKey.value = fontKey.value
-	}
-
-	function selectFont(key : string) : void {
-		pendingFontKey.value = key
-	}
-
-	/** 保存字体选择并应用 */
-	function saveFont() : void {
-		fontKey.value = pendingFontKey.value
-		uni.setStorageSync(STORAGE_FONT, fontKey.value)
-		fontListOpen.value = false
-		showToast('字体已保存')
-	}
-
-	/** 取消字体选择：放弃待保存选择并收起列表 */
-	function cancelFontSelect() : void {
-		pendingFontKey.value = fontKey.value
-		fontListOpen.value = false
-	}
-
-	function saveBookmarks() : void {
-		uni.setStorageSync(STORAGE_BOOKMARKS, JSON.stringify(bookmarks.value))
-	}
-
-	function addBookmark() : void {
-		if (indexOfBookmark() >= 0) {
-			return
-		}
-		bookmarks.value.push({ chapterId: currentChapterId.value, pageIndex: pageIndex.value } as Bookmark)
-		saveBookmarks()
-	}
-
-	function removeBookmark() : void {
-		const i = indexOfBookmark()
-		if (i < 0) {
-			return
-		}
-		bookmarks.value.splice(i, 1)
-		saveBookmarks()
-	}
-
-	/** 书签条目文案（章节标签 · 第 N 页，页码 1-based 展示） */
-	function bookmarkLabel(bm : Bookmark) : string {
-		const ch = chapterAt(bm.chapterId)
-		return ch.title + ' · 第 ' + (bm.pageIndex + 1) + ' 页'
-	}
-
-	/** 跳转到书签所在章节页并关闭抽屉 */
+	/** 跳转到书签所在章节页并关闭抽屉（ReaderControl 书签卡片点击上行；滚动模式无页码语义，落到目标章顶部） */
 	function goToBookmark(bm : Bookmark) : void {
 		goToChapter(bm.chapterId, false)
 		pageIndex.value = bm.pageIndex
@@ -1429,81 +958,51 @@
 		drawerOpen.value = false
 	}
 
-	/** 抽屉页签切换（进入目录页签时恢复正序浏览态由 orderDesc 独立控制） */
-	function switchDrawerTab(tab : string) : void {
-		drawerTab.value = tab
-	}
-
-	/** 目录页签排序箭头：阻止冒泡后切换正/倒序 */
-	function onSortTap(e : UniPointerEvent) : void {
-		e.stopPropagation()
-		toggleOrder()
-	}
-
-	/** 划词状态（跨段选区：从起点段/字符到终点段/字符的闭区间，手柄拖动可跨段落选择） */
-	type SelSpan = {
-		fromCid : number
-		fromOrigin : number
-		fromStart : number
-		toCid : number
-		toOrigin : number
-		toEnd : number
-	}
+	/** 划词高亮镜像（选区真源在气泡组件：spanChanged 事件同步，驱动正文高亮渲染与派生上下文） */
 	const selSpan = ref<SelSpan | null>(null)
-	/** 起点段视口位置（px，长按时缓存；滚动/翻页/字号变化即清选区防止手柄错位） */
-	const selRectLeft = ref(0)
-	const selRectTop = ref(0)
-	/** 手柄位置（px，视口坐标，随选区端点更新） */
-	const handleStartLeft = ref(0)
-	const handleStartTop = ref(0)
-	const handleEndLeft = ref(0)
-	const handleEndTop = ref(0)
-	/** 选区几何（px，视口坐标，气泡定位用）：估算即时填充，锚点实测后覆盖为真实值 */
-	const selTopPx = ref(0)
-	const selBottomPx = ref(0)
+
+	/** 选区变化镜像（气泡组件 spanChanged 事件） */
+	function onSpanChanged(s : SelSpan | null) : void {
+		selSpan.value = s
+	}
+
+	/** 拖动开始：查询正文段落视口矩形回传组件（触点→段落映射在宿主模板内，跨组件查询不可行） */
+	function onDragStarted() : void {
+		cacheParaRects()
+	}
+
 	/** 选区两端锚点（零宽字符，排入选中文本流）：其渲染位置即字符边界的真实位置，手柄/气泡吸附实测值 */
 	const ANCHOR_CHAR = '\u200B'
-	let anchorStart : NodeInfo | null = null
-	let anchorEnd : NodeInfo | null = null
-	/** 手柄热区/视觉体尺寸（rpx）：热区大于视觉体便于拖动 */
-	const HANDLE_HOT_RPX = 76
-	const HANDLE_VISUAL_RPX = 50
 	/** 句末标点与闭合引号（句界扫描：句末标点后紧跟闭合引号视为引用嵌入、非句子边界） */
 	const SENTENCE_END_CHARS = '。！？!?…'
 	const SENTENCE_CLOSERS = '”』」）)】》"'
 
-		/** 当前选区文本（跨段拼接，段间换行；复用 spanSegs 段序列，段内字符长度与段落数严格区分） */
-		function selectionText() : string {
-			const s0 = selSpan.value
-			if (s0 == null) {
-				return ''
-			}
-			let out = ''
-			for (const seg of spanSegs(s0)) {
-				if (seg.end < seg.start) {
-					continue
-				}
-				if (out.length > 0) {
-					out += '\n'
-				}
-				out += paragraphs.value[seg.origin].text.slice(seg.start, seg.end + 1)
-			}
-			return out
+	/** 当前选区文本（跨段拼接，段间换行；复用 spanSegs 段序列，段内字符长度与段落数严格区分） */
+	function selectionText() : string {
+		const s0 = selSpan.value
+		if (s0 == null) {
+			return ''
 		}
-
-		/** 选区覆盖的段序列（含首末部分段与中间整段；跨章时按章连续展开；段落数上限防御） */
-		type SpanSeg = {
-			cid : number
-			origin : number
-			start : number
-			end : number
+		let out = ''
+		for (const seg of spanSegs(s0)) {
+			if (seg.end < seg.start) {
+				continue
+			}
+			if (out.length > 0) {
+				out += '\n'
+			}
+			// 按段所在章取文本：滚动模式跨章选区的段索引属于各自章，不能用当前章段落数组
+			out += paragraphsOf(seg.cid)[seg.origin].text.slice(seg.start, seg.end + 1)
 		}
+		return out
+	}
 
+	/** 选区覆盖的段序列（SpanSeg 类型见 utils/readerTypes.uts；跨章时按章连续展开） */
 		function spanSegs(s0 : SelSpan) : SpanSeg[] {
 			const s = normalizeSpan(s0)
 			const segs : SpanSeg[] = []
-			const paraTotal = paragraphs.value.length
-			const fromTextLen = paragraphs.value[s.fromOrigin].text.length
+			const fromParas = paragraphsOf(s.fromCid)
+			const fromTextLen = fromParas[s.fromOrigin].text.length
 			if (s.toCid == s.fromCid && s.toOrigin == s.fromOrigin) {
 				if (s.toEnd >= s.fromStart) {
 					segs.push({ cid: s.fromCid, origin: s.fromOrigin, start: s.fromStart, end: s.toEnd } as SpanSeg)
@@ -1512,20 +1011,24 @@
 			}
 			segs.push({ cid: s.fromCid, origin: s.fromOrigin, start: s.fromStart, end: fromTextLen - 1 } as SpanSeg)
 			if (s.toCid == s.fromCid) {
-				for (let o = s.fromOrigin + 1; o < s.toOrigin && o < paraTotal; o++) {
-					segs.push({ cid: s.fromCid, origin: o, start: 0, end: paragraphs.value[o].text.length - 1 } as SpanSeg)
+				// 同章跨段：中间段取起点章真实段落数
+				for (let o = s.fromOrigin + 1; o < s.toOrigin && o < fromParas.length; o++) {
+					segs.push({ cid: s.fromCid, origin: o, start: 0, end: fromParas[o].text.length - 1 } as SpanSeg)
 				}
 			} else {
-				for (let o = s.fromOrigin + 1; o < paraTotal; o++) {
-					segs.push({ cid: s.fromCid, origin: o, start: 0, end: paragraphs.value[o].text.length - 1 } as SpanSeg)
+				// 跨章：各章按自身真实段落数展开（滚动模式多章正文长度各异，不能套用当前章段落数）
+				for (let o = s.fromOrigin + 1; o < fromParas.length; o++) {
+					segs.push({ cid: s.fromCid, origin: o, start: 0, end: fromParas[o].text.length - 1 } as SpanSeg)
 				}
-				for (let c = s.fromCid + 1; c < s.toCid && c < paraTotal; c++) {
-					for (let o = 0; o < paraTotal; o++) {
-						segs.push({ cid: c, origin: o, start: 0, end: paragraphs.value[o].text.length - 1 } as SpanSeg)
+				for (let c = s.fromCid + 1; c < s.toCid; c++) {
+					const midParas = paragraphsOf(c)
+					for (let o = 0; o < midParas.length; o++) {
+						segs.push({ cid: c, origin: o, start: 0, end: midParas[o].text.length - 1 } as SpanSeg)
 					}
 				}
-				for (let o = 0; o < s.toOrigin && o < paraTotal; o++) {
-					segs.push({ cid: s.toCid, origin: o, start: 0, end: paragraphs.value[o].text.length - 1 } as SpanSeg)
+				const toParas = paragraphsOf(s.toCid)
+				for (let o = 0; o < s.toOrigin && o < toParas.length; o++) {
+					segs.push({ cid: s.toCid, origin: o, start: 0, end: toParas[o].text.length - 1 } as SpanSeg)
 				}
 			}
 			segs.push({ cid: s.toCid, origin: s.toOrigin, start: 0, end: s.toEnd } as SpanSeg)
@@ -1546,8 +1049,12 @@
 
 	/** 段落文本分段：renderCid 为渲染内容所属章（选区/划线/想法按章匹配，多章共用原型正文防串显）；选区支持跨段 */
 	function paragraphSegments(origin : number, renderCid : number) : TextSeg[] {
-		const p = paragraphs.value[origin]
-		const len = p.text.length
+		// 按渲染章取段落：跨章预渲染层（上/下一页层）的 origin 属于相邻章，不能用当前章段落索引；越界（数据未就绪）返回空段
+		const p = paragraphsOf(renderCid)[origin]
+		if (p == null) {
+			return [] as TextSeg[]
+		}
+		const len = p.length
 		if (len == 0) {
 			return [] as TextSeg[]
 		}
@@ -1616,9 +1123,9 @@
 			}
 			const last = segs.length > 0 ? segs[segs.length - 1] : null
 			if (last != null && last.anchor == 0 && last.selected == inSel && last.underlined == inUl && last.thought == inThought) {
-				last.text = last.text + p.text.slice(a, b)
+				last.text = last.text + p.slice(a, b)
 			} else {
-				segs.push({ start: a, text: p.text.slice(a, b), selected: inSel, underlined: inUl, thought: inThought, anchor: 0 } as TextSeg)
+				segs.push({ start: a, text: p.slice(a, b), selected: inSel, underlined: inUl, thought: inThought, anchor: 0 } as TextSeg)
 			}
 			// 选区终点锚点段：插在选中末段之后（终点段）
 			if (span != null && inSel && renderCid == span.toCid && origin == span.toOrigin) {
@@ -1645,423 +1152,15 @@
 	/** 划线段点击协调标志：段落 click 先于父级 content click（微信端无有效 stopPropagation，用标志让父级跳过本次） */
 	let paragraphTapHandled = false
 
-	/** 想法查看面板（锚定划线上/下方：上引用下想法，点击任意处关闭） */
-	const thoughtViewOpen = ref(false)
-	const thoughtViewQuote = ref('')
-	const thoughtViewContent = ref('')
-	const thoughtViewLeft = ref(0)
-	const thoughtViewTop = ref(0)
-	const thoughtViewW = ref(0)
-	/** 面板内容最大高度（px，屏高的 35%，超出内部滚动） */
-	const thoughtViewMaxH = computed(() : number => pageH.value * 0.35)
-	/** 面板底色：夜晚用深色浮层，白天用纯白与页面背景区分 */
-	const thoughtViewPanelBg = computed(() : string => nightMode.value ? menuBottomBg.value : '#ffffff')
-	/** 分享预览卡片内容区限高（px，屏高的 45%，预览可滚动；导出为全量长图不受此限） */
-	const shareCardMaxH = computed(() : number => pageH.value * 0.45)
-	let thoughtViewH = 0
-	const THOUGHT_VIEW_EST_H = 150
-	/** 定位基准：点击划线段的视口上下界（实测校正后重定位用） */
-	let thoughtViewSelBottom = 0
-	let thoughtViewSelTop = 0
+	/** 想法查看面板底色：夜晚用深色浮层，白天用纯白与页面背景区分（下行气泡组件） */
+	const thoughtCardPanelBg = computed(() : string => nightMode.value ? menuBottomBg.value : '#ffffff')
 
-	function positionThoughtView(selBottom : number, selTop : number) : void {
-		const margin = uni.upx2px(24)
-		thoughtViewLeft.value = margin
-		thoughtViewW.value = pageW.value - margin * 2
-		const gap = uni.upx2px(16)
-		const h = thoughtViewH > 0 ? thoughtViewH : THOUGHT_VIEW_EST_H
-		const bottomSpace = pageH.value - selBottom - gap - h
-		const topSpace = selTop - gap - h
-		// 下方放得下置下方；否则取上下空间宽裕侧并钳制不出屏
-		if (bottomSpace >= uni.upx2px(60) || bottomSpace >= topSpace) {
-			thoughtViewTop.value = Math.min(selBottom + gap, pageH.value - h - uni.upx2px(40))
-		} else {
-			thoughtViewTop.value = Math.max(navTop.value, selTop - gap - h)
-		}
-	}
-
-	/** 面板显示后实测高度并校正垂直定位（想法长度不同高度不同，每次打开都测） */
-	function measureThoughtView() : void {
-		uni.createSelectorQuery().select('.thought-view-panel').boundingClientRect((rect : NodeInfo | null) : void => {
-			if (rect != null && rect.height > 0) {
-				thoughtViewH = rect.height
-				positionThoughtView(thoughtViewSelBottom, thoughtViewSelTop)
-			}
-		}).exec()
-	}
-
-	function closeThoughtView() : void {
-		thoughtViewOpen.value = false
-	}
-
-	/** ===== 分享卡片（预览弹窗 + canvas 保存到相册 + 微信端转发） ===== */
-	/** 绘制排版常量（与预览 CSS 逐项换算：rpx 值减半为 px） */
-	const SHARE_CARD_W = 295.0
-	const SHARE_CARD_TOP = 29.0
-	const SHARE_HEADER_H = 30.0
-	const SHARE_PAD = 15.5
-	const SHARE_TEXT_X = SHARE_PAD
-	const SHARE_TEXT_W = SHARE_CARD_W - SHARE_PAD * 2
-	const SHARE_QUOTE_W = SHARE_TEXT_W - 18.0
-	const SHARE_LINE_H = 21.0
-	const SHARE_BASE12 = 10.0
-	const SHARE_BASE13 = 11.0
-	const SHARE_BASE20 = 16.0
-	const SHARE_BASE10 = 8.5
-	const SHARE_RING_R = 23.0
-	const SHARE_LOGO_R = 20.0
-	const SHARE_INK = '#0e0f0c'
-
+	/** ===== 用户信息（分享卡片头像下行气泡组件） ===== */
 	const userStore = useUserStore()
-	const shareOpen = ref(false)
-	/** 卡片正文：上/下文各拆两档透明度实现渐出，选中文本实色 */
-	const shareCtxFarBefore = ref('')
-	const shareCtxNearBefore = ref('')
-	const shareQuote = ref('')
-	const shareCtxNearAfter = ref('')
-	const shareCtxFarAfter = ref('')
-	const shareThought = ref('')
-	const shareSource = ref('')
-	/** 分享卡片头像：登录用户取其头像 key 映射的静态图，未登录/无头像用默认 hei */
-	const shareLogoSrc = computed(() : string => {
-		const info = userStore.userInfo
-		if (info != null && info.avatar_url.length > 0) {
-			return avatarPathOf(info.avatar_url)
-		}
-		return '/static/touxiang/hei.png'
-	})
-
-	function closeShare() : void {
-		shareOpen.value = false
-	}
-
-	/** 打开分享预览：快照选区与上下文（微信端冒泡会清选区）、关联想法、出处；跨段选区取首段前文/末段后文 */
-	function openSharePreview() : void {
-		const s = selSpan.value
-		if (s == null) {
-			return
-		}
-		const fromP = paragraphs.value[s.fromOrigin]
-		const toP = paragraphs.value[s.toOrigin]
-		const ctxStart = Math.max(0, s.fromStart - 24)
-		const ctxEnd = Math.min(toP.text.length, s.toEnd + 25)
-		const before = fromP.text.slice(ctxStart, s.fromStart)
-		const after = toP.text.slice(s.toEnd + 1, ctxEnd)
-		const halfB = Math.ceil(before.length / 2)
-		shareCtxFarBefore.value = before.slice(0, halfB)
-		shareCtxNearBefore.value = before.slice(halfB)
-		const halfA = Math.floor(after.length / 2)
-		shareCtxNearAfter.value = after.slice(0, halfA)
-		shareCtxFarAfter.value = after.slice(halfA)
-		shareQuote.value = selectionText()
-		shareThought.value = ''
-		for (const t of thoughts.value) {
-			// 选区与想法区间相交即展示（拖动微调后仍关联）
-			const tEndAfterSpanFrom = comparePos(t.toCid, t.toOrigin, t.toEnd, s.fromCid, s.fromOrigin, s.fromStart) >= 0
-			const tStartBeforeSpanEnd = comparePos(t.fromCid, t.fromOrigin, t.fromStart, s.toCid, s.toOrigin, s.toEnd) <= 0
-			if (tEndAfterSpanFrom && tStartBeforeSpanEnd) {
-				shareThought.value = t.content
-				break
-			}
-		}
-		shareSource.value = chapterAt(s.toCid).title
-		thoughtViewOpen.value = false
-		shareOpen.value = true
-	}
-
-	/** 分享卡片绘制辅助：文本按宽度折行（\n 强制换行保留段落结构；返回行数组，供画布高度预算与逐行绘制） */
-	function wrapCanvasLines(ctx : CanvasRenderingContext2D, text : string, maxW : number, font : string) : string[] {
-		ctx.font = font
-		const lines : string[] = []
-		let line = ''
-		for (let i = 0; i < text.length; i++) {
-			const ch = text.charAt(i)
-			if (ch == '\n') {
-				lines.push(line)
-				line = ''
-				continue
-			}
-			if (ctx.measureText(line + ch).width > maxW && line.length > 0) {
-				lines.push(line)
-				line = ch
-			} else {
-				line = line + ch
-			}
-		}
-		if (line.length > 0) {
-			lines.push(line)
-		}
-		return lines
-	}
-
-	/** 分享卡片绘制辅助：逐行绘制（yTop 为首行行盒顶，与预览 text 行盒模型一致；baseline 为字号对应基线偏移），返回块底 yTop */
-	function drawCanvasLines(ctx : CanvasRenderingContext2D, lines : string[], x : number, yTop : number, lineH : number, font : string, color : string, baseline : number) : number {
-		ctx.font = font
-		ctx.fillStyle = color
-		let top = yTop
-		for (const line of lines) {
-			ctx.fillText(line, x, top + baseline)
-			top += lineH
-		}
-		return top
-	}
-
-	/** 分享卡片富文本运行段（字号/加粗/颜色/内容） */
-	type ShareRun = {
-		text : string
-		fs : number
-		bold : boolean
-		color : string
-	}
-
-	/** 富文本行（行内运行段顺序混排，基线对齐） */
-	type RenderLine = {
-		runs : ShareRun[]
-	}
-
-	function shareRunFont(r : ShareRun) : string {
-		return (r.bold ? 'bold ' : '') + r.fs + 'px sans-serif'
-	}
-
-	/** 富文本流式折行排版（逐字符测量、\n 强制换行、行内同款运行段合并），返回行数组 */
-	function layoutShareRuns(ctx : CanvasRenderingContext2D, runs : ShareRun[], maxW : number) : RenderLine[] {
-		const out : RenderLine[] = []
-		let curRuns : ShareRun[] = [] as ShareRun[]
-		let curW = 0.0
-		const pushLine = () : void => {
-			if (curRuns.length > 0) {
-				out.push({ runs: curRuns } as RenderLine)
-				curRuns = [] as ShareRun[]
-				curW = 0.0
-			}
-		}
-		for (const run of runs) {
-			ctx.font = shareRunFont(run)
-			for (let i = 0; i < run.text.length; i++) {
-				const ch = run.text.charAt(i)
-				if (ch == '\n') {
-					pushLine()
-					continue
-				}
-				const w = ctx.measureText(ch).width
-				if (curW + w > maxW && curW > 0) {
-					pushLine()
-				}
-				const last = curRuns.length > 0 ? curRuns[curRuns.length - 1] : null
-				if (last != null && last.fs == run.fs && last.bold == run.bold && last.color == run.color) {
-					last.text = last.text + ch
-				} else {
-					curRuns.push({ text: ch, fs: run.fs, bold: run.bold, color: run.color } as ShareRun)
-				}
-				curW += w
-			}
-		}
-		pushLine()
-		return out
-	}
-
-	/** 富文本行绘制（行内基线按行内最大字号对齐），返回块底 yTop */
-	function drawRenderLines(ctx : CanvasRenderingContext2D, lines : RenderLine[], x : number, yTop : number, lineH : number) : number {
-		let top = yTop
-		for (const line of lines) {
-			let maxFs = 12.5
-			for (const r of line.runs) {
-				if (r.fs > maxFs) {
-					maxFs = r.fs
-				}
-			}
-			const bl = top + maxFs * 0.8
-			let rx = x
-			for (const r of line.runs) {
-				ctx.font = shareRunFont(r)
-				ctx.fillStyle = r.color
-				ctx.fillText(r.text, rx, bl)
-				rx += ctx.measureText(r.text).width
-			}
-			top += lineH
-		}
-		return top
-	}
-
-	/** 构建引文富文本运行段（上/下文渐出 + 大引号 + 选中文本） */
-	function buildShareQuoteRuns() : ShareRun[] {
-		const runs : ShareRun[] = [] as ShareRun[]
-		if (shareCtxFarBefore.value.length > 0) {
-			runs.push({ text: shareCtxFarBefore.value, fs: 12.5, bold: false, color: 'rgba(14, 15, 12, 0.18)' } as ShareRun)
-		}
-		if (shareCtxNearBefore.value.length > 0) {
-			runs.push({ text: shareCtxNearBefore.value, fs: 12.5, bold: false, color: 'rgba(14, 15, 12, 0.4)' } as ShareRun)
-		}
-		runs.push({ text: '“', fs: 20, bold: true, color: 'rgba(14, 15, 12, 0.25)' } as ShareRun)
-		runs.push({ text: shareQuote.value, fs: 13.5, bold: true, color: SHARE_INK } as ShareRun)
-		runs.push({ text: '”', fs: 20, bold: true, color: 'rgba(14, 15, 12, 0.25)' } as ShareRun)
-		if (shareCtxNearAfter.value.length > 0) {
-			runs.push({ text: shareCtxNearAfter.value, fs: 12.5, bold: false, color: 'rgba(14, 15, 12, 0.4)' } as ShareRun)
-		}
-		if (shareCtxFarAfter.value.length > 0) {
-			runs.push({ text: shareCtxFarAfter.value, fs: 12.5, bold: false, color: 'rgba(14, 15, 12, 0.18)' } as ShareRun)
-		}
-		return runs
-	}
-
-	/** 分享卡片布局：各块行盒顶位置与卡片/画布高度（想法块按行数占位，间距与预览 CSS 换算一致） */
-	type ShareCardLayout = {
-		quoteTop : number
-		thoughtTop : number
-		sourceTop : number
-		cardH : number
-		H : number
-	}
-
-	function layoutShareCard(quoteLines : RenderLine[], thL : string[]) : ShareCardLayout {
-		const quoteTop = SHARE_CARD_TOP + SHARE_HEADER_H + SHARE_LINE_H + 11.5
-		const quoteBlockH = quoteLines.length * SHARE_LINE_H
-		let thoughtTop = quoteTop + quoteBlockH + 11.5
-		if (thL.length > 0) {
-			thoughtTop += 1 + 9.5
-		}
-		const sourceTop = thoughtTop + (thL.length > 0 ? thL.length * SHARE_LINE_H : 0) + 11.5
-		const cardH = sourceTop + 15.0 - SHARE_CARD_TOP
-		return { quoteTop: quoteTop, thoughtTop: thoughtTop, sourceTop: sourceTop, cardH: cardH, H: SHARE_CARD_TOP + cardH } as ShareCardLayout
-	}
-
-	/** 绘制卡片底（顶部头像带浅灰 + 卡片白底）与产品名 */
-	function drawShareCardBase(ctx : CanvasRenderingContext2D, cardH : number) : void {
-		ctx.fillStyle = '#efefec'
-		ctx.fillRect(0, 0, SHARE_CARD_W, SHARE_CARD_TOP)
-		ctx.fillStyle = '#ffffff'
-		ctx.fillRect(0, SHARE_CARD_TOP, SHARE_CARD_W, cardH)
-		ctx.fillStyle = 'rgba(14, 15, 12, 0.45)'
-		ctx.font = '12.5px sans-serif'
-		ctx.textAlign = 'center'
-		ctx.fillText('无足鸟古诗词学习助手', SHARE_CARD_W / 2, SHARE_CARD_TOP + SHARE_HEADER_H + SHARE_BASE12)
-		ctx.textAlign = 'left'
-	}
-
-	/** 绘制引文块（富文本流式：大引号 + 上/下文渐出 + 选中文本加粗） */
-	function drawShareQuoteBlock(ctx : CanvasRenderingContext2D, quoteLines : RenderLine[]) : void {
-		drawRenderLines(ctx, quoteLines, SHARE_TEXT_X, SHARE_CARD_TOP + SHARE_HEADER_H + SHARE_LINE_H + 11.5, SHARE_LINE_H)
-	}
-
-	/** 绘制想法块（蓝色） */
-	function drawShareThoughtBlock(ctx : CanvasRenderingContext2D, thL : string[], top : number) : void {
-		drawCanvasLines(ctx, thL, SHARE_TEXT_X, top, SHARE_LINE_H, '12.5px sans-serif', '#1e40af', SHARE_BASE12)
-	}
-
-	/** 绘制出处（左对齐，与预览一致） */
-	function drawShareSource(ctx : CanvasRenderingContext2D, top : number) : void {
-		ctx.fillStyle = 'rgba(14, 15, 12, 0.4)'
-		ctx.font = '10.5px sans-serif'
-		ctx.fillText('《' + BOOK_TITLE + '》 · ' + shareSource.value, SHARE_TEXT_X, top + SHARE_BASE10)
-	}
-
-	/** 绘制头像（白环包裹跨卡片顶边；withLogo=false 时以浅色圆替代） */
-	function drawShareLogo(ctx : CanvasRenderingContext2D, logo : CanvasImage, withLogo : boolean) : void {
-		ctx.fillStyle = '#ffffff'
-		ctx.beginPath()
-		ctx.arc(SHARE_CARD_W / 2, SHARE_CARD_TOP, SHARE_RING_R, 0, Math.PI * 2)
-		ctx.fill()
-		if (withLogo) {
-			ctx.save()
-			ctx.beginPath()
-			ctx.arc(SHARE_CARD_W / 2, SHARE_CARD_TOP, SHARE_LOGO_R, 0, Math.PI * 2)
-			ctx.clip()
-			ctx.drawImage(logo, SHARE_CARD_W / 2 - SHARE_LOGO_R, SHARE_CARD_TOP - SHARE_LOGO_R, SHARE_LOGO_R * 2, SHARE_LOGO_R * 2)
-			ctx.restore()
-		} else {
-			ctx.fillStyle = '#d9d9d5'
-			ctx.beginPath()
-			ctx.arc(SHARE_CARD_W / 2, SHARE_CARD_TOP, SHARE_LOGO_R, 0, Math.PI * 2)
-			ctx.fill()
-		}
-	}
-
-	/** 导出画布为临时图并保存到相册（单次） */
-	function exportShareCanvas(canvas : CanvasNode) : void {
-		uni.canvasToTempFilePath({
-			canvas: canvas,
-			success: (res2) => {
-				uni.saveImageToPhotosAlbum({
-					filePath: res2.tempFilePath,
-					success: () => {
-						showToast('已保存到相册')
-					},
-					fail: () => {
-						showToast('保存失败，请检查相册权限')
-					}
-				})
-			},
-			fail: () => {
-				showToast('保存失败，请重试')
-			}
-		})
-	}
-
-	/** 绘制分享卡片到隐藏 canvas 并保存为长图（排版与预览 CSS 换算一致；头像半出卡片顶部白环包裹；想法全量渲染不截断） */
-	function saveShareImage() : void {
-		uni.createSelectorQuery().select('#share-canvas').fields({ node: true, size: true }, (res : any) : void => {
-			if (res == null || res.node == null) {
-				showToast('保存失败，请重试')
-				return
-			}
-			const canvas = res.node as CanvasNode
-			const dpr = uni.getWindowInfo().pixelRatio
-			const ctx = canvas.getContext('2d')
-			if (ctx == null) {
-				showToast('保存失败，请重试')
-				return
-			}
-			// 排版：富文本折行 + 想法折行 + 各块位置（测量在画布尺寸设定前完成，赋值后重新 scale）
-			const quoteLines = layoutShareRuns(ctx, buildShareQuoteRuns(), SHARE_TEXT_W)
-			const thL = shareThought.value.length > 0 ? wrapCanvasLines(ctx, shareThought.value, SHARE_TEXT_W, '12.5px sans-serif') : ([] as string[])
-			const L = layoutShareCard(quoteLines, thL)
-			canvas.width = SHARE_CARD_W * dpr
-			canvas.height = L.H * dpr
-			ctx.scale(dpr, dpr)
-			drawShareCardBase(ctx, L.cardH)
-			drawShareQuoteBlock(ctx, quoteLines)
-			if (thL.length > 0) {
-				drawShareThoughtBlock(ctx, thL, L.thoughtTop)
-			}
-			drawShareSource(ctx, L.sourceTop)
-			// 头像（异步加载，完成后导出；加载失败/超时以浅色圆替代）
-			let headerDrawn = false
-			let exported = false
-			const drawLogo = (withLogo : boolean) : void => {
-				if (headerDrawn) {
-					return
-				}
-				headerDrawn = true
-				drawShareLogo(ctx, logo, withLogo)
-			}
-			const exportCanvas = () : void => {
-				if (exported) {
-					return
-				}
-				exported = true
-				exportShareCanvas(canvas)
-			}
-			const logo = canvas.createImage()
-			logo.src = shareLogoSrc.value
-			logo.onload = () => {
-				drawLogo(true)
-				exportCanvas()
-			}
-			logo.onerror = () => {
-				drawLogo(false)
-				exportCanvas()
-			}
-			// 加载异常兜底：超时后按浅色圆导出
-			setTimeout(() => {
-				drawLogo(false)
-				exportCanvas()
-			}, 1500)
-		}).exec()
-	}
 
 	// #ifdef MP-WEIXIN
 	onShareAppMessage(() => {
-		return { title: '《' + BOOK_TITLE + '》' + shareSource.value, path: '/pages/reading/reader' }
+		return { title: '《' + bookTitle.value + '》' + chapterAt(currentChapterId.value).title, path: '/pages/reading/reader' }
 	})
 	// #endif
 
@@ -2082,7 +1181,7 @@
 				onContentTap()
 				return
 			}
-			const p = paragraphs.value[origin]
+			const p = paragraphsOf(renderCid)[origin]
 			const m = layoutMetrics()
 			const maxRow = Math.max(0, Math.floor((p.text.length - 1) / m.perLine))
 			let row = Math.floor((clientY - rect.top) / m.lineH)
@@ -2103,92 +1202,27 @@
 				onContentTap()
 				return
 			}
-			// 命中划线区间：有想法则弹查看面板（锚定划线下方，空间不足转上方），纯划线无展示
+			// 命中划线区间：有想法则弹查看卡片（气泡组件内聚，锚定划线下方，空间不足转上方），纯划线无展示
 			for (const t of thoughts.value) {
 				if (thoughtCovers(t, renderCid, origin, charIdx)) {
-					thoughtViewQuote.value = t.quote
-					thoughtViewContent.value = t.content
-					thoughtViewSelBottom = rect.bottom
-					thoughtViewSelTop = rect.top
-					positionThoughtView(rect.bottom, rect.top)
-					thoughtViewOpen.value = true
-					setTimeout(() => {
-						measureThoughtView()
-					}, 80)
+					popoverRef.value?.showThoughtView(t.quote, t.content, rect.bottom, rect.top)
 					return
 				}
 			}
 			}).exec()
 			}
 
-	/** 应用划线区间（按章+段落记录）：先从现有区间减去选中区域；add=true 恒并入（写想法时确保划线），add=false 为切换（选中区域已完全划线则取消） */
-	function applySelectionUnderline(cid : number, origin : number, start : number, end : number, add : boolean) : void {
-		let entry = findUnderlineEntry(cid, origin)
-		if (entry == null) {
-			entry = { cid: cid, origin: origin, ranges: [] } as UnderlineEntry
-			underlineStore.value.push(entry)
-		}
-		let covered = 0
-		for (const u of entry.ranges) {
-			const lo = Math.max(u[0], start)
-			const hi = Math.min(u[1] + 1, end + 1)
-			if (hi > lo) {
-				covered += hi - lo
-			}
-		}
-		const isCovered = covered == end - start + 1
-		const result : number[][] = []
-		for (const u of entry.ranges) {
-			if (u[1] < start || u[0] > end) {
-				result.push(u)
-				continue
-			}
-			if (u[0] < start) {
-				result.push([u[0], start - 1])
-			}
-			if (u[1] > end) {
-				result.push([end + 1, u[1]])
-			}
-		}
-		if (add || !isCovered) {
-			result.push([start, end])
-		}
-		entry.ranges = result
-		if (entry.ranges.length == 0) {
-			// 区间清空后移除记录，避免存储留空壳
-			const idx = underlineStore.value.indexOf(entry)
-			if (idx >= 0) {
-				underlineStore.value.splice(idx, 1)
-			}
-		}
-		saveUnderlines()
-	}
-
-	/** 选区跨段划线应用：拆分选区覆盖的段序列逐段应用（add=true 并入/确保划线，add=false 切换取消） */
-	function applySpanUnderline(s : SelSpan, add : boolean) : void {
-		for (const seg of spanSegs(s)) {
-			if (seg.end < seg.start) {
-				continue
-			}
-			applySelectionUnderline(seg.cid, seg.origin, seg.start, seg.end, add)
-		}
-	}
-
-	/** 想法/划线卡片：quote=划线文本（上半），content=想法内容（下半，纯划线为空）；cid/origin/qStart 用于定位跳转与排序 */
-	type NoteRecord = {
-		cid: number
-		origin: number
-		qStart: number
-		quote: string
-		content: string
-	}
-
-	/** 想法/划线卡片列表：划线区间派生卡片并关联想法（想法覆盖的划线区间不再单出划线卡），无匹配区间的想法独立成卡；按章/段落/位置排序 */
+	/** 想法/划线卡片列表（NoteRecord 类型见 utils/readerTypes.uts）：划线区间派生卡片并关联想法（想法覆盖的划线区间不再单出划线卡），无匹配区间的想法独立成卡；按章/段落/位置排序 */
 	const noteRecords = computed(() : NoteRecord[] => {
 		const records : NoteRecord[] = []
 		const usedThoughts : boolean[] = thoughts.value.map(() : boolean => false)
 		for (const e of underlineStore.value) {
-			const p = paragraphs.value[e.origin]
+			// 划线文本按记录所在章取：跨章划线的卡片引用不能用当前章段落数组
+			const p = paragraphsOf(e.cid)[e.origin]
+			if (p == null) {
+				// 章节段落未注入（首帧渲染早于书籍加载）或记录指向已不存在的章：跳过避免越界
+				continue
+			}
 			for (const u of e.ranges) {
 				const quote = p.text.slice(u[0], u[1] + 1)
 				let content = ''
@@ -2221,80 +1255,97 @@
 		return records
 	})
 
-	/** 启动恢复本地设置（字号/翻页模式/主题） */
+	/** 启动恢复本地设置镜像（真源同一存储，与 ReaderControl 组件各自恢复保持一致；字号/翻页模式/主题） */
 	{
-		const stored : any = uni.getStorageSync(STORAGE_SETTINGS)
-		if (typeof stored == 'string' && (stored as string).length > 0) {
-			const s = JSON.parse<ReaderSettings>(stored as string)
-			if (s != null) {
-				if (s.fontSize >= 12 && s.fontSize <= 36) {
-					fontSize.value = s.fontSize
-					clampPageIndex()
-				}
-				if (s.pageTurn == '仿真' || s.pageTurn == '覆盖' || s.pageTurn == '平移' || s.pageTurn == '滚动') {
-					pageTurn.value = s.pageTurn
-				}
-				// 存储值不在当前端可选列表内（如非 APP 端的历史"仿真"设置）时回退默认，避免选中无按钮模式
-				if (pageTurnModes.value.indexOf(pageTurn.value) < 0) {
-					pageTurn.value = pageTurnModes.value[0]
-				}
-				if (s.theme == 'night' || s.theme == 'paper') {
-					applyReaderTheme(s.theme)
-				}
-			}
+		const s = loadSettings()
+		fontSize.value = s.fontSize
+		clampPageIndex()
+		// 存储值不在当前端可选列表内（如非 APP 端的历史"仿真"设置）时回退默认，避免选中无按钮模式
+		const modes = ['滚动', '覆盖', '平移']
+		// #ifdef APP
+		modes.splice(1, 0, '仿真')
+		// #endif
+		if (modes.indexOf(s.pageTurn) >= 0) {
+			pageTurn.value = s.pageTurn
+		} else {
+			pageTurn.value = modes[0]
+		}
+		if (s.theme == 'night' || s.theme == 'paper') {
+			applyReaderTheme(s.theme)
 		}
 	}
 
-	/** 启动恢复上次阅读进度（书名匹配才恢复，避免不同书之间串用；章节/页码/滚动位置）。必须置于窗口尺寸与全部阅读设置恢复之后：pageBreaks 依赖 pageW/pageH/fontSize 等后置声明的 ref，过早读取会因未初始化而报错（微信端曾报 undefined.value），且恢复页码需按真实分页校验 */
-	{
-		const stored : any = uni.getStorageSync(STORAGE_PROGRESS)
-		if (typeof stored == 'string' && (stored as string).length > 0) {
-			const p = JSON.parse<ReaderProgress>(stored as string)
-			if (p != null && p.bookTitle == BOOK_TITLE && p.chapterId >= 0 && p.chapterId < chapters.value.length) {
-				currentChapterId.value = p.chapterId
-				if (p.pageIndex >= 0 && p.pageIndex < pageBreaks.value.length) {
-					pageIndex.value = p.pageIndex
-				}
-				scrollChapters.value = [p.chapterId]
-				scrollModeTop.value = p.scrollTop > 0 ? p.scrollTop : 0
-				scrollModePos.value = scrollModeTop.value
+	/** 恢复上次阅读进度（进度按 bookId 隔离存储，无书名串用问题；章节/页码/滚动位置）。在 loadBookContent 注入数据后调用：pageBreaks 依赖窗口尺寸与字号 ref（均已就绪），恢复页码按真实分页校验 */
+	function restoreProgress(bid : string) : void {
+		const p = loadBookProgress(bid)
+		if (p == null) {
+			return
+		}
+		if (p.chapterId >= 0 && p.chapterId < chapters.value.length) {
+			currentChapterId.value = p.chapterId
+			paragraphs.value = paragraphsOf(p.chapterId)
+			if (p.pageIndex >= 0 && p.pageIndex < pageBreaks.value.length) {
+				pageIndex.value = p.pageIndex
 			}
+			scrollChapters.value = [p.chapterId]
+			scrollModeTop.value = p.scrollTop > 0 ? p.scrollTop : 0
+			scrollModePos.value = scrollModeTop.value
 		}
 	}
 
-	/** Toast（Stitch: 顶部 96px 黑底胶囊 1.5s 自动消失） */
-	const toastVisible = ref(false)
-	const toastMsg = ref('')
-	let toastTimer = -1
+	/** ===== 打开本地书籍（书架点击传入 bookId） ===== */
+	onLoad((options : OnLoadOptions) : void => {
+		const bid = options['bookId']
+		if (bid == null || bid.length == 0) {
+			showToast('书籍不存在')
+			return
+		}
+		openLocalBook(bid)
+	})
+
+	/** 读取本地书籍文件并解析注入；失败（书被删/文件被清理）提示后返回书架 */
+	async function openLocalBook(bid : string) : Promise<void> {
+		const book : LocalBook | null = findBook(bid)
+		if (book == null) {
+			showToast('书籍不存在或已删除')
+			setTimeout(() => {
+				uni.navigateBack()
+			}, 1200)
+			return
+		}
+		bookId.value = book.id
+		bookTitle.value = book.title
+		uni.showLoading({ title: '正在打开', mask: true })
+		// 先让 loading 完成渲染，再进入同步的文件读取与章节解析（大文件解析耗时，主线程会短暂阻塞）
+		await new Promise<void>((resolve) => {
+			setTimeout(resolve, 60)
+		})
+		try {
+			const text = await readTextFile(book.path)
+			const parsed = parseChapters(text, book.title)
+			const chs = parsed.map((c, i) : Chapter => {
+				return { id: i, title: c.title, label: c.label, contentTitle: c.contentTitle, active: false } as Chapter
+			})
+			loadBookContent(chs, parsed.map((c) : string[] => c.paragraphs))
+			restoreProgress(book.id)
+		} catch (e) {
+			showToast('书籍读取失败，文件可能已被清理')
+		}
+		uni.hideLoading()
+	}
+
+	/** 排版度量（响应式：随字号/屏宽变化，下行气泡组件供划词换算） */
+	const metrics = computed<TextMetrics>(() : TextMetrics => layoutMetrics())
+
+	/** 全局提示（ReaderToast 组件化：文案/显隐/自动消失计时内聚） */
+	function showToast(msg: string) : void {
+		toastRef.value?.show(msg)
+	}
 
 	/** 主题图标路径：夜间使用 -light 白色变体 */
 	function themeIcon(name: string) : string {
 		return '/static/icons/' + name + (nightMode.value ? '-light' : '') + '.svg'
 	}
-
-	/** 目录抽屉内目录按钮图标（日间蓝/夜间浅蓝） */
-	const drawerCatalogIcon = computed(() : string => {
-		return nightMode.value ? '/static/icons/reader-catalog-blue-light.svg' : '/static/icons/reader-catalog-blue.svg'
-	})
-
-	/** 目录正/倒序展示（Stitch: ⇅/↓↑ 切换） */
-	/** 目录正/倒序展示（Stitch: ⇅/↓↑ 切换；当前阅读章节蓝色高亮由 currentChapterId 驱动） */
-	const displayChapters = computed(() : Chapter[] => {
-		const list = chapters.value
-		const marked = list.map((c) : Chapter => {
-			return {
-				id: c.id,
-				title: c.title,
-				label: c.label,
-				contentTitle: c.contentTitle,
-				active: c.id === currentChapterId.value
-			} as Chapter
-		})
-		if (!orderDesc.value) {
-			return marked
-		}
-		return marked.slice().reverse()
-	})
 
 	/** 左右滑动翻页手势（Stitch 设置面板"翻页"模式：左滑下一章、右滑上一章，水平位移阈值避免与纵向滚动冲突） */
 	let touchStartX = 0
@@ -2411,15 +1462,15 @@
 			return
 		}
 		const vertical = dy > 40 && dy > Math.abs(dx) * 1.5
-		// 下拉态松手：仍拉起则落定（添加/移除书签），否则为取消——两者均回弹归位
+		// 下拉态松手：仍拉起则落定（添加/移除书签，增删/持久化在控制框组件内），否则为取消——两者均回弹归位
 		if (pullState.value == 'adding') {
 			if (vertical) {
-				addBookmark()
+				controlRef.value?.addBookmark(currentChapterId.value, pageIndex.value)
 			}
 			settlePull()
 		} else if (pullState.value == 'removing') {
 			if (vertical) {
-				removeBookmark()
+				controlRef.value?.removeBookmark(currentChapterId.value, pageIndex.value)
 			}
 			settlePull()
 		}
@@ -2463,13 +1514,14 @@
 		saveProgress()
 	}
 
-	/** 切换章节并定位页（进入新章默认首页，回退上一章定位末页；滚动模式复位章节序列与滚动位置） */
+	/** 切换章节并定位页（进入新章默认首页，回退上一章定位末页；段落切换到目标章后分页重算；滚动模式复位章节序列与滚动位置） */
 	function goToChapter(id: number, atLastPage: boolean) : void {
 		// 章界防御：书签/进度等存量索引可能指向未注入数据中不存在的章
 		if (id < 0 || id >= chapters.value.length) {
 			return
 		}
 		currentChapterId.value = id
+		paragraphs.value = paragraphsOf(id)
 		pageIndex.value = atLastPage ? pageBreaks.value.length - 1 : 0
 		scrollChapters.value = [id]
 		scrollModeTop.value = atLastPage ? 999999 : 0
@@ -2479,26 +1531,11 @@
 		saveProgress()
 	}
 
-	function showToast(msg: string) : void {
-		toastMsg.value = msg
-		toastVisible.value = true
-		if (toastTimer >= 0) {
-			clearTimeout(toastTimer)
-		}
-		toastTimer = setTimeout(() => {
-			toastVisible.value = false
-		}, 1500)
-	}
-
-	/** 点击正文空白（Stitch: 划线段点击已处理→跳过；想法查看打开→关闭；抽屉打开→收起；划词激活→清除；设置展开→收起；否则切换菜单显隐） */
+	/** 点击正文空白（Stitch: 划线段点击已处理→跳过；想法查看卡片由其全屏遮罩自行拦截点击关闭；抽屉打开→收起；划词激活→清除；设置展开→收起；否则切换菜单显隐） */
 	function onContentTap() : void {
 		// 正文划线段 click 已处理（含纯划线吞点击）：跳过本次父级点击
 		if (paragraphTapHandled) {
 			paragraphTapHandled = false
-			return
-		}
-		if (thoughtViewOpen.value) {
-			closeThoughtView()
 			return
 		}
 		if (drawerOpen.value) {
@@ -2524,16 +1561,7 @@
 		uni.navigateBack()
 	}
 
-	/** 划词排版度量：每行字数/行高/字宽（px）；正文左右内边距已含在段落 rect 内，坐标一律以 rect 为基准 */
-	type TextMetrics = {
-		perLine: number
-		lineH: number
-		/** 自然字距（=字号；0.4rpx 字距在原生渲染实测未生效，按 APP 端实测每行字数校准） */
-		charW: number
-		/** 满行实际字距（正文两端对齐拉伸后按行宽均分） */
-		fullCharW: number
-	}
-
+	/** 划词排版度量（TextMetrics/rowSpacing 见 utils/readerTypes.uts 共享层，气泡组件随 metrics props 使用同源参数） */
 	function layoutMetrics() : TextMetrics {
 		// 每行字数须与真实渲染一致：letter-spacing 0.4rpx（约 0.2px）在 APP 原生渲染中未生效，
 		// 计入会导致每行字数少估 1，划词手柄每跨一行累计右偏 1 字符（pageBreaks 的高度预算为保守估计，另按原公式不动）
@@ -2546,12 +1574,6 @@
 			charW: charW,
 			fullCharW: contentW / perLine
 		} as TextMetrics
-	}
-
-	/** 指定行的字距：满行经两端对齐拉伸按行宽均分，末行未满不拉伸按自然字距（与渲染排版对齐） */
-	function rowSpacing(m : TextMetrics, len : number, maxRow : number, row : number) : number {
-		const rest = len - maxRow * m.perLine
-		return (row < maxRow || rest == m.perLine) ? m.fullCharW : m.charW
 	}
 
 	/** 所在句范围（[起点, 终点] 闭区间）：触点向前/向后扫句末标点定句界，标点后的闭合引号随句并入 */
@@ -2590,181 +1612,23 @@
 		return '#ppara-' + pi
 	}
 
-	/** 字符边界视口坐标（[x, y]）：isEnd=末字符右缘/其行底，否则首字符左缘/其行顶；字距按所在行取满行均分/末行自然值 */
-	function charEdgePos(charIdx : number, isEnd : boolean, len : number) : number[] {
-		const m = layoutMetrics()
-		const maxRow = Math.max(0, Math.floor((len - 1) / m.perLine))
-		const row = Math.max(0, Math.min(Math.floor(charIdx / m.perLine), maxRow))
-		const col = charIdx - row * m.perLine
-		const spacing = rowSpacing(m, len, maxRow, row)
-		const lineTop = selRectTop.value + row * m.lineH
-		const x = selRectLeft.value + (isEnd ? (col + 1) * spacing : col * spacing)
-		return [x, isEnd ? lineTop + m.lineH : lineTop]
-	}
-
-	/** 按选区端点估算刷新手柄与选区几何（即时显示兜底；跨段选区估算失效，由锚点实测定位） */
-	function updateHandles() : void {
-		const s = selSpan.value
-		if (s == null) {
-			return
-		}
-		if (s.fromOrigin != s.toOrigin || s.fromCid != s.toCid) {
-			return
-		}
-		const hotH = uni.upx2px(HANDLE_HOT_RPX)
-		const visH = uni.upx2px(HANDLE_VISUAL_RPX)
-		const len = paragraphs.value[s.fromOrigin].text.length
-		const sp = charEdgePos(s.fromStart, false, len)
-		handleStartLeft.value = sp[0] - hotH / 2
-		handleStartTop.value = sp[1] - visH
-		const ep = charEdgePos(s.toEnd, true, len)
-		handleEndLeft.value = ep[0] - hotH / 2
-		handleEndTop.value = ep[1] - hotH + visH
-		selTopPx.value = sp[1]
-		selBottomPx.value = ep[1]
-	}
-
-	/** 划词气泡定位：气泡体水平中心跟随焦点（长按触点/拖动端，随选中位置水平移动，钳制屏幕内），垂直优先置于选区上方、空间不足转下方，箭头指向焦点 */
-	function updatePopover() : void {
-		if (selSpan.value == null) {
-			return
-		}
-		const selTop = selTopPx.value
-		const selBottom = selBottomPx.value
-		// 估算兜底按布局模式区分（双行更矮更窄），实测后以真实尺寸校正
-		const w = popoverW > 0 ? popoverW : (popoverTwoLine.value ? uni.upx2px(290) : POPOVER_EST_W)
-		const h = popoverH > 0 ? popoverH : (popoverTwoLine.value ? 100 : POPOVER_EST_H)
-		// 上下间距避开手柄视觉体：起点柄悬于行顶上方、终点柄圆头垂于行底下方，另留 16rpx 呼吸空隙
-		const hotH = uni.upx2px(HANDLE_HOT_RPX)
-		const visH = uni.upx2px(HANDLE_VISUAL_RPX)
-		const gapUp = visH + uni.upx2px(16)
-		const gapDown = hotH - visH + uni.upx2px(16)
-		const arrowH = uni.upx2px(13)
-		// 水平：气泡体中心跟随焦点位置，两侧留边钳制不出屏
-		const margin = uni.upx2px(24)
-		popoverLeft.value = Math.max(margin, Math.min(selFocusX.value - w / 2, pageW.value - margin - w))
-		// 垂直：上方放得下置上方；否则取上下空间宽裕侧（下方时箭头朝上）
-		const topSpace = selTop - gapUp - arrowH - h
-		const bottomSpace = pageH.value - selBottom - gapDown - arrowH - h
-		if (topSpace >= navTop.value || topSpace >= bottomSpace) {
-			popoverBelow.value = false
-			popoverTop.value = Math.max(navTop.value, selTop - gapUp - arrowH - h)
-		} else {
-			popoverBelow.value = true
-			popoverTop.value = Math.min(selBottom + gapDown + arrowH, pageH.value - h - uni.upx2px(60))
-		}
-		// 箭头（20rpx 方块）指向焦点：焦点在气泡体内时对准其位置、出体时钳到边缘，左缘再扣半宽
-		const arrowMargin = uni.upx2px(30)
-		const arrowCenter = Math.max(arrowMargin, Math.min(selFocusX.value - popoverLeft.value, w - arrowMargin))
-		arrowLeft.value = arrowCenter - uni.upx2px(10)
-		if (!popoverMeasured) {
-			setTimeout(() => {
-				measurePopover()
-			}, 80)
-		}
-	}
-
-	/** 测量选区两端锚点真实渲染位置（零宽字符排入选中文本流，位置即字符边界真实位置），吸附手柄与气泡 */
+	/** 测量选区两端锚点真实渲染位置（零宽字符排入选中文本流，位置即字符边界真实位置），矩形回传气泡组件吸附 */
 	function measureAnchors() : void {
 		if (selSpan.value == null) {
 			return
 		}
-		anchorStart = null
-		anchorEnd = null
 		uni.createSelectorQuery().select('#sel-anchor-start').boundingClientRect((r : NodeInfo | null) : void => {
-			anchorStart = r
-			applyAnchors()
+			popoverRef.value?.setAnchorRects(0, r)
 		}).exec()
 		uni.createSelectorQuery().select('#sel-anchor-end').boundingClientRect((r : NodeInfo | null) : void => {
-			anchorEnd = r
-			applyAnchors()
+			popoverRef.value?.setAnchorRects(1, r)
 		}).exec()
 	}
 
-	/** 两个锚点测量齐备后吸附：手柄贴真实字符边界，选区几何与气泡随之精化 */
-	function applyAnchors() : void {
-		const s = anchorStart
-		const e = anchorEnd
-		if (selSpan.value == null || s == null || e == null) {
-			return
-		}
-		const hotH = uni.upx2px(HANDLE_HOT_RPX)
-		const visH = uni.upx2px(HANDLE_VISUAL_RPX)
-		handleStartLeft.value = s.left - hotH / 2
-		handleStartTop.value = s.top - visH
-		handleEndLeft.value = e.right - hotH / 2
-		handleEndTop.value = e.bottom - hotH + visH
-		selTopPx.value = s.top
-		selBottomPx.value = e.bottom
-		// 拖动过手柄后箭头指向被拖端的新边界，未拖动时保持指向长按触点
-		if (lastDragEnd == -1) {
-			selFocusX.value = s.left
-		} else if (lastDragEnd == 1) {
-			selFocusX.value = e.right
-		}
-		updatePopover()
-		// 实测完成，手柄与气泡以精确位置首次显示
-		selectionLaidOut.value = true
-	}
-
-	/** 查询气泡体实际尺寸并校正定位（内容固定仅查一次，查询失败允许重试） */
-	function measurePopover() : void {
-		uni.createSelectorQuery().select('.popover-body').boundingClientRect((rect : NodeInfo | null) : void => {
-			if (rect != null && rect.width > 0 && rect.height > 0) {
-				popoverW = rect.width
-				popoverH = rect.height
-				popoverMeasured = true
-				updatePopover()
-			}
-		}).exec()
-	}
-
-	/** 手柄拖动状态（触摸目标在 touchstart 时锁定，move/end 持续派发至该手柄；响应式供气泡显隐联动） */
-	const dragStartActive = ref(false)
-	const dragEndActive = ref(false)
-
-	/** 划词气泡定位（px，视口坐标）：气泡体水平中心对准选区中心（钳制屏幕内），垂直置于选区上/下侧 */
-	const popoverLeft = ref(0)
-	const popoverTop = ref(0)
-	/** 气泡是否位于选区下方（箭头朝上指向选区） */
-	const popoverBelow = ref(false)
-	/** 箭头指向的视口 x：长按触点位置，拖动手柄后为被拖端的新边界 */
-	const selFocusX = ref(0)
-	/** 箭头在气泡体内的水平位置（px，相对气泡体左缘，钳制不悬空） */
-	const arrowLeft = ref(0)
-	/** 最后操作的手柄端：0=未拖动（箭头指长按触点）/ -1=起点 / 1=终点 */
-	let lastDragEnd = 0
-	/** 选区已实测定位（锚点测量完成后手柄/气泡才出现，避免估算兜底位置跳变为实测位置） */
-	const selectionLaidOut = ref(false)
-	/** 气泡显示：有选区且已实测定位、不在拖动手柄中（拖动中隐藏，松手按新选区重定位显示） */
-	const popoverVisible = computed(() : boolean => {
-		return selectionLaidOut.value && !dragStartActive.value && !dragEndActive.value
-	})
-	/** 气泡体尺寸缓存（内容固定，显示后查询一次校正；未就绪用估算值兜底） */
-	let popoverW = 0
-	let popoverH = 0
-	let popoverMeasured = false
-	const POPOVER_EST_W = 230
-	const POPOVER_EST_H = 52
-	/** 气泡双行布局：五项单行所需宽超过屏宽可用宽时切换（紧凑单行约 234px，手机屏均可单行，仅超窄屏兜底触发），按屏宽判定一次 */
-	const popoverTwoLine = ref(false)
-	{
-		const needW = uni.upx2px(449) + 24
-		const availW = pageW.value - uni.upx2px(48)
-		popoverTwoLine.value = needW > availW
-	}
-
-	/** 拖动中的段落视口矩形缓存（触点→段落映射，支撑跨段拖动） */
-	type ParaRect = {
-		cid : number
-		origin : number
-		left : number
-		top : number
-		bottom : number
-	}
+	/** 拖动中的段落视口矩形收集容器（触点→段落映射在气泡组件内换算，正文段落元素查询必须在宿主） */
 	let dragParaRects : ParaRect[] = []
 
-	/** 缓存正文段落视口矩形（滚动模式含已加载各章，分页模式仅当前页段落；rect 顺序与段序一致） */
+	/** 缓存正文段落视口矩形（滚动模式含已加载各章，分页模式仅当前页段落；rect 顺序与段序一致），完成后回传气泡组件 */
 	function cacheParaRects() : void {
 		dragParaRects = []
 		if (scrollMode.value) {
@@ -2772,20 +1636,23 @@
 				if (rects == null) {
 					return
 				}
-				const paraLen = paragraphs.value.length
-				for (let i = 0; i < rects.length; i++) {
-					const ci = Math.floor(i / paraLen)
-					if (ci >= scrollChapters.value.length) {
-						break
+				// 滚动模式按已加载章序逐章消费 rect（各章段落数不同，不能用统一段落数整除反推章序）
+				let idx = 0
+				for (let ci = 0; ci < scrollChapters.value.length; ci++) {
+					const cid = scrollChapters.value[ci]
+					const paras = paragraphsOf(cid)
+					for (let o = 0; o < paras.length && idx < rects.length; o++, idx++) {
+						dragParaRects.push({
+							cid: cid,
+							origin: o,
+							left: rects[idx].left,
+							top: rects[idx].top,
+							bottom: rects[idx].bottom,
+							len: paras[o].text.length
+						} as ParaRect)
 					}
-					dragParaRects.push({
-						cid: scrollChapters.value[ci],
-						origin: i % paraLen,
-						left: rects[i].left,
-						top: rects[i].top,
-						bottom: rects[i].bottom
-					} as ParaRect)
 				}
+				popoverRef.value?.setDragRects(dragParaRects)
 			}).exec()
 		} else {
 			uni.createSelectorQuery().selectAll('.para-page').boundingClientRect((rects : NodeInfo[]) : void => {
@@ -2798,142 +1665,16 @@
 						origin: currentPageItems.value[i].origin,
 						left: rects[i].left,
 						top: rects[i].top,
-						bottom: rects[i].bottom
+						bottom: rects[i].bottom,
+						len: currentPageItems.value[i].text.length
 					} as ParaRect)
 				}
+				popoverRef.value?.setDragRects(dragParaRects)
 			}).exec()
 		}
 	}
 
-	/** 位置比较（章/段/字符字典序，章 id 升序即阅读顺序）：负=前小于后，0=相等 */
-	function comparePos(cid1 : number, origin1 : number, idx1 : number, cid2 : number, origin2 : number, idx2 : number) : number {
-		if (cid1 != cid2) {
-			return cid1 - cid2
-		}
-		if (origin1 != origin2) {
-			return origin1 - origin2
-		}
-		return idx1 - idx2
-	}
-
-	/** 选区规范化：保证 from 端点在 to 端点之前（拖动反向越过时端点互换后的防御） */
-	function normalizeSpan(s : SelSpan) : SelSpan {
-		if (comparePos(s.fromCid, s.fromOrigin, s.fromStart, s.toCid, s.toOrigin, s.toEnd) > 0) {
-			return {
-				fromCid: s.toCid,
-				fromOrigin: s.toOrigin,
-				fromStart: s.toEnd,
-				toCid: s.fromCid,
-				toOrigin: s.fromOrigin,
-				toEnd: s.fromStart
-			} as SelSpan
-		}
-		return s
-	}
-
-	/** 手柄拖动（跨段）：触点映射到段落与字符并更新被拖端点；越过另一端时端点互换（原生选择交互）；拖动中手柄视觉跟随手指，松手后由锚点实测吸附真实边界 */
-	function applyHandleDrag(e : UniTouchEvent, isEnd : boolean) : void {
-		const span = selSpan.value
-		if (e.touches.length == 0 || span == null || dragParaRects.length == 0) {
-			return
-		}
-		const m = layoutMetrics()
-		const touch = e.touches[0]
-		// 触点命中段落（纵向区间，未命中钳制首末段）
-		let idx = -1
-		for (let i = 0; i < dragParaRects.length; i++) {
-			if (touch.clientY >= dragParaRects[i].top && touch.clientY <= dragParaRects[i].bottom) {
-				idx = i
-				break
-			}
-		}
-		if (idx < 0) {
-			idx = touch.clientY < dragParaRects[0].top ? 0 : dragParaRects.length - 1
-		}
-		const pr = dragParaRects[idx]
-		const p = paragraphs.value[pr.origin]
-		const maxRow = Math.max(0, Math.floor((p.text.length - 1) / m.perLine))
-		let row = Math.floor((touch.clientY - pr.top) / m.lineH)
-		row = Math.max(0, Math.min(row, maxRow))
-		let col = Math.floor((touch.clientX - pr.left) / rowSpacing(m, p.text.length, maxRow, row))
-		col = Math.max(0, Math.min(col, m.perLine - 1))
-		const charIdx = Math.min(row * m.perLine + col, p.text.length - 1)
-		if (isEnd) {
-			// 终点柄：新位置在起点之前则互换端点，否则更新终点
-			if (comparePos(pr.cid, pr.origin, charIdx, span.fromCid, span.fromOrigin, span.fromStart) >= 0) {
-				span.toCid = pr.cid
-				span.toOrigin = pr.origin
-				span.toEnd = charIdx
-			} else {
-				span.toCid = span.fromCid
-				span.toOrigin = span.fromOrigin
-				span.toEnd = span.fromStart
-				span.fromCid = pr.cid
-				span.fromOrigin = pr.origin
-				span.fromStart = charIdx
-			}
-		} else {
-			// 起点柄：新位置在终点之后则互换端点，否则更新起点
-			if (comparePos(pr.cid, pr.origin, charIdx, span.toCid, span.toOrigin, span.toEnd) <= 0) {
-				span.fromCid = pr.cid
-				span.fromOrigin = pr.origin
-				span.fromStart = charIdx
-			} else {
-				span.fromCid = span.toCid
-				span.fromOrigin = span.toOrigin
-				span.fromStart = span.toEnd
-				span.toCid = pr.cid
-				span.toOrigin = pr.origin
-				span.toEnd = charIdx
-			}
-		}
-		const hotH = uni.upx2px(HANDLE_HOT_RPX)
-		// 箭头焦点跟随触点（跨段拖动时气泡随手指移动，避免停留在旧位置无法点击）
-		selFocusX.value = touch.clientX
-		if (isEnd) {
-			handleEndLeft.value = touch.clientX - hotH / 2
-			handleEndTop.value = touch.clientY - hotH / 2
-		} else {
-			handleStartLeft.value = touch.clientX - hotH / 2
-			handleStartTop.value = touch.clientY - hotH / 2
-		}
-	}
-
-	function onStartHandleTouchStart() : void {
-		dragStartActive.value = true
-		lastDragEnd = -1
-		cacheParaRects()
-	}
-
-	function onStartHandleTouchMove(e : UniTouchEvent) : void {
-		if (dragStartActive.value) {
-			applyHandleDrag(e, false)
-		}
-	}
-
-	function onStartHandleTouchEnd() : void {
-		dragStartActive.value = false
-		updatePopover()
-		measureAnchors()
-	}
-
-	function onEndHandleTouchStart() : void {
-		dragEndActive.value = true
-		lastDragEnd = 1
-		cacheParaRects()
-	}
-
-	function onEndHandleTouchMove(e : UniTouchEvent) : void {
-		if (dragEndActive.value) {
-			applyHandleDrag(e, true)
-		}
-	}
-
-	function onEndHandleTouchEnd() : void {
-		dragEndActive.value = false
-		updatePopover()
-		measureAnchors()
-	}
+	/** 手柄拖动（跨段）与触摸事件处理已内聚气泡组件（正文段落矩形由宿主查询回传 setDragRects） */
 
 	/** 长按段落：触点位置估算字符索引，定位所在句整句选中并显示拖动手柄（cid=-1 为分页模式，滚动模式传段落所在章 id） */
 	function onLongPress(pi : number, cid : number, e : UniTouchEvent) : void {
@@ -2944,11 +1685,15 @@
 		settingsOpen.value = false
 		const clientX = e.touches[0].clientX
 		const clientY = e.touches[0].clientY
+		// 滚动模式自动加载相邻章后 currentChapterId 可能跳变，而视口停留内容仍属原章：
+		// 长按段落时把当前章同步为被长按段落所在章，保证选区渲染的章匹配条件成立（用户在哪里操作，哪里即当前阅读章）
+		const spanCid = cid >= 0 ? cid : currentChapterId.value
 		uni.createSelectorQuery().select(selectionParaId(pi, cid)).boundingClientRect((rect : NodeInfo | null) : void => {
 			if (rect == null) {
 				return
 			}
-			const p = paragraphs.value[pi]
+			// 段落文本按被长按段落所在章取（滚动模式多章渲染下 pi 属于 spanCid 章）
+			const p = paragraphsOf(spanCid)[pi]
 			const m = layoutMetrics()
 			const maxRow = Math.max(0, Math.floor((p.text.length - 1) / m.perLine))
 			// 触点相对段落文本区 → 行列估算字符索引（与分页排版同源公式，字距按行取值）
@@ -2957,20 +1702,15 @@
 			let col = Math.floor((clientX - rect.left) / rowSpacing(m, p.text.length, maxRow, row))
 			col = Math.max(0, Math.min(col, m.perLine - 1))
 			const charIdx = Math.min(row * m.perLine + col, p.text.length - 1)
-			// 滚动模式自动加载相邻章后 currentChapterId 可能跳变，而视口停留内容仍属原章：
-			// 长按段落时把当前章同步为被长按段落所在章，保证选区渲染的章匹配条件成立（用户在哪里操作，哪里即当前阅读章）
-			const spanCid = cid >= 0 ? cid : currentChapterId.value
 			if (spanCid != currentChapterId.value) {
 				currentChapterId.value = spanCid
 				saveProgress()
 			}
-			selRectLeft.value = rect.left
-			selRectTop.value = rect.top
 			// 长按位置落在已有想法区间：恢复该想法的完整选区（含划线区域）；否则按句选取
-			let restored = false
+			let span : SelSpan | null = null
 			for (const t of thoughts.value) {
 				if (thoughtCovers(t, spanCid, pi, charIdx)) {
-					selSpan.value = {
+					span = {
 						fromCid: t.fromCid,
 						fromOrigin: t.fromOrigin,
 						fromStart: t.fromStart,
@@ -2978,13 +1718,12 @@
 						toOrigin: t.toOrigin,
 						toEnd: t.toEnd
 					} as SelSpan
-					restored = true
 					break
 				}
 			}
-			if (!restored) {
+			if (span == null) {
 				const range = sentenceRange(p.text, charIdx)
-				selSpan.value = {
+				span = {
 					fromCid: spanCid,
 					fromOrigin: pi,
 					fromStart: range[0],
@@ -2993,148 +1732,76 @@
 					toEnd: range[1]
 				} as SelSpan
 			}
-			// 箭头初始指向长按触点位置
-			selFocusX.value = clientX
-			lastDragEnd = 0
-			// 复位定位标记：手柄与气泡等锚点实测完成后才出现（估算位置仅作兜底，避免先显示估算位置再跳到实测位置）
-			selectionLaidOut.value = false
-			updateHandles()
-			updatePopover()
-			setTimeout(() => {
-				measureAnchors()
-			}, 60)
-			// 锚点测量异常兜底：仍以估算位置显示手柄与气泡，保证功能可用
-			setTimeout(() => {
-				if (selSpan.value != null && !selectionLaidOut.value) {
-					selectionLaidOut.value = true
-				}
-			}, 250)
+			// 选区状态与手柄/气泡在气泡组件内建立（锚点实测由组件发起请求、宿主查询回传）
+			popoverRef.value?.beginSelection(span, rect.left, rect.top, clientX, p.text.length)
 		}).exec()
 	}
 
+	/** 清除选区（选区状态在气泡组件，联动收起想法查看卡片并同步高亮镜像） */
 	function clearSelection() : void {
-		selSpan.value = null
-		selectionLaidOut.value = false
-		thoughtViewOpen.value = false
+		popoverRef.value?.hideSelection()
 	}
 
-	/** 想法编辑器（多行输入框浮层）：确认后保存想法并同步将选中区域划线 */
-	const thoughtEditorOpen = ref(false)
-	const thoughtInput = ref('')
-	/** textarea 聚焦控制：微信端打开后延时置 true 拉起键盘（渲染期设置无效） */
-	const thoughtInputFocus = ref(false)
-	/** 想法输入框最大高度（px）：屏高的 40%，auto-height 随内容增长到此封顶（内部滚动） */
-	const thoughtInputMaxH = computed(() : number => pageH.value * 0.4)
-	/** 选区快照：打开时立即记录（微信端事件冒泡会先触发容器清选区，编辑器期间使用快照） */
-	const thoughtSpan = ref<SelSpan | null>(null)
-	const thoughtQuote = ref('')
-
-	function openThoughtEditor() : void {
+	/** ===== 选区上下文（划词气泡功能数据，按当前选区实时计算下行组件） ===== */
+	/** 选区覆盖段序列（划线按项写入所在章） */
+	const selSegs = computed<SpanSeg[]>(() : SpanSeg[] => {
 		const s = selSpan.value
 		if (s == null) {
-			return
+			return [] as SpanSeg[]
 		}
-		thoughtSpan.value = { fromCid: s.fromCid, fromOrigin: s.fromOrigin, fromStart: s.fromStart, toCid: s.toCid, toOrigin: s.toOrigin, toEnd: s.toEnd } as SelSpan
-		thoughtQuote.value = selectionText()
-		thoughtInput.value = ''
-		thoughtInputFocus.value = false
-		thoughtEditorOpen.value = true
-		setTimeout(() => {
-			thoughtInputFocus.value = true
-		}, 150)
-	}
+		return spanSegs(s)
+	})
 
-	function confirmThought() : void {
-		const content = thoughtInput.value.trim()
-		const sp = thoughtSpan.value
-		if (content.length == 0) {
-			showToast('请输入想法内容')
-			return
+	/** 选区文本（跨段拼接） */
+	const selText = computed(() : string => {
+		return selectionText()
+	})
+
+	/** 分享卡片内容快照（上下文渐出四段 + 引文 + 关联想法 + 出处；跨段选区取首段前文/末段后文） */
+	const shareCtx = computed<ShareQuoteCtx | null>(() : ShareQuoteCtx | null => {
+		const s = selSpan.value
+		if (s == null) {
+			return null
 		}
-		if (sp == null) {
-			thoughtEditorOpen.value = false
-			thoughtInputFocus.value = false
-			return
-		}
-		thoughts.value.push({
-			fromCid: sp.fromCid,
-			fromOrigin: sp.fromOrigin,
-			fromStart: sp.fromStart,
-			toCid: sp.toCid,
-			toOrigin: sp.toOrigin,
-			toEnd: sp.toEnd,
-			quote: thoughtQuote.value,
-			content: content
-		} as Thought)
-		saveThoughts()
-		// 同步将选中区域划线（已划线则保持）并持久化
-		applySpanUnderline(sp, true)
-		thoughtEditorOpen.value = false
-		thoughtInputFocus.value = false
-		thoughtInput.value = ''
-		clearSelection()
-	}
-
-	/** 取消写想法：关闭编辑器并清除选区 */
-	function cancelThought() : void {
-		thoughtEditorOpen.value = false
-		thoughtInputFocus.value = false
-		thoughtInput.value = ''
-		clearSelection()
-	}
-
-	/** 划词气泡操作（Stitch: 复制/写想法/划线/查询/分享）；拦截冒泡避免触发容器点击清选区，选区延迟 500ms 清除 */
-	function onPopoverAction(e : UniPointerEvent, action : string) : void {
-		e.stopPropagation()
-		if (action === 'copy') {
-			const content = selectionText()
-			if (content.length == 0) {
-				return
+		// 上下文按选区端点所在章取（滚动模式跨章选区的端点分属两章）
+		const fromP = paragraphsOf(s.fromCid)[s.fromOrigin]
+		const toP = paragraphsOf(s.toCid)[s.toOrigin]
+		const ctxStart = Math.max(0, s.fromStart - 24)
+		const ctxEnd = Math.min(toP.text.length, s.toEnd + 25)
+		const before = fromP.text.slice(ctxStart, s.fromStart)
+		const after = toP.text.slice(s.toEnd + 1, ctxEnd)
+		const halfB = Math.ceil(before.length / 2)
+		const halfA = Math.floor(after.length / 2)
+		let thoughtText = ''
+		for (const t of thoughts.value) {
+			// 选区与想法区间相交即展示（拖动微调后仍关联）
+			const tEndAfterSpanFrom = comparePos(t.toCid, t.toOrigin, t.toEnd, s.fromCid, s.fromOrigin, s.fromStart) >= 0
+			const tStartBeforeSpanEnd = comparePos(t.fromCid, t.fromOrigin, t.fromStart, s.toCid, s.toOrigin, s.toEnd) <= 0
+			if (tEndAfterSpanFrom && tStartBeforeSpanEnd) {
+				thoughtText = t.content
+				break
 			}
-			// #ifdef MP-WEIXIN
-			// 微信端系统强制弹出「内容已复制」提示且 showToast 参数无效，只保留系统提示、不叠加页面内提示
-			uni.setClipboardData({
-				data: content,
-				fail: () => {
-					showToast('复制失败，请重试')
-				}
-			})
-			// #endif
-			// #ifndef MP-WEIXIN
-			uni.setClipboardData({
-				data: content,
-				showToast: false,
-				success: () => {
-					showToast('已复制到剪贴板')
-				},
-				fail: () => {
-					showToast('复制失败，请重试')
-				}
-			})
-			// #endif
-			setTimeout(() => {
-				clearSelection()
-			}, 500)
-		} else if (action === 'idea') {
-			// 打开想法编辑器（多行输入框），确认后保存想法并同步划线；编辑期间保留选区
-			openThoughtEditor()
-		} else if (action === 'underline') {
-			// 跨段划线切换（各段记录到所在章）：已划线区域再划即取消；取消高亮，不做提示
-			const s = selSpan.value
-			if (s != null) {
-				applySpanUnderline(s, false)
-			}
-			clearSelection()
-		} else if (action === 'query') {
-			showToast('查询功能即将上线')
-			setTimeout(() => {
-				clearSelection()
-			}, 500)
-		} else if (action === 'share') {
-			// 打开分享卡片预览（快照选区与上下文，微信端冒泡清选区不影响）
-			openSharePreview()
 		}
-	}
+		return {
+			farBefore: before.slice(0, halfB),
+			nearBefore: before.slice(halfB),
+			quote: selectionText(),
+			nearAfter: after.slice(0, halfA),
+			farAfter: after.slice(halfA),
+			thoughtText: thoughtText,
+			source: chapterAt(s.toCid).title,
+			bookTitle: bookTitle.value
+		} as ShareQuoteCtx
+	})
+
+	/** 分享卡片头像：登录用户取其头像 key 映射的静态图，未登录/无头像用默认 hei */
+	const shareLogoSrc = computed(() : string => {
+		const info = userStore.userInfo
+		if (info != null && info.avatar_url.length > 0) {
+			return avatarPathOf(info.avatar_url)
+		}
+		return '/static/touxiang/hei.png'
+	})
 
 	/** 设置面板开关（Stitch: 展开时隐藏顶栏与听书球） */
 	function toggleSettings() : void {
@@ -3149,28 +1816,6 @@
 	function closeSettings() : void {
 		settingsOpen.value = false
 	}
-
-	/** 字号调节（Stitch: 12-36px 范围，实时作用于正文；字号变化触发重分页，页码钳制防空页） */
-	function changeFontSize(delta: number) : void {
-		const next = fontSize.value + delta
-		if (next < 12 || next > 36) {
-			return
-		}
-		fontSize.value = next
-		clampPageIndex()
-		clearSelection()
-		saveReaderSettings()
-	}
-
-	/** 背景色板切换（Stitch: 纯白/暖米黄，正文与标题色跟随；浮层重置为日间主题） */
-	/** 本地设置（字号/翻页模式/主题）持久化 */
-	type ReaderSettings = {
-		fontSize: number
-		pageTurn: string
-		theme: string
-	}
-
-	const STORAGE_SETTINGS = 'reader_settings'
 
 	/** 应用阅读主题（整组成组切换：正文/浮层/遮罩/控件色） */
 	function applyReaderTheme(key : string) : void {
@@ -3188,57 +1833,36 @@
 		titleColor.value = theme.titleColor
 		labelColor.value = theme.labelColor
 		mutedColor.value = theme.mutedColor
-		chapterTextColor.value = theme.chapterTextColor
-		menuTopBg.value = theme.menuTopBg
 		menuBottomBg.value = theme.menuBottomBg
-		menuBorderColor.value = theme.menuBorderColor
-		activeBlue.value = theme.activeBlue
 		maskBg.value = theme.maskBg
 		maskTextColor.value = theme.maskTextColor
 		popoverBg.value = theme.popoverBg
 		panelShadow.value = theme.panelShadow
-		if (key == 'night') {
-			// 夜间：控件灰底白字，与暗面板区分且文字突出
-			controlBg.value = '#3a3a3a'
-			controlBorder.value = 'rgba(255, 255, 255, 0.12)'
-			controlText.value = '#f3f4f6'
-		} else {
-			controlBg.value = '#ffffff'
-			controlBorder.value = '#e9e9e6'
-			controlText.value = '#0e0f0c'
+	}
+
+	/** 控制框设置变更应用（设置真源在组件：调节/持久化/提示内聚；页面同步镜像并应用渲染） */
+	function onControlChange(s : ReaderSettings) : void {
+		const fontChanged = s.fontSize != fontSize.value
+		const turnChanged = s.pageTurn != pageTurn.value
+		fontSize.value = s.fontSize
+		if (fontChanged) {
+			// 字号变化触发重分页，页码钳制防空页，并清除随排版失效的选区
+			clampPageIndex()
+			clearSelection()
 		}
-	}
-
-	function saveReaderSettings() : void {
-		const s = { fontSize: fontSize.value, pageTurn: pageTurn.value, theme: themeKey.value } as ReaderSettings
-		uni.setStorageSync(STORAGE_SETTINGS, JSON.stringify(s))
-	}
-
-	function changeReaderBg(bg: string, text: string) : void {
-		selectedBg.value = bg
-		applyReaderTheme(bg == READER_THEME_PAPER.readerBg ? 'paper' : 'light')
-		saveReaderSettings()
-	}
-
-	/** 翻页模式选择（Stitch: 单选高亮 + toast；切至滚动模式以当前章初始化章节序列，页脚转滚动显隐态） */
-	function selectPageTurn(mode: string) : void {
-		pageTurn.value = mode
-		if (mode == '滚动') {
-			scrollChapters.value = [currentChapterId.value]
-			scrollModeTop.value = 0
-			footerVisible.value = false
-		} else {
-			footerVisible.value = true
+		pageTurn.value = s.pageTurn
+		if (turnChanged) {
+			// 切至滚动模式以当前章初始化章节序列
+			if (s.pageTurn == '滚动') {
+				scrollChapters.value = [currentChapterId.value]
+				scrollModeTop.value = 0
+			}
+			clearSelection()
 		}
-		saveReaderSettings()
-		showToast('已切换至【' + mode + '】模式')
-	}
-
-	/** 日/夜切换（主题成组取自 utils/theme.uts） */
-	function toggleNightMode() : void {
-		applyReaderTheme(nightMode.value ? 'light' : 'night')
-		saveReaderSettings()
-		showToast(nightMode.value ? '已切换至夜晚模式' : '已切换至白天模式')
+		fontKey.value = s.fontKey
+		if (s.theme != themeKey.value) {
+			applyReaderTheme(s.theme)
+		}
 	}
 
 	/** 目录抽屉（Stitch: 遮罩渐显 + 抽屉顶部下滑 0.32s） */
@@ -3252,7 +1876,6 @@
 		// 与设置面板互斥：打开抽屉时收起设置面板与顶部控制栏
 		settingsOpen.value = false
 		menuVisible.value = false
-		drawerTab.value = 'catalog'
 		drawerOpen.value = true
 	}
 
@@ -3260,23 +1883,28 @@
 		drawerOpen.value = false
 	}
 
-	/** 目录正/倒序（Stitch: ⇅/↓↑ 图标 + toast） */
-	function toggleOrder() : void {
-		orderDesc.value = !orderDesc.value
-		showToast(orderDesc.value ? '已切换至倒序排列' : '已切换至正序排列')
-	}
-
-	/** 章节点击（Stitch: 高亮切换 + toast + 260ms 后收起抽屉） */
-	function selectChapter(ch: Chapter) : void {
-		goToChapter(ch.id, false)
-		if (ch.title.indexOf('第1章') >= 0) {
+	/** 章节点击（ReaderControl 目录卡片点击上行；高亮切换 + toast + 260ms 后收起抽屉） */
+	function selectChapterById(id: number) : void {
+		const isCurrent = id == currentChapterId.value
+		goToChapter(id, false)
+		if (isCurrent) {
 			showToast('当前正在阅读此章节')
 		} else {
-			showToast('已跳转至 ' + ch.title)
+			showToast('已跳转至 ' + chapterAt(id).title)
 		}
 		setTimeout(() => {
 			drawerOpen.value = false
 		}, 260)
+	}
+
+	/** 听书悬浮球点击（ReaderControl 上行，功能占位） */
+	function onListenTap() : void {
+		showToast('听书模式即将上线')
+	}
+
+	/** 控制框组件内部动作提示（如目录正/倒序切换） */
+	function onControlToast(msg: string) : void {
+		showToast(msg)
 	}
 </script>
 
@@ -3462,415 +2090,6 @@
 		border-radius: 4rpx;
 	}
 
-	/* 底部进度（浮于翻页层之上：尽量贴近屏幕底部，底部内边距内联绑定避让手势条；滚动模式透明度过渡淡入淡出；z 序高于页层、低于顶栏/面板/书签遮罩） */
-	.reader-footer {
-		position: absolute;
-		left: 0;
-		right: 0;
-		bottom: 0;
-		padding-top: 40rpx;
-		padding-left: 70rpx;
-		padding-right: 70rpx;
-		flex-direction: row;
-		align-items: center;
-		justify-content: space-between;
-		z-index: 20;
-		transition: opacity 0.3s ease-in-out;
-	}
-
-	.footer-left {
-		flex-direction: row;
-		align-items: center;
-		gap: 15rpx;
-	}
-
-	.footer-dot {
-		width: 12rpx;
-		height: 12rpx;
-		border-radius: $bai-rounded-pill;
-		background-color: rgba($bai-mute, 0.4);
-	}
-
-	.footer-time {
-		font-size: 25rpx;
-		color: $bai-mute;
-	}
-
-	.footer-right {
-		flex-direction: row;
-		align-items: center;
-		gap: 15rpx;
-	}
-
-	.footer-progress {
-		font-size: 25rpx;
-		color: $bai-mute;
-	}
-
-	.footer-percent {
-		font-size: 21rpx;
-		color: $bai-mute;
-		padding: 4rpx 12rpx;
-		border-radius: $bai-rounded-sm;
-		background-color: $bai-pale;
-	}
-
-	/* 顶部导航菜单（Stitch: 毛玻璃背景、底边框、底部圆角 16px，呼出/隐藏滑移动效） */
-	.menu-top {
-		position: absolute;
-		left: 0;
-		right: 0;
-		top: 0;
-		/* 内容行高与顶部内边距由内联绑定（状态栏起 40px 行，与胶囊垂直居中对齐） */
-		padding-left: 38rpx;
-		padding-right: 38rpx;
-		padding-bottom: 27rpx;
-		border-bottom-width: 1px;
-		border-bottom-style: solid;
-		border-bottom-left-radius: $bai-rounded-lg;
-		border-bottom-right-radius: $bai-rounded-lg;
-		z-index: 40;
-		transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.28s cubic-bezier(0.16, 1, 0.3, 1);
-	}
-
-	.menu-top-hidden {
-		transform: translateY(-110%);
-		opacity: 0;
-	}
-
-	.menu-top-inner {
-		flex-direction: row;
-		align-items: center;
-	}
-
-	.menu-top-left {
-		flex-direction: row;
-		align-items: center;
-		gap: 23rpx;
-	}
-
-	/* 返回按钮与其他子页统一：图标 80rpx */
-	.round-btn {
-		width: 80rpx;
-		height: 80rpx;
-		flex-direction: row;
-		align-items: center;
-		justify-content: center;
-	}
-
-	.round-btn-icon {
-		width: 80rpx;
-		height: 80rpx;
-	}
-
-	.book-name {
-		font-size: 29rpx;
-		font-weight: 600;
-	}
-
-	/* 书签列表（抽屉书签页签） */
-	.bookmark-empty {
-		padding: 64rpx 38rpx;
-		align-items: center;
-	}
-
-	.bookmark-empty-text {
-		font-size: 27rpx;
-		text-align: center;
-	}
-
-	/* 划线记录卡片（抽屉想法/划线页签）：左竖条装饰，文本颜色内联绑定跟随主题 */
-	.note-item {
-		margin: 15rpx 38rpx;
-		padding: 20rpx 25rpx;
-		border-left-width: 6rpx;
-		border-left-style: solid;
-		border-left-color: $bai-neutral;
-		border-radius: 8rpx;
-		background-color: rgba($bai-ink, 0.04);
-	}
-
-	/* 引用文本（原文摘录）弱化：弱色小字；想法内容为主文字 */
-	.note-item-text {
-		font-size: 25rpx;
-		line-height: 38rpx;
-	}
-
-	.note-item-content {
-		font-size: 27rpx;
-		line-height: 42rpx;
-		margin-top: 10rpx;
-	}
-
-	/* 想法查看（锚定划线上/下方只读浮层：透明遮罩点击关闭，面板位置/宽度内联绑定，内容超长内部滚动） */
-	.thought-view-mask {
-		position: fixed;
-		left: 0;
-		right: 0;
-		top: 0;
-		bottom: 0;
-		z-index: 92;
-	}
-
-	.thought-view-panel {
-		position: fixed;
-		/* 背景内联绑定（夜间深色浮层，与底部控制栏一致） */
-		border-radius: $bai-rounded-lg;
-		padding: 31rpx;
-		z-index: 93;
-	}
-
-	.thought-view-scroll {
-		flex-direction: column;
-	}
-
-	.thought-view-content {
-		font-size: 29rpx;
-		line-height: 46rpx;
-	}
-
-	/* 想法编辑器（多行输入框浮层：遮罩居中卡片，textarea 多行输入，取消/保存） */
-	.thought-mask {
-		position: fixed;
-		left: 0;
-		right: 0;
-		top: 0;
-		bottom: 0;
-		background-color: rgba($bai-ink, 0.5);
-		z-index: 95;
-		justify-content: center;
-		align-items: center;
-	}
-
-	.thought-dialog {
-		width: 590rpx;
-		border-radius: $bai-rounded-lg;
-		background-color: $bai-canvas;
-		padding: 31rpx 31rpx 23rpx 31rpx;
-	}
-
-	.thought-title {
-		font-size: 40rpx;
-		font-weight: 800;
-		color: $bai-ink;
-		margin-bottom: 19rpx;
-		text-align: center;
-	}
-
-	/* 引用块：超大双引号行内混排装饰（引号随字体度量自动基线对齐），无背景 */
-	.thought-quote {
-		margin-bottom: 15rpx;
-	}
-
-	.thought-quote-text {
-		font-size: 25rpx;
-		line-height: 38rpx;
-	}
-
-	.thought-quote-mark {
-		font-size: 56rpx;
-		font-weight: 800;
-		color: rgba($bai-ink, 0.18);
-	}
-
-	.thought-input {
-		width: 528rpx;
-		min-height: 160rpx;
-		font-size: 27rpx;
-		line-height: 42rpx;
-		color: $bai-ink;
-		padding: 19rpx;
-		background-color: $bai-pale;
-		border-radius: $bai-rounded-sm;
-	}
-
-	.thought-actions {
-		flex-direction: row;
-		justify-content: flex-end;
-		gap: 15rpx;
-		margin-top: 19rpx;
-	}
-
-	.thought-btn-cancel {
-		padding: 12rpx 38rpx;
-		border-radius: $bai-rounded-pill;
-		border: 1px solid $bai-pale;
-	}
-
-	.thought-btn-cancel-text {
-		font-size: 25rpx;
-		color: $bai-mute;
-	}
-
-	.thought-btn-confirm {
-		padding: 12rpx 38rpx;
-		border-radius: $bai-rounded-pill;
-		background-color: $bai-ink;
-	}
-
-	.thought-btn-confirm-text {
-		font-size: 25rpx;
-		color: $bai-on-primary;
-	}
-
-	/* 分享卡片预览（居中白卡：头像/引文渐出/想法/出处，固定日间配色便于分享） */
-	.share-mask {
-		position: fixed;
-		left: 0;
-		right: 0;
-		top: 0;
-		bottom: 0;
-		background-color: rgba($bai-ink, 0.6);
-		z-index: 96;
-		justify-content: center;
-		align-items: center;
-		/* 头像环一半出弹窗容器，沿途容器不裁剪 */
-		overflow: visible;
-	}
-
-	.share-pop {
-		position: relative;
-		flex-direction: column;
-		align-items: center;
-		overflow: visible;
-	}
-
-	.share-card {
-		width: 590rpx;
-		background-color: #ffffff;
-		border-radius: $bai-rounded-lg;
-		padding: 62rpx 31rpx 31rpx 31rpx;
-	}
-
-	/* 头像圆环包裹（环色与卡片一致）：绝对定位钉在卡片上边框正中，一半出卡，绘制于卡片上层 */
-	.share-card-logo-ring {
-		position: absolute;
-		top: -46rpx;
-		left: 50%;
-		margin-left: -46rpx;
-		width: 92rpx;
-		height: 92rpx;
-		border-radius: $bai-rounded-pill;
-		background-color: #ffffff;
-		padding: 6rpx;
-		z-index: 2;
-	}
-
-	.share-card-logo {
-		width: 80rpx;
-		height: 80rpx;
-		border-radius: $bai-rounded-pill;
-	}
-
-	.share-card-app {
-		font-size: 25rpx;
-		color: rgba(14, 15, 12, 0.45);
-		text-align: center;
-		margin-bottom: 23rpx;
-	}
-
-	.share-card-scroll {
-		flex-direction: column;
-	}
-
-	.share-card-text {
-		font-size: 25rpx;
-		line-height: 42rpx;
-	}
-
-	.share-ctx-far {
-		color: rgba(14, 15, 12, 0.18);
-	}
-
-	.share-ctx-near {
-		color: rgba(14, 15, 12, 0.4);
-	}
-
-	.share-quote-mark {
-		font-size: 40rpx;
-		font-weight: 800;
-		color: rgba(14, 15, 12, 0.25);
-	}
-
-	.share-quote-main {
-		font-size: 27rpx;
-		font-weight: 700;
-		color: #0e0f0c;
-	}
-
-	.share-card-thought {
-		margin-top: 23rpx;
-	}
-
-	.share-card-thought-text {
-		font-size: 25rpx;
-		line-height: 42rpx;
-		color: $bai-positive;
-	}
-
-	.share-card-source {
-		font-size: 21rpx;
-		color: rgba(14, 15, 12, 0.4);
-		margin-top: 23rpx;
-	}
-
-	.share-actions {
-		flex-direction: row;
-		gap: 15rpx;
-		margin-top: 31rpx;
-		width: 590rpx;
-	}
-
-	.share-action {
-		flex: 1;
-		height: 80rpx;
-		border-radius: $bai-rounded-pill;
-		background-color: #ffffff;
-		border: 1px solid rgba(14, 15, 12, 0.15);
-		align-items: center;
-		justify-content: center;
-	}
-
-	.share-action-text {
-		font-size: 27rpx;
-		color: #0e0f0c;
-	}
-
-	.share-action-share {
-		background-color: #0e0f0c;
-		border-color: #0e0f0c;
-	}
-
-	.share-action-text-primary {
-		color: #ffffff;
-	}
-
-	/* 分享卡片绘制画布（移出屏幕外，仅用于导出图片） */
-	.share-canvas {
-		position: fixed;
-		left: -9999px;
-		top: 0;
-		width: 375px;
-		height: 500px;
-	}
-
-	.bookmark-item {
-		flex-direction: row;
-		align-items: center;
-		padding: 27rpx 38rpx;
-	}
-
-	.bookmark-item-icon {
-		width: 38rpx;
-		height: 38rpx;
-	}
-
-	.bookmark-item-text {
-		margin-left: 23rpx;
-		font-size: 27rpx;
-		font-weight: 500;
-	}
-
 	/* 书签下拉/移除遮罩（顶部半透明提示条：高度内联绑定，随下拉从 0 长出，书签图标在遮罩内右上角随动作变化） */
 	.bookmark-mask {
 		position: absolute;
@@ -3911,469 +2130,10 @@
 		height: 84rpx;
 	}
 
+
 	.bookmark-mask-text {
 		font-size: 27rpx;
 		font-weight: 600;
 		color: $bai-on-primary;
 	}
-
-	/* 全局提示（页面正中卡片弹窗：视口居中、圆角卡片、日间墨底/夜间深灰底白字） */
-	.reader-toast {
-		position: fixed;
-		left: 50%;
-		top: 50%;
-		transform: translate(-50%, -50%);
-		z-index: 90;
-		max-width: 70%;
-	}
-
-	.reader-toast-text {
-		font-size: 27rpx;
-		line-height: 42rpx;
-		color: $bai-on-primary;
-		padding: 27rpx 38rpx;
-		border-radius: $bai-rounded-lg;
-		background-color: rgba($bai-ink, 0.85);
-		text-align: center;
-	}
-
-	/* 底部控制面板（令牌: 顶部圆角 xl 24px、毛玻璃、浮层提升阴影，呼出/隐藏滑移动效） */
-	.menu-bottom {
-		position: absolute;
-		left: 0;
-		right: 0;
-		bottom: 0;
-		border-top-left-radius: $bai-rounded-xl;
-		border-top-right-radius: $bai-rounded-xl;
-		z-index: 30;
-		/* 投影内联绑定（夜间切换白色微光） */
-		transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.28s cubic-bezier(0.16, 1, 0.3, 1);
-	}
-
-	.menu-bottom-hidden {
-		transform: translateY(110%);
-		opacity: 0;
-	}
-
-	/* 设置面板（Stitch: 顶部药丸指示器 + 字号/背景/翻页三行） */
-	.settings-panel {
-		padding: 23rpx 38rpx 31rpx 38rpx;
-	}
-
-	.settings-grip-row {
-		flex-direction: row;
-		justify-content: center;
-		padding-bottom: 23rpx;
-	}
-
-	.settings-grip {
-		width: 69rpx;
-		height: 8rpx;
-		border-radius: $bai-rounded-pill;
-		background-color: $bai-neutral;
-	}
-
-	.settings-row {
-		flex-direction: row;
-		align-items: center;
-		padding: 19rpx 0;
-	}
-
-	.settings-label {
-		font-size: 23rpx;
-		width: 69rpx;
-	}
-
-	.settings-row-body {
-		flex: 1;
-		flex-direction: row;
-		align-items: center;
-		justify-content: space-between;
-		margin-left: 15rpx;
-	}
-
-	.stepper-group {
-		flex-direction: row;
-		align-items: center;
-		gap: 23rpx;
-	}
-
-	.stepper-btn {
-		width: 154rpx;
-		height: 69rpx;
-		border-radius: $bai-rounded-pill;
-		border: 1px solid $bai-pale;
-		background-color: $bai-canvas;
-		flex-direction: row;
-		align-items: center;
-		justify-content: center;
-	}
-
-	.stepper-text {
-		font-size: 34rpx;
-		font-weight: 700;
-	}
-
-	.stepper-val {
-		font-size: 27rpx;
-		font-weight: 700;
-		min-width: 46rpx;
-		text-align: center;
-	}
-
-	.font-btn {
-		flex-direction: row;
-		align-items: center;
-		gap: 8rpx;
-		height: 69rpx;
-		padding: 0 27rpx;
-		border-radius: $bai-rounded-pill;
-		border: 1px solid $bai-pale;
-		background-color: $bai-canvas;
-	}
-
-	.font-btn-text {
-		font-size: 23rpx;
-	}
-
-	/* 字体选择列表（点字体按钮展开：选项 2×2 胶囊 + 右下保存按钮） */
-	.font-select {
-		padding: 8rpx 0 23rpx 92rpx;
-		flex-direction: column;
-	}
-
-	.font-select-list {
-		flex-direction: row;
-		flex-wrap: wrap;
-		gap: 15rpx;
-	}
-
-	.font-option {
-		width: 260rpx;
-	}
-
-	.font-save-row {
-		margin-top: 19rpx;
-		flex-direction: row;
-		justify-content: flex-end;
-		gap: 15rpx;
-	}
-
-	.font-cancel-btn {
-		padding: 12rpx 38rpx;
-		border-radius: $bai-rounded-pill;
-		border: 1px solid $bai-pale;
-	}
-
-	.font-cancel-btn-text {
-		font-size: 23rpx;
-		font-weight: 600;
-		color: $bai-mute;
-	}
-
-	.font-save-btn {
-		padding: 12rpx 38rpx;
-		border-radius: $bai-rounded-pill;
-		background-color: $bai-ink;
-		border: 1px solid rgba($bai-on-primary, 0.2);
-	}
-
-	.font-save-btn-text {
-		font-size: 23rpx;
-		font-weight: 600;
-		color: $bai-on-primary;
-	}
-
-	.swatch-group {
-		flex-direction: row;
-		align-items: center;
-		gap: 23rpx;
-	}
-
-	.swatch {
-		width: 154rpx;
-		height: 62rpx;
-		border-radius: $bai-rounded-pill;
-	}
-
-	.swatch-white {
-		border: 1px solid $bai-pale;
-	}
-
-	.swatch-milky {
-		background-color: $bai-paper;
-		border: 1px solid $bai-pale;
-	}
-
-	.swatch-active {
-		border: 4rpx solid $bai-positive;
-	}
-
-	.page-turn-group {
-		flex: 1;
-		flex-direction: row;
-		gap: 15rpx;
-		margin-left: 8rpx;
-	}
-
-	.page-turn-btn {
-		flex: 1;
-		height: 62rpx;
-		border-radius: $bai-rounded-pill;
-		flex-direction: row;
-		align-items: center;
-		justify-content: center;
-	}
-
-	.page-turn-idle {
-		border: 1px solid $bai-pale;
-		background-color: $bai-canvas;
-	}
-
-	.page-turn-active {
-		border: 4rpx solid $bai-positive;
-		background-color: $bai-positive-tint;
-	}
-
-	.page-turn-text {
-		font-size: 23rpx;
-		color: $bai-ink;
-	}
-
-	.page-turn-text-active {
-		font-weight: 500;
-		color: $bai-positive;
-	}
-
-	/* 听书悬浮球（Stitch: 64px 黑底圆，悬浮于底栏上方 96px，右 20px） */
-	.listen-wrap {
-		position: relative;
-		flex-direction: row;
-		justify-content: flex-end;
-		padding-right: 38rpx;
-	}
-
-	.listen-btn {
-		position: absolute;
-		right: 38rpx;
-		bottom: 185rpx;
-		width: 123rpx;
-		height: 123rpx;
-		border-radius: $bai-rounded-pill;
-		background-color: $bai-ink;
-		border: 1px solid rgba($bai-on-primary, 0.15);
-		flex-direction: row;
-		align-items: center;
-		justify-content: center;
-		box-shadow: $bai-shadow-fab;
-	}
-
-	.listen-text {
-		font-size: 54rpx;
-		font-weight: 900;
-		color: $bai-on-primary;
-	}
-
-	/* 底部三项导航（Stitch: 三等分，图标 20px + 文字 11px） */
-	.bottom-nav {
-		flex-direction: row;
-		padding: 23rpx 46rpx 54rpx 46rpx;
-	}
-
-	.bottom-nav-btn {
-		flex: 1;
-		flex-direction: column;
-		align-items: center;
-		gap: 8rpx;
-	}
-
-	.bottom-nav-icon {
-		width: 38rpx;
-		height: 38rpx;
-	}
-
-	.bottom-nav-text {
-		font-size: 21rpx;
-	}
-
-	/* 划词手柄（选区两端水滴形大手柄：圆头+三角尖，色取正蓝与高亮呼应；热区 76rpx 大于视觉体 50rpx 便于拖动，起点柄贴行顶、终点柄贴行底） */
-	.sel-handle {
-		position: fixed;
-		width: 76rpx;
-		height: 76rpx;
-		flex-direction: column;
-		align-items: center;
-		z-index: 55;
-	}
-
-	.sel-handle-start {
-		justify-content: flex-start;
-	}
-
-	.sel-handle-end {
-		justify-content: flex-end;
-	}
-
-	.sel-handle-drop {
-		width: 38rpx;
-		height: 38rpx;
-		border-radius: $bai-rounded-pill;
-		background-color: $bai-positive;
-	}
-
-	.sel-handle-tip {
-		width: 0;
-		height: 0;
-		border-left-width: 12rpx;
-		border-left-style: solid;
-		border-left-color: transparent;
-		border-right-width: 12rpx;
-		border-right-style: solid;
-		border-right-color: transparent;
-	}
-
-	.sel-handle-tip-down {
-		border-top-width: 16rpx;
-		border-top-style: solid;
-		border-top-color: $bai-positive;
-		margin-top: -4rpx;
-	}
-
-	.sel-handle-tip-up {
-		border-bottom-width: 16rpx;
-		border-bottom-style: solid;
-		border-bottom-color: $bai-positive;
-		margin-bottom: -4rpx;
-	}
-
-	/* 划词气泡（Stitch: 黑底圆角 12px 内边距 12x8，操作项竖排图标+文字；位置由内联绑定——水平对准选区中心、垂直置于选区上/下侧，箭头随朝向指向选区） */
-	.selection-popover {
-		position: fixed;
-		z-index: 60;
-	}
-
-	.popover-body {
-		position: relative;
-		flex-direction: row;
-		align-items: center;
-		gap: 6rpx;
-		padding: 12rpx 15rpx;
-		/* 背景内联绑定（夜间提亮一档与暗底区分，日间墨黑） */
-		border-radius: $bai-rounded-md;
-	}
-
-	/* 双行布局（屏宽不足以单行展开时）：行靠左、各行与按钮宽度均自适应内容，行间水平细分隔线（stretch 横贯） */
-	.popover-body-two {
-		flex-direction: column;
-		align-items: flex-start;
-		gap: 0;
-	}
-
-	.popover-row {
-		flex-direction: row;
-		align-items: center;
-		gap: 6rpx;
-	}
-
-	.popover-divider-h {
-		align-self: stretch;
-		height: 1px;
-		margin: 10rpx 15rpx;
-		background-color: rgba($bai-on-primary, 0.2);
-	}
-
-	.popover-btn {
-		flex-direction: column;
-		align-items: center;
-		gap: 6rpx;
-		padding: 6rpx 14rpx;
-	}
-
-	.popover-icon {
-		width: 31rpx;
-		height: 31rpx;
-	}
-
-	.popover-text {
-		font-size: 21rpx;
-		font-weight: 500;
-		color: $bai-on-primary;
-	}
-
-	.popover-divider {
-		width: 1px;
-		height: 46rpx;
-		background-color: rgba($bai-on-primary, 0.2);
-	}
-
-	/* 气泡箭头（体旁旋转 45° 实色小方块：一半与体重叠（同色无缝）、露出一半形成三角尖，规避 border 三角 hack 与体圆角裁剪；水平 margin-left 内联绑定指向按住位置，颜色内联绑定与体一致） */
-	.popover-arrow {
-		width: 20rpx;
-		height: 20rpx;
-		transform: rotate(45deg);
-	}
-
-	/* 气泡在选区上方：方块贴体底，上移半格与体重叠，露出下半菱形为朝下尖 */
-	.popover-arrow-below {
-		margin-top: -10rpx;
-	}
-
-	/* 气泡在选区下方：方块贴体顶，下移半格与体重叠，露出下半菱形为朝上尖 */
-	.popover-arrow-above {
-		margin-bottom: -10rpx;
-	}
-
-	/* 目录抽屉（控制栏内容块：与设置面板一致随控制栏从底部弹出，高度内联绑定恢复独立浮层时期尺寸；顶部间距与设置面板一致） */
-	.drawer-panel {
-		padding-top: 23rpx;
-		flex-direction: column;
-	}
-
-	.drawer-header {
-		flex-direction: row;
-		align-items: center;
-		gap: 46rpx;
-		padding: 31rpx 38rpx 23rpx 38rpx;
-	}
-
-	.drawer-tab-active {
-		flex-direction: row;
-		align-items: flex-end;
-		gap: 4rpx;
-		padding-bottom: 4rpx;
-	}
-
-	.drawer-tab-title {
-		font-size: 38rpx;
-		font-weight: 700;
-		color: $bai-positive;
-	}
-
-	.drawer-tab-sort {
-		font-size: 27rpx;
-		line-height: 27rpx;
-		font-weight: 600;
-		color: $bai-positive;
-	}
-
-	.drawer-tab-plain {
-		font-size: 33rpx;
-		color: $bai-mute;
-	}
-
-	.drawer-list {
-		flex: 1;
-	}
-
-	.chapter-item {
-		padding: 27rpx 38rpx;
-	}
-
-	.chapter-item-text {
-		font-size: 29rpx;
-	}
-
-	.chapter-item-text-active {
-		font-weight: 600;
-	}
-</style>
+	</style>
