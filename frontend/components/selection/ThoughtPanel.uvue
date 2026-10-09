@@ -1,0 +1,330 @@
+<template>
+	<view class="thought-root">
+		<!-- 想法查看（锚定划线下方/上方只读浮层：仅展示想法内容，超长内部滚动，点击任意处关闭；宿主经 ref 调 showThoughtView 打开） -->
+		<view v-if="cardOpen" class="thought-view-mask" @click="closeCard">
+			<view
+				class="thought-view-panel"
+				:style="'left:' + cardLeft + 'px;top:' + cardTop + 'px;width:' + cardW + 'px;background-color:' + panelBg + ';box-shadow:' + shadow"
+				@click="closeCard"
+			>
+				<scroll-view scroll-y class="thought-view-scroll" :style="'max-height:' + cardMaxH + 'px'">
+					<text class="thought-view-content" :style="'color:' + contentColor">{{ cardContent }}</text>
+				</scroll-view>
+			</view>
+		</view>
+
+		<!-- 想法编辑器（多行输入框浮层：上方双引号引用高亮文本，确认后保存想法到本地存储并同步划线；点击拦截已移除避免微信端 textarea 聚焦失效） -->
+		<view v-if="editorOpen" class="thought-mask">
+			<view class="thought-dialog">
+				<text class="thought-title">写想法</text>
+				<view class="thought-quote">
+					<text class="thought-quote-text" :style="'color:' + quoteColor"><text class="thought-quote-mark">“</text>{{ editorQuote }}<text class="thought-quote-mark">”</text></text>
+				</view>
+				<textarea
+					class="thought-input"
+					v-model="editorInput"
+					placeholder="写下你的想法…"
+					:maxlength="10000"
+					:focus="editorFocus"
+					auto-height
+					:style="'max-height:' + editorMaxH + 'px'"
+				/>
+				<view class="thought-actions">
+					<view class="thought-btn-cancel" @click="cancelEditor">
+						<text class="thought-btn-cancel-text">取消</text>
+					</view>
+					<view class="thought-btn-confirm" @click="confirmEditor">
+						<text class="thought-btn-confirm-text">保存</text>
+					</view>
+				</view>
+			</view>
+		</view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { getCurrentInstance } from 'vue'
+	import { SpanSeg, Thought, applySpanUnderlineToStorage, saveThought } from '@/utils/readerTypes.uts'
+
+	/**
+	 * ThoughtPanel —— 想法子组件（查看卡片 + 写想法编辑器合并内聚）
+	 * --------------------------------------------------------------------------
+	 * 查看卡片：点击划线段命中想法时由宿主经 ref 调 showThoughtView 打开，
+	 * 定位（划线上/下方择优）、实测高度校正（.in 自身实例查询）、关闭内聚，
+	 * 关闭经 emit('thoughtViewClosed') 通知宿主复位点击协调标志。
+	 * 写想法编辑器：气泡「写想法」按钮经 ref 调 openEditor(quote) 打开
+	 * （quote 为宿主选区文本快照），确认后想法写入 reader_thoughts、选区区间
+	 * 确保划线（add=true 并入）一并持久化，emit('sync') 通知宿主重读、
+	 * emit('dismiss') 清选区；取消仅 emit('dismiss')。
+	 */
+	const props = defineProps<{
+		/** 选区覆盖段序列（宿主按选区与各章段落展开；想法区间取首末项） */
+		segs: SpanSeg[]
+		/** 引用文本颜色（随主题，编辑器引用块） */
+		quoteColor: string
+		/** 查看卡片面板底色（随主题，夜间深色浮层） */
+		panelBg: string
+		/** 查看卡片内容文字色（随主题） */
+		contentColor: string
+		/** 浮层投影（随主题，查看卡片沿用底栏投影） */
+		shadow: string
+		/** 页面宽（px，查看卡片宽度与水平定位） */
+		pageW: number
+		/** 页面高（px，查看卡片定位与编辑器输入框最大高度） */
+		pageH: number
+		/** 正文区顶部起点（px，查看卡片上置下界） */
+		navTop: number
+	}>()
+	const emit = defineEmits(['sync', 'dismiss', 'toast', 'thoughtViewClosed'])
+
+	/** ===== 想法查看（点击划线弹出的只读卡片） ===== */
+	const cardOpen = ref(false)
+	const cardLeft = ref(0)
+	const cardTop = ref(0)
+	/** 面板宽度（px，视口坐标）：左右留边后的满宽 */
+	const cardW = ref(0)
+	/** 面板内容最大高度（px，屏高的 35%，超出内部滚动） */
+	const cardMaxH = computed(() : number => props.pageH * 0.35)
+	const cardContent = ref('')
+	let cardH = 0
+	const CARD_EST_H = 150
+	/** 打开时锚定的划线段视口上下界（实测校正后重定位用） */
+	let cardSelBottom = 0
+	let cardSelTop = 0
+
+	/** 按划线段视口几何定位：下方放得下置下方；否则取上下空间宽裕侧并钳制不出屏 */
+	function positionCard(selBottom : number, selTop : number) : void {
+		const margin = uni.upx2px(24)
+		cardLeft.value = margin
+		cardW.value = props.pageW - margin * 2
+		const gap = uni.upx2px(16)
+		const h = cardH > 0 ? cardH : CARD_EST_H
+		const bottomSpace = props.pageH - selBottom - gap - h
+		const topSpace = selTop - gap - h
+		if (bottomSpace >= uni.upx2px(60) || bottomSpace >= topSpace) {
+			cardTop.value = Math.min(selBottom + gap, props.pageH - h - uni.upx2px(40))
+		} else {
+			cardTop.value = Math.max(props.navTop, selTop - gap - h)
+		}
+	}
+
+	/** 面板显示后实测高度并校正垂直定位（想法长度不同高度不同，每次打开都测；组件内查询须 .in 实例） */
+	function measureCard() : void {
+		uni.createSelectorQuery().in(getCurrentInstance()!.proxy!).select('.thought-view-panel').boundingClientRect((rect : NodeInfo | null) : void => {
+			if (rect != null && rect.height > 0) {
+				cardH = rect.height
+				positionCard(cardSelBottom, cardSelTop)
+			}
+		}).exec()
+	}
+
+	/** 打开想法查看卡片（宿主页面点击划线段命中想法时调用） */
+	function showThoughtView(quote : string, content : string, selBottom : number, selTop : number) : void {
+		cardSelBottom = selBottom
+		cardSelTop = selTop
+		cardContent.value = content
+		positionCard(selBottom, selTop)
+		cardOpen.value = true
+		setTimeout(() => {
+			measureCard()
+		}, 80)
+	}
+
+	/** 关闭想法查看卡片（供宿主在清选区/字号变化等场景联动收起） */
+	function hideThoughtView() : void {
+		cardOpen.value = false
+	}
+
+	/** 点击遮罩/面板任意处关闭：通知宿主复位点击协调标志 */
+	function closeCard() : void {
+		cardOpen.value = false
+		emit('thoughtViewClosed')
+	}
+
+	/** ===== 写想法（编辑器浮层） ===== */
+	const editorOpen = ref(false)
+	const editorInput = ref('')
+	/** textarea 聚焦控制：微信端打开后延时置 true 拉起键盘（渲染期设置无效） */
+	const editorFocus = ref(false)
+	/** 打开时的划线文本快照（微信端冒泡清选区不影响） */
+	const editorQuote = ref('')
+	/** 想法输入框最大高度（px）：屏高的 40%，auto-height 随内容增长到此封顶（内部滚动） */
+	const editorMaxH = computed(() : number => props.pageH * 0.4)
+
+	/** 打开写想法编辑器（宿主气泡「写想法」按钮调用，quote 为选区文本快照） */
+	function openEditor(quote : string) : void {
+		editorQuote.value = quote
+		editorInput.value = ''
+		editorFocus.value = false
+		editorOpen.value = true
+		setTimeout(() => {
+			editorFocus.value = true
+		}, 150)
+	}
+
+	function confirmEditor() : void {
+		const content = editorInput.value.trim()
+		if (content.length == 0) {
+			emit('toast', '请输入想法内容')
+			return
+		}
+		const segs = props.segs
+		if (segs.length == 0) {
+			closeEditor()
+			return
+		}
+		// 想法选区区间 = 段序列首末项（起点段起点字符 → 终点段终点字符）
+		const first = segs[0]
+		const last = segs[segs.length - 1]
+		saveThought({
+			fromCid: first.cid,
+			fromOrigin: first.origin,
+			fromStart: first.start,
+			toCid: last.cid,
+			toOrigin: last.origin,
+			toEnd: last.end,
+			quote: editorQuote.value,
+			content: content
+		} as Thought)
+		// 同步将选中区域划线（已划线则保持）并持久化
+		applySpanUnderlineToStorage(segs, true)
+		closeEditor()
+		emit('sync')
+		emit('dismiss')
+	}
+
+	/** 取消写想法：关闭编辑器并清除选区 */
+	function cancelEditor() : void {
+		closeEditor()
+		emit('dismiss')
+	}
+
+	function closeEditor() : void {
+		editorOpen.value = false
+		editorFocus.value = false
+		editorInput.value = ''
+	}
+
+	defineExpose({
+		showThoughtView,
+		hideThoughtView,
+		openEditor
+	})
+</script>
+
+<style lang="scss">
+	/* 组件根：零尺寸占位（fixed 子浮层相对页面视口定位） */
+	.thought-root {
+		width: 0;
+		height: 0;
+	}
+
+	/* 想法查看（锚定划线上/下方只读浮层：透明遮罩点击关闭，面板位置/宽度内联绑定，内容超长内部滚动） */
+	.thought-view-mask {
+		position: fixed;
+		left: 0;
+		right: 0;
+		top: 0;
+		bottom: 0;
+		z-index: 92;
+	}
+
+	.thought-view-panel {
+		position: fixed;
+		border-radius: $bai-rounded-lg;
+		padding: 31rpx 38rpx;
+	}
+
+	.thought-view-scroll {
+		flex-direction: column;
+	}
+
+	.thought-view-content {
+		font-size: 29rpx;
+		line-height: 46rpx;
+	}
+
+	/* 想法编辑器（多行输入框浮层：遮罩居中卡片，textarea 多行输入，取消/保存） */
+	.thought-mask {
+		position: fixed;
+		left: 0;
+		right: 0;
+		top: 0;
+		bottom: 0;
+		background-color: rgba($bai-ink, 0.5);
+		z-index: 95;
+		justify-content: center;
+		align-items: center;
+	}
+
+	.thought-dialog {
+		width: 590rpx;
+		border-radius: $bai-rounded-lg;
+		background-color: $bai-canvas;
+		padding: 31rpx 31rpx 23rpx 31rpx;
+	}
+
+	.thought-title {
+		font-size: 40rpx;
+		font-weight: 800;
+		color: $bai-ink;
+		margin-bottom: 19rpx;
+		text-align: center;
+	}
+
+	/* 引用块：超大双引号行内混排装饰（引号随字体度量自动基线对齐），无背景 */
+	.thought-quote {
+		margin-bottom: 15rpx;
+	}
+
+	.thought-quote-text {
+		font-size: 25rpx;
+		line-height: 38rpx;
+	}
+
+	.thought-quote-mark {
+		font-size: 56rpx;
+		font-weight: 800;
+		color: rgba($bai-ink, 0.18);
+	}
+
+	.thought-input {
+		width: 528rpx;
+		min-height: 160rpx;
+		font-size: 27rpx;
+		line-height: 42rpx;
+		color: $bai-ink;
+		padding: 19rpx;
+		background-color: $bai-pale;
+		border-radius: $bai-rounded-sm;
+	}
+
+	.thought-actions {
+		flex-direction: row;
+		justify-content: flex-end;
+		gap: 15rpx;
+		margin-top: 19rpx;
+	}
+
+	.thought-btn-cancel {
+		padding: 12rpx 38rpx;
+		border-radius: $bai-rounded-pill;
+		border: 1px solid $bai-pale;
+	}
+
+	.thought-btn-cancel-text {
+		font-size: 25rpx;
+		color: $bai-mute;
+	}
+
+	.thought-btn-confirm {
+		padding: 12rpx 38rpx;
+		border-radius: $bai-rounded-pill;
+		background-color: $bai-ink;
+	}
+
+	.thought-btn-confirm-text {
+		font-size: 25rpx;
+		color: $bai-on-primary;
+	}
+</style>

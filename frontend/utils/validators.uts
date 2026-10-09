@@ -1,0 +1,81 @@
+/**
+ * 表单校验规则统一收口（前端侧）
+ * --------------------------------------------------------------------------
+ * 规则与 auth 服务后端保持一致：用户名 2-15 位（中英文数字）、
+ * 密码 8-20 位且含大小写字母/数字/特殊符号至少三种、验证码 6 位数字、邮箱格式。
+ * 各校验函数返回错误文案（空串表示通过），供 blur 校验与提交前校验共用。
+ */
+
+/** 用户名：2-15 个字符，仅限中文、英文及数字 */
+export function validateUsername(v : string) : string {
+	if (v.length == 0) {
+		return '请输入用户名'
+	}
+	if (v.length < 2 || v.length > 15) {
+		return '用户名长度需为 2-15 个字符'
+	}
+	if (!/^[\u4e00-\u9fa5a-zA-Z0-9]+$/.test(v)) {
+		return '用户名仅允许中文、英文及数字字符'
+	}
+	return ''
+}
+
+/** 密码：8-20 位，含大小写字母、数字、特殊符号中至少三种 */
+export function validatePassword(v : string) : string {
+	if (v.length == 0) {
+		return '请输入密码'
+	}
+	if (v.length < 8 || v.length > 20) {
+		return '密码长度需为 8-20 位'
+	}
+	let categories = 0
+	if (/[a-z]/.test(v)) {
+		categories++
+	}
+	if (/[A-Z]/.test(v)) {
+		categories++
+	}
+	if (/[0-9]/.test(v)) {
+		categories++
+	}
+	if (/[^a-zA-Z0-9]/.test(v)) {
+		categories++
+	}
+	if (categories < 3) {
+		return '密码需包含大小写字母、数字、特殊符号中的至少三种'
+	}
+	return ''
+}
+
+/** 确认密码：非空校验 + 与参照密码一致性比对 */
+export function validateConfirmPassword(v : string, reference : string) : string {
+	if (v.length == 0) {
+		return '请再次输入密码'
+	}
+	if (v !== reference) {
+		return '两次密码不一致'
+	}
+	return ''
+}
+
+/** 邮箱格式 */
+export function validateEmail(v : string) : string {
+	if (v.length == 0) {
+		return '请输入邮箱地址'
+	}
+	if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) {
+		return '邮箱格式不正确'
+	}
+	return ''
+}
+
+/** 验证码：6 位数字 */
+export function validateCode(v : string) : string {
+	if (v.length == 0) {
+		return '请输入验证码'
+	}
+	if (!/^\d{6}$/.test(v)) {
+		return '验证码为 6 位数字'
+	}
+	return ''
+}

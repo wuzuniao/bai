@@ -1,0 +1,67 @@
+/**
+ * 翻页层样式（纯函数）：平移/覆盖/仿真（APP 端）三种模式的层位移、层级与遮罩透明度规则
+ * 页面仅持 computed 薄壳（响应式依赖经参数传入自动追踪），翻页几何规则单点维护。
+ */
+
+/** 当前页层样式：按翻页模式产生位移与层级（跟手与回弹共用） */
+export function flipCurrentLayerStyle(mode : string, dir : number, offset : number, active : boolean, settling : boolean) : string {
+	if (!active && !settling) {
+		return ''
+	}
+	if (mode == '平移') {
+		if (dir == 0) {
+			// 落定帧不产生位移（避免新页从边缘重新滑入一道边界），与跟手末帧满屏内容无缝衔接
+			return 'z-index:1'
+		}
+		return 'transform:translateX(' + (dir * offset * -1) + 'px);z-index:1'
+	}
+	// #ifdef APP
+	if (mode == '仿真') {
+		// 仿真（APP 端专属实现）：当前页静置下层，目标页连同卷筒/投影自页外滑入覆盖
+		return 'z-index:1'
+	}
+	// #endif
+	if (mode == '覆盖') {
+		// 覆盖：当前页静置底层，其上暗化遮罩随滑动由浅入深（被覆盖越多越深），由目标页滑入覆盖
+		return 'z-index:1'
+	}
+	return ''
+}
+
+/** 上一页层样式：常驻屏左外预渲染（pageW 未就绪时先透明），回翻跟手/补间时作为目标层滑入（覆盖/仿真/平移通用） */
+export function flipPrevLayerStyle(pageW : number, dir : number, offset : number, active : boolean) : string {
+	if (pageW <= 0) {
+		return 'opacity:0;z-index:2'
+	}
+	if (active && dir == -1) {
+		return 'transform:translateX(' + (offset - pageW) + 'px);z-index:2'
+	}
+	return 'transform:translateX(-' + pageW + 'px);z-index:2'
+}
+
+/** 下一页层样式：常驻屏右外预渲染，前翻跟手/补间时作为目标层滑入（覆盖/仿真/平移通用） */
+export function flipNextLayerStyle(pageW : number, dir : number, offset : number, active : boolean) : string {
+	if (pageW <= 0) {
+		return 'opacity:0;z-index:2'
+	}
+	if (active && dir == 1) {
+		return 'transform:translateX(' + (pageW - offset) + 'px);z-index:2'
+	}
+	return 'transform:translateX(' + pageW + 'px);z-index:2'
+}
+
+/** 覆盖模式遮罩透明度（滑入的下一页上，仅前翻）：出现越多遮罩越浅，落定归零 */
+export function flipCoverNextOpacity(pageW : number, offset : number) : number {
+	if (pageW <= 0) {
+		return 0
+	}
+	return 1 - Math.min(offset / pageW, 1)
+}
+
+/** 覆盖模式遮罩透明度（当前页上，仅回翻）：被上一页取代越多越深 */
+export function flipCoverCurrentOpacity(pageW : number, offset : number) : number {
+	if (pageW <= 0) {
+		return 0
+	}
+	return Math.min(offset / pageW, 1)
+}

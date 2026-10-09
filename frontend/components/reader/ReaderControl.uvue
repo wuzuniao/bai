@@ -1,0 +1,357 @@
+<template>
+	<view class="control-root">
+		<!-- 顶部导航菜单（Stitch: 返回/书名，呼出态从顶部滑入；内容行与小程序胶囊同行） -->
+		<view
+			class="menu-top"
+			:class="visible && !settingsOpen ? '' : 'menu-top-hidden'"
+			:style="'background-color:' + theme.menuTopBg + ';border-color:' + theme.menuBorderColor + ';padding-top:' + navTop + 'px'"
+		>
+			<view class="menu-top-inner" :style="'height:' + navHeight + 'px'">
+				<view class="menu-top-left">
+					<view class="round-btn" @click="onBack">
+						<image class="round-btn-icon" :src="themeIcon('arrow-back')" />
+					</view>
+					<text class="book-name" :style="'color:' + theme.titleColor">{{ bookTitle }}</text>
+				</view>
+			</view>
+		</view>
+
+		<!-- 底部控制面板（Stitch: 设置面板 + 听书悬浮球 + 三项导航，呼出态从底部滑入；抽屉打开时保持显示，三控制项不随子项变化） -->
+		<view
+			class="menu-bottom"
+			:class="visible || drawerOpen ? '' : 'menu-bottom-hidden'"
+			:style="'background-color:' + theme.menuBottomBg + ';border-color:' + theme.menuBorderColor + ';box-shadow:' + theme.panelShadow"
+		>
+			<!-- 目录抽屉（子组件化：页签/排序/目录/想法列表自管理，书签真源在其内嵌 BookmarkPanel；
+			     常挂载 v-show 控制显隐——书签增删 ref 转发链常可用） -->
+			<DrawerPanel
+				ref="drawerPanelRef"
+				v-show="drawerOpen"
+				:open="drawerOpen"
+				:drawer-height="drawerPanelHeight"
+				:theme="theme"
+				:night="nightMode"
+				:chapters="chapters"
+				:active-chapter-id="activeChapterId"
+				:notes="notes"
+				@select-chapter="onSelectChapter"
+				@go-note="onGoNote"
+				@go-bookmark="onGoBookmark"
+				@toast="onPanelToast"
+				@changed="onBookmarksChanged"
+			/>
+			<!-- 设置面板（子组件化：字号/字体/背景/翻页/日夜真源与持久化内聚；
+			     常挂载 v-show 控制显隐——日夜切换 ref 调用常可用） -->
+			<SettingsPanel
+				ref="settingsPanelRef"
+				v-show="settingsOpen"
+				:open="settingsOpen"
+				@change="onSettingsChange"
+				@toast="onPanelToast"
+			/>
+			<!-- 听书悬浮球（Stitch: 黑底 64px 圆，"听" 28px/900，设置/抽屉展开时隐藏） -->
+			<view v-if="!settingsOpen && !drawerOpen" class="listen-wrap">
+				<view class="listen-btn" @click="onListen">
+					<text class="listen-text">听</text>
+				</view>
+			</view>
+			<!-- 底部三项导航（Stitch: 目录/夜间/设置） -->
+			<view class="bottom-nav">
+				<view class="bottom-nav-btn" @click="onToggleDrawer">
+					<image class="bottom-nav-icon" :src="themeIcon('reader-catalog')" />
+					<text class="bottom-nav-text" :style="'color:' + theme.titleColor">目录</text>
+				</view>
+				<view class="bottom-nav-btn" @click="toggleNightMode">
+					<image class="bottom-nav-icon" :src="nightMode ? '/static/icons/reader-sun.svg' : themeIcon('reader-moon')" />
+					<text class="bottom-nav-text" :style="'color:' + theme.titleColor">{{ nightMode ? '白天' : '夜晚' }}</text>
+				</view>
+				<view class="bottom-nav-btn" @click="onToggleSettings">
+					<image class="bottom-nav-icon" :src="themeIcon('reader-settings')" />
+					<text class="bottom-nav-text" :style="'color:' + theme.titleColor">设置</text>
+				</view>
+			</view>
+		</view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { READER_THEME_LIGHT, READER_THEME_NIGHT, READER_THEME_PAPER, ReaderTheme } from '@/utils/theme.uts'
+	import { Chapter, NoteRecord, Bookmark, ReaderSettings, loadSettings } from '@/utils/readerTypes.uts'
+	import DrawerPanel from '@/components/reader/DrawerPanel.uvue'
+	import SettingsPanel from '@/components/reader/SettingsPanel.uvue'
+
+	/**
+	 * ReaderControl —— 阅读页上下控制框（框架层，可复用组件）
+	 * --------------------------------------------------------------
+	 * 职责：单击正文呼出的顶部导航菜单（返回/书名）与底部控制面板的
+	 * 容器框架（呼出/隐藏滑移、尺寸避让）+ 听书悬浮球 + 目录/夜间/设置
+	 * 三项导航 + 主题派生渲染 + 子组件事件与 ref 的逐层转发。
+	 * 设置真源在 SettingsPanel 子组件（字号/字体/背景/翻页/日夜的调节、
+	 * 持久化与提示内聚）：面板 change 事件经本组件更新主题镜像并上行页面；
+	 * 三项导航的日夜切换经 ref 调面板 setTheme（真源唯一写入口）。
+	 * 书签真源在抽屉内嵌的 BookmarkPanel 子组件：宿主下拉/上推手势落定
+	 * 经本组件 ref 调 addBookmark/removeBookmark（转发 DrawerPanel→BookmarkPanel），
+	 * 变更经 bookmarksChanged 事件通知页面重读（旗帜渲染）。
+	 * 目录点击/书签跳转/想法卡片跳转经事件上行（导航与正文渲染耦合宿主）。
+	 */
+	const props = defineProps<{
+		/** 菜单呼出态（单击正文空白切换） */
+		visible: boolean
+		/** 设置面板展开（展开时隐藏顶栏与听书球） */
+		settingsOpen: boolean
+		/** 目录抽屉打开（抽屉打开时底栏保持显示） */
+		drawerOpen: boolean
+		/** 顶部导航书名 */
+		bookTitle: string
+		/** 目录章节列表（正序全量；当前章高亮由 activeChapterId 驱动） */
+		chapters: Chapter[]
+		/** 当前阅读章节 id（目录高亮） */
+		activeChapterId: number
+		/** 想法/划线记录卡片列表（宿主按划线/想法本地存储派生） */
+		notes: NoteRecord[]
+	}>()
+
+	const emit = defineEmits(['back', 'toggleDrawer', 'toggleSettings', 'listen', 'selectChapter', 'goBookmark', 'goNote', 'toast', 'change', 'bookmarksChanged'])
+
+	/** ===== 子组件引用（真源在子组件，本组件只做转发与镜像派生） ===== */
+	const drawerPanelRef = ref<DrawerPanel | null>(null)
+	const settingsPanelRef = ref<SettingsPanel | null>(null)
+
+	/** ===== 设置镜像（真源在 SettingsPanel：面板 change 上行同步，用于主题派生渲染） ===== */
+	const settingsMirror = ref<ReaderSettings>(loadSettings())
+
+	/** 主题（成组解析自 utils/theme.uts：正文/浮层/遮罩/控件色） */
+	const theme = computed<ReaderTheme>(() : ReaderTheme => {
+		if (settingsMirror.value.theme == 'night') {
+			return READER_THEME_NIGHT
+		}
+		if (settingsMirror.value.theme == 'paper') {
+			return READER_THEME_PAPER
+		}
+		return READER_THEME_LIGHT
+	})
+	const nightMode = computed(() : boolean => {
+		return settingsMirror.value.theme == 'night'
+	})
+
+	/** 主题图标路径：夜间使用 -light 白色变体 */
+	function themeIcon(name : string) : string {
+		return '/static/icons/' + name + (nightMode.value ? '-light' : '') + '.svg'
+	}
+
+	/** 顶部导航内容行（px）：与小程序胶囊同行对齐（状态栏高度起、行高 40px） */
+	const navTop = ref(44)
+	const navHeight = ref(40)
+	/** 目录抽屉高度（px）：抽屉顶对齐小程序控制项（胶囊）下方 8px，并扣除控制行自身高度（152rpx） */
+	const drawerPanelHeight = ref(500)
+	{
+		const win = uni.getWindowInfo()
+		if (win.statusBarHeight > 0) {
+			navTop.value = win.statusBarHeight
+		}
+		const navH = uni.upx2px(152)
+		// #ifdef MP-WEIXIN
+		const capsule = uni.getMenuButtonBoundingClientRect()
+		if (capsule.height > 0) {
+			drawerPanelHeight.value = win.windowHeight - (capsule.top + capsule.height + 8) - navH
+		} else {
+			drawerPanelHeight.value = win.windowHeight - (navTop.value + navHeight.value + 8) - navH
+		}
+		// #endif
+		// #ifndef MP-WEIXIN
+		drawerPanelHeight.value = win.windowHeight - (navTop.value + navHeight.value + 8) - navH
+		// #endif
+	}
+
+	/** ===== 交互事件上行（导航类耦合宿主正文） ===== */
+	function onBack() : void {
+		emit('back')
+	}
+
+	function onToggleDrawer() : void {
+		emit('toggleDrawer')
+	}
+
+	function onToggleSettings() : void {
+		emit('toggleSettings')
+	}
+
+	function onListen() : void {
+		emit('listen')
+	}
+
+	/** 日/夜切换（三项导航）：真源在设置面板，经 ref 调用（面板 change 上行后本组件镜像与页面渲染同步） */
+	function toggleNightMode() : void {
+		settingsPanelRef.value?.setTheme(nightMode.value ? 'light' : 'night')
+	}
+
+	/** ===== 子组件事件转发（镜像同步 + 上行页面） ===== */
+	function onSettingsChange(s : ReaderSettings) : void {
+		settingsMirror.value = s
+		emit('change', s)
+	}
+
+	function onSelectChapter(id : number) : void {
+		emit('selectChapter', id)
+	}
+
+	function onGoNote(r : NoteRecord) : void {
+		emit('goNote', r)
+	}
+
+	function onGoBookmark(bm : Bookmark) : void {
+		emit('goBookmark', bm)
+	}
+
+	function onPanelToast(msg : string) : void {
+		emit('toast', msg)
+	}
+
+	function onBookmarksChanged() : void {
+		emit('bookmarksChanged')
+	}
+
+	/** 书签增删转发（宿主下拉/上推手势落定经 ref 调用，逐层下传书签真源组件） */
+	function addBookmark(chapterId : number, pageIndex : number) : void {
+		drawerPanelRef.value?.addBookmark(chapterId, pageIndex)
+	}
+
+	function removeBookmark(chapterId : number, pageIndex : number) : void {
+		drawerPanelRef.value?.removeBookmark(chapterId, pageIndex)
+	}
+
+	defineExpose({
+		addBookmark,
+		removeBookmark
+	})
+</script>
+
+<style lang="scss">
+	/* 组件根：零尺寸占位（不设 flex 参与宿主 flex 流挤压正文），子浮层（absolute）相对宿主页面相对定位容器定位 */
+	.control-root {
+		width: 0;
+		height: 0;
+	}
+
+	/* 顶部导航菜单（Stitch: 毛玻璃背景、底边框、底部圆角 16px，呼出/隐藏滑移动效） */
+	.menu-top {
+		position: absolute;
+		left: 0;
+		right: 0;
+		top: 0;
+		/* 内容行高与顶部内边距由内联绑定（状态栏起 40px 行，与胶囊垂直居中对齐） */
+		padding-left: 38rpx;
+		padding-right: 38rpx;
+		padding-bottom: 27rpx;
+		border-bottom-width: 1px;
+		border-bottom-style: solid;
+		border-bottom-left-radius: $bai-rounded-lg;
+		border-bottom-right-radius: $bai-rounded-lg;
+		z-index: 40;
+		transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+	}
+
+	.menu-top-hidden {
+		transform: translateY(-110%);
+		opacity: 0;
+	}
+
+	.menu-top-inner {
+		flex-direction: row;
+		align-items: center;
+	}
+
+	.menu-top-left {
+		flex-direction: row;
+		align-items: center;
+		gap: 23rpx;
+	}
+
+	/* 返回按钮与其他子页统一：图标 80rpx */
+	.round-btn {
+		width: 80rpx;
+		height: 80rpx;
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.round-btn-icon {
+		width: 80rpx;
+		height: 80rpx;
+	}
+
+	.book-name {
+		font-size: 29rpx;
+		font-weight: 600;
+	}
+
+	/* 底部控制面板（令牌: 顶部圆角 xl 24px、毛玻璃、浮层提升阴影，呼出/隐藏滑移动效） */
+	.menu-bottom {
+		position: absolute;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		border-top-left-radius: $bai-rounded-xl;
+		border-top-right-radius: $bai-rounded-xl;
+		z-index: 30;
+		/* 投影内联绑定（夜间切换白色微光） */
+		transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+	}
+
+	.menu-bottom-hidden {
+		transform: translateY(110%);
+		opacity: 0;
+	}
+
+	/* 听书悬浮球（Stitch: 64px 黑底圆，悬浮于底栏上方 96px，右 20px） */
+	.listen-wrap {
+		position: relative;
+		flex-direction: row;
+		justify-content: flex-end;
+		padding-right: 38rpx;
+	}
+
+	.listen-btn {
+		position: absolute;
+		right: 38rpx;
+		bottom: 185rpx;
+		width: 123rpx;
+		height: 123rpx;
+		border-radius: $bai-rounded-pill;
+		background-color: $bai-ink;
+		border: 1px solid rgba($bai-on-primary, 0.15);
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+		box-shadow: $bai-shadow-fab;
+	}
+
+	.listen-text {
+		font-size: 54rpx;
+		font-weight: 900;
+		color: $bai-on-primary;
+	}
+
+	/* 底部三项导航（Stitch: 三等分，图标 20px + 文字 11px） */
+	.bottom-nav {
+		flex-direction: row;
+		padding: 23rpx 46rpx 54rpx 46rpx;
+	}
+
+	.bottom-nav-btn {
+		flex: 1;
+		flex-direction: column;
+		align-items: center;
+		gap: 8rpx;
+	}
+
+	.bottom-nav-icon {
+		width: 38rpx;
+		height: 38rpx;
+	}
+
+	.bottom-nav-text {
+		font-size: 21rpx;
+	}
+</style>

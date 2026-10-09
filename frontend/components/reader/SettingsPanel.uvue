@@ -1,0 +1,445 @@
+<template>
+	<view class="settings-panel">
+		<view class="settings-grip-row">
+			<view class="settings-grip"></view>
+		</view>
+		<view class="settings-row">
+			<text class="settings-label" :style="'color:' + theme.mutedColor">字号</text>
+			<view class="settings-row-body">
+				<view class="stepper-group">
+					<view class="stepper-btn" :style="'background-color:' + theme.controlBg + ';border-color:' + theme.controlBorder" @click="changeFontSize(-1)">
+						<text class="stepper-text" :style="'color:' + theme.controlText">A⁻</text>
+					</view>
+					<text class="stepper-val" :style="'color:' + theme.titleColor">{{ fontSize }}</text>
+					<view class="stepper-btn" :style="'background-color:' + theme.controlBg + ';border-color:' + theme.controlBorder" @click="changeFontSize(1)">
+						<text class="stepper-text" :style="'color:' + theme.controlText">A⁺</text>
+					</view>
+				</view>
+				<view class="font-btn" :style="'background-color:' + theme.controlBg + ';border-color:' + theme.controlBorder" @click="toggleFontList">
+					<text class="font-btn-text" :style="'color:' + theme.controlText">{{ fontListOpen ? '请选择' : currentFontLabel }}</text>
+				</view>
+			</view>
+		</view>
+		<!-- 字体选择列表（选择后点保存本地持久化） -->
+		<view v-if="fontListOpen" class="font-select">
+			<view class="font-select-list">
+				<view
+					v-for="(f, fi) in fontOptions"
+					:key="f.key"
+					class="page-turn-btn font-option"
+					:class="pendingFontKey === f.key ? 'page-turn-active' : 'page-turn-idle'"
+					:style="pendingFontKey === f.key ? '' : 'background-color:' + theme.controlBg + ';border-color:' + theme.controlBorder"
+					@click="selectFont(f.key)"
+				>
+					<text class="page-turn-text" :class="pendingFontKey === f.key ? 'page-turn-text-active' : ''" :style="pendingFontKey === f.key ? '' : 'color:' + theme.controlText">{{ f.label }}</text>
+				</view>
+			</view>
+			<view class="font-save-row">
+				<view class="font-cancel-btn" @click="cancelFontSelect">
+					<text class="font-cancel-btn-text">取消</text>
+				</view>
+				<view class="font-save-btn" :style="nightMode ? 'background-color:#f3f4f6' : ''" @click="saveFont">
+					<text class="font-save-btn-text" :style="nightMode ? 'color:#0e0f0c' : ''">保存</text>
+				</view>
+			</view>
+		</view>
+		<view class="settings-row">
+			<text class="settings-label" :style="'color:' + theme.mutedColor">背景</text>
+			<view class="settings-row-body">
+				<view class="swatch-group">
+					<view
+						class="swatch swatch-white"
+						:class="selectedBg === READER_THEME_LIGHT.readerBg ? 'swatch-active' : ''"
+						@click="changeReaderBg(READER_THEME_LIGHT.readerBg)"
+					></view>
+					<view
+						class="swatch swatch-milky"
+						:class="selectedBg === READER_THEME_PAPER.readerBg ? 'swatch-active' : ''"
+						@click="changeReaderBg(READER_THEME_PAPER.readerBg)"
+					></view>
+				</view>
+			</view>
+		</view>
+		<view class="settings-row">
+			<text class="settings-label" :style="'color:' + theme.mutedColor">翻页</text>
+			<view class="page-turn-group">
+				<view
+					v-for="(m, mi) in pageTurnModes"
+					:key="mi"
+					class="page-turn-btn"
+					:class="pageTurn === m ? 'page-turn-active' : 'page-turn-idle'"
+					:style="pageTurn === m ? '' : 'background-color:' + theme.controlBg + ';border-color:' + theme.controlBorder"
+					@click="selectPageTurn(m)"
+				>
+					<text class="page-turn-text" :class="pageTurn === m ? 'page-turn-text-active' : ''" :style="pageTurn === m ? '' : 'color:' + theme.controlText">{{ m }}</text>
+				</view>
+			</view>
+		</view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { READER_THEME_LIGHT, READER_THEME_NIGHT, READER_THEME_PAPER, ReaderTheme } from '@/utils/theme.uts'
+	import { ReaderSettings, FONT_OPTIONS, fontOptionOf, loadSettings, saveSettings } from '@/utils/readerTypes.uts'
+
+	/**
+	 * SettingsPanel —— 阅读设置面板子组件（设置真源）
+	 * --------------------------------------------------------------------------
+	 * 字号/字体/背景/翻页/日夜的调节动作、持久化（reader_settings / reader_font）
+	 * 与提示全部内聚；变更经 change 事件上行宿主（ReaderControl 转发页面应用渲染）。
+	 * 组件常挂载（宿主经 v-show 控制显隐），open 由隐藏转可见时重置面板内
+	 * 临时 UI 状态（字体选择列表收起），对齐原 v-if 卸载重挂的交互节奏。
+	 * setTheme 供宿主三项导航的日夜切换调用（真源唯一写入口，保证持久化与上行一致）。
+	 */
+	const props = defineProps<{
+		/** 面板可见状态（宿主 v-show 控制显隐；转可见时重置临时 UI 状态） */
+		open: boolean
+	}>()
+	const emit = defineEmits(['change', 'toast'])
+
+	/** ===== 阅读设置（真源：组件内调节/持久化，change 事件上行宿主应用渲染） ===== */
+	/** 当前主题 key：light / night / paper */
+	const themeKey = ref('light')
+	/** 正文字号（12-36） */
+	const fontSize = ref(18)
+	/** 当前翻页模式 */
+	const pageTurn = ref('滚动')
+	/** 当前生效字体 key */
+	const fontKey = ref('sourcehan')
+	/** 当前背景色（与主题色板比较决定选中态） */
+	const selectedBg = ref(READER_THEME_LIGHT.readerBg)
+
+	/** 翻页模式选项（APP 端多「仿真」） */
+	// #ifdef APP
+	const pageTurnModes = ['滚动', '仿真', '覆盖', '平移']
+	// #endif
+	// #ifndef APP
+	const pageTurnModes = ['滚动', '覆盖', '平移']
+	// #endif
+
+	/** 恢复本地设置（宿主持镜像驱动渲染，两侧读同一存储真源保持一致；翻页模式做端侧支持校验） */
+	{
+		const s = loadSettings()
+		fontSize.value = s.fontSize
+		pageTurn.value = pageTurnModes.indexOf(s.pageTurn) >= 0 ? s.pageTurn : pageTurnModes[0]
+		themeKey.value = s.theme
+		selectedBg.value = s.theme == 'paper' ? READER_THEME_PAPER.readerBg : (s.theme == 'night' ? READER_THEME_NIGHT.readerBg : READER_THEME_LIGHT.readerBg)
+		// 字体沿用独立 key（历史版本存储结构不变）
+		const storedFont : any = uni.getStorageSync('reader_font')
+		if (typeof storedFont == 'string') {
+			const key = storedFont as string
+			for (let i = 0; i < FONT_OPTIONS.length; i++) {
+				if (FONT_OPTIONS[i].key == key) {
+					fontKey.value = key
+					break
+				}
+			}
+		}
+	}
+
+	/** 字体选项与当前生效字体名（按钮展示） */
+	const fontOptions = FONT_OPTIONS
+	const currentFontLabel = computed(() : string => {
+		return fontOptionOf(fontKey.value).label
+	})
+
+	/** 主题（成组解析自 utils/theme.uts：正文/浮层/遮罩/控件色） */
+	const theme = computed<ReaderTheme>(() : ReaderTheme => {
+		if (themeKey.value == 'night') {
+			return READER_THEME_NIGHT
+		}
+		if (themeKey.value == 'paper') {
+			return READER_THEME_PAPER
+		}
+		return READER_THEME_LIGHT
+	})
+	const nightMode = computed(() : boolean => {
+		return themeKey.value == 'night'
+	})
+
+	/** 变更上行：设置载荷通知宿主应用渲染 */
+	function emitChange() : void {
+		emit('change', {
+			fontSize: fontSize.value,
+			pageTurn: pageTurn.value,
+			theme: themeKey.value,
+			fontKey: fontKey.value
+		} as ReaderSettings)
+	}
+
+	/** 字号调节（12-36 钳制 + 持久化 + 上行） */
+	function changeFontSize(delta : number) : void {
+		const next = fontSize.value + delta
+		if (next < 12 || next > 36) {
+			return
+		}
+		fontSize.value = next
+		saveSettings({ fontSize: fontSize.value, pageTurn: pageTurn.value, theme: themeKey.value, fontKey: fontKey.value } as ReaderSettings)
+		emitChange()
+	}
+
+	/** 应用字体选择（更新生效字体并持久化） */
+	function applyFont(key : string) : void {
+		fontKey.value = key
+		uni.setStorageSync('reader_font', key)
+		emitChange()
+		emit('toast', '字体已保存')
+	}
+
+	/** 背景色板切换（正文与标题色随主题成组切换，由宿主应用） */
+	function changeReaderBg(bg : string) : void {
+		selectedBg.value = bg
+		const key = bg == READER_THEME_PAPER.readerBg ? 'paper' : 'light'
+		themeKey.value = key
+		saveSettings({ fontSize: fontSize.value, pageTurn: pageTurn.value, theme: themeKey.value, fontKey: fontKey.value } as ReaderSettings)
+		emitChange()
+	}
+
+	/** 翻页模式选择（Stitch: 单选高亮 + toast） */
+	function selectPageTurn(mode : string) : void {
+		pageTurn.value = mode
+		saveSettings({ fontSize: fontSize.value, pageTurn: pageTurn.value, theme: themeKey.value, fontKey: fontKey.value } as ReaderSettings)
+		emitChange()
+		emit('toast', '已切换至【' + mode + '】模式')
+	}
+
+	/** 日/夜切换（宿主三项导航经 ref 调用：真源唯一写入口，保证持久化与上行一致） */
+	function setTheme(key : string) : void {
+		themeKey.value = key
+		selectedBg.value = key == 'paper' ? READER_THEME_PAPER.readerBg : (key == 'night' ? READER_THEME_NIGHT.readerBg : READER_THEME_LIGHT.readerBg)
+		saveSettings({ fontSize: fontSize.value, pageTurn: pageTurn.value, theme: themeKey.value, fontKey: fontKey.value } as ReaderSettings)
+		emitChange()
+		emit('toast', key == 'night' ? '已切换至夜晚模式' : '已切换至白天模式')
+	}
+
+	/** ===== 字体列表（面板内 UI 状态，保存动作组件内持久化） ===== */
+	const fontListOpen = ref(false)
+	/** 字体列表中的待保存选择 */
+	const pendingFontKey = ref('sourcehan')
+
+	/** 展开/收起字体列表（展开时待保存选择重置为当前生效值） */
+	function toggleFontList() : void {
+		fontListOpen.value = !fontListOpen.value
+		pendingFontKey.value = fontKey.value
+	}
+
+	function selectFont(key : string) : void {
+		pendingFontKey.value = key
+	}
+
+	/** 保存字体选择（收起列表并应用/持久化） */
+	function saveFont() : void {
+		fontListOpen.value = false
+		applyFont(pendingFontKey.value)
+	}
+
+	/** 取消字体选择：放弃待保存选择并收起列表 */
+	function cancelFontSelect() : void {
+		pendingFontKey.value = fontKey.value
+		fontListOpen.value = false
+	}
+
+	/** 面板由隐藏转可见时收起字体列表（对齐原 v-if 卸载重挂的交互节奏） */
+	watch(() : boolean => props.open, (v : boolean) : void => {
+		if (v) {
+			fontListOpen.value = false
+			pendingFontKey.value = fontKey.value
+		}
+	})
+
+	defineExpose({
+		setTheme
+	})
+</script>
+
+<style lang="scss">
+	/* 设置面板（Stitch: 顶部药丸指示器 + 字号/背景/翻页三行） */
+	.settings-panel {
+		padding: 23rpx 38rpx 31rpx 38rpx;
+	}
+
+	.settings-grip-row {
+		flex-direction: row;
+		justify-content: center;
+		padding-bottom: 23rpx;
+	}
+
+	.settings-grip {
+		width: 69rpx;
+		height: 8rpx;
+		border-radius: $bai-rounded-pill;
+		background-color: $bai-neutral;
+	}
+
+	.settings-row {
+		flex-direction: row;
+		align-items: center;
+		padding: 19rpx 0;
+	}
+
+	.settings-label {
+		font-size: 23rpx;
+		width: 69rpx;
+	}
+
+	.settings-row-body {
+		flex: 1;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		margin-left: 15rpx;
+	}
+
+	.stepper-group {
+		flex-direction: row;
+		align-items: center;
+		gap: 23rpx;
+	}
+
+	.stepper-btn {
+		width: 154rpx;
+		height: 69rpx;
+		border-radius: $bai-rounded-pill;
+		border: 1px solid $bai-pale;
+		background-color: $bai-canvas;
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.stepper-text {
+		font-size: 34rpx;
+		font-weight: 700;
+	}
+
+	.stepper-val {
+		font-size: 27rpx;
+		font-weight: 700;
+		min-width: 46rpx;
+		text-align: center;
+	}
+
+	.font-btn {
+		flex-direction: row;
+		align-items: center;
+		gap: 8rpx;
+		height: 69rpx;
+		padding: 0 27rpx;
+		border-radius: $bai-rounded-pill;
+		border: 1px solid $bai-pale;
+		background-color: $bai-canvas;
+	}
+
+	.font-btn-text {
+		font-size: 23rpx;
+	}
+
+	/* 字体选择列表（点字体按钮展开：选项 2×2 胶囊 + 右下保存按钮） */
+	.font-select {
+		padding: 8rpx 0 23rpx 92rpx;
+		flex-direction: column;
+	}
+
+	.font-select-list {
+		flex-direction: row;
+		flex-wrap: wrap;
+		gap: 15rpx;
+	}
+
+	.font-option {
+		width: 260rpx;
+	}
+
+	.font-save-row {
+		margin-top: 19rpx;
+		flex-direction: row;
+		justify-content: flex-end;
+		gap: 15rpx;
+	}
+
+	.font-cancel-btn {
+		padding: 12rpx 38rpx;
+		border-radius: $bai-rounded-pill;
+		border: 1px solid $bai-pale;
+	}
+
+	.font-cancel-btn-text {
+		font-size: 23rpx;
+		font-weight: 600;
+		color: $bai-mute;
+	}
+
+	.font-save-btn {
+		padding: 12rpx 38rpx;
+		border-radius: $bai-rounded-pill;
+		background-color: $bai-ink;
+		border: 1px solid rgba($bai-on-primary, 0.2);
+	}
+
+	.font-save-btn-text {
+		font-size: 23rpx;
+		font-weight: 600;
+		color: $bai-on-primary;
+	}
+
+	.swatch-group {
+		flex-direction: row;
+		align-items: center;
+		gap: 23rpx;
+	}
+
+	.swatch {
+		width: 154rpx;
+		height: 62rpx;
+		border-radius: $bai-rounded-pill;
+	}
+
+	.swatch-white {
+		border: 1px solid $bai-pale;
+	}
+
+	.swatch-milky {
+		background-color: $bai-paper;
+		border: 1px solid $bai-pale;
+	}
+
+	.swatch-active {
+		border: 4rpx solid $bai-positive;
+	}
+
+	.page-turn-group {
+		flex: 1;
+		flex-direction: row;
+		gap: 15rpx;
+		margin-left: 8rpx;
+	}
+
+	.page-turn-btn {
+		flex: 1;
+		height: 62rpx;
+		border-radius: $bai-rounded-pill;
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.page-turn-idle {
+		border: 1px solid $bai-pale;
+		background-color: $bai-canvas;
+	}
+
+	.page-turn-active {
+		border: 4rpx solid $bai-positive;
+		background-color: $bai-positive-tint;
+	}
+
+	.page-turn-text {
+		font-size: 23rpx;
+		color: $bai-ink;
+	}
+
+	.page-turn-text-active {
+		font-weight: 500;
+		color: $bai-positive;
+	}
+</style>

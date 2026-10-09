@@ -1,0 +1,83 @@
+<template>
+	<view class="agree-check" @click="toggle">
+		<view :class="modelValue ? 'agree-check__box agree-check__box--on' : 'agree-check__box'">
+			<view v-if="modelValue" class="agree-check__mark"></view>
+		</view>
+		<text class="agree-check__text">查看并同意</text>
+		<text class="agree-check__text" @click.stop="goAgreement">《服务协议》</text>
+		<text class="agree-check__text">和</text>
+		<text class="agree-check__text" @click.stop="goPrivacy">《隐私政策》</text>
+	</view>
+</template>
+
+<script setup lang="uts">
+	/**
+	 * AgreementCheckbox —— 协议勾选行组件（checkbox + 服务协议/隐私政策链接）
+	 * --------------------------------------------------------------------------
+	 * 登录（账号密码/微信/指纹三卡片）与注册页共用；协议链接跳转内聚
+	 * （openExternalLink 复制后浏览器打开），勾选状态经 v-model 双向绑定。
+	 */
+	import { AGREEMENT_URL, PRIVACY_URL } from '@/utils/config.uts'
+	import { openExternalLink } from '@/utils/link.uts'
+
+	const props = defineProps<{
+		/** 是否已勾选（v-model） */
+		modelValue: boolean
+	}>()
+	const emit = defineEmits(['update:modelValue'])
+
+	function toggle() : void {
+		emit('update:modelValue', !props.modelValue)
+	}
+
+	/** 服务协议 / 隐私政策：外部链接，复制后浏览器打开 */
+	function goAgreement() : void {
+		openExternalLink(AGREEMENT_URL)
+	}
+
+	function goPrivacy() : void {
+		openExternalLink(PRIVACY_URL)
+	}
+</script>
+
+<style lang="scss">
+	.agree-check {
+		flex-direction: row;
+		align-items: center;
+	}
+
+	.agree-check__box {
+		width: 32rpx;
+		height: 32rpx;
+		border-radius: 8rpx;
+		background-color: $bai-canvas;
+		border: 1px solid $bai-neutral;
+		box-sizing: border-box;
+		flex-direction: row;
+		justify-content: center;
+		align-items: center;
+		flex-shrink: 0;
+	}
+
+	.agree-check__box--on {
+		background-color: $bai-ink;
+		border-color: $bai-ink;
+	}
+
+	/* 选中态对勾（CSS 绘制） */
+	.agree-check__mark {
+		width: 10rpx;
+		height: 16rpx;
+		border-right: 1.5px solid $bai-on-primary;
+		border-bottom: 1.5px solid $bai-on-primary;
+		transform: rotate(45deg) translate(-1px, -1px);
+	}
+
+	.agree-check__text {
+		margin-left: 16rpx;
+		color: $bai-body;
+		font-size: 24rpx;
+		line-height: 32rpx;
+		font-weight: 400;
+	}
+</style>

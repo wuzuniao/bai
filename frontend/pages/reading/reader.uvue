@@ -61,7 +61,10 @@
 						</view>
 					</view>
 				</scroll-view>
-			<!-- 分页模式：三层常驻页面翻页（当前页 + 上一页 + 下一页预渲染，仿真/覆盖/平移） -->
+			<!-- 分页模式：三层常驻页面翻页（当前页 + 上一页 + 下一页预渲染，仿真/覆盖/平移）。
+			     ⚠ 三层正文渲染不可抽公共子组件：划词锚定依赖宿主级节点查询（#ppara-* 供 cacheParaRects、
+			     #sel-anchor-* 供气泡实测），跨组件 createSelectorQuery 在微信端失效（见 SelectionPopover 协议），
+			     正文渲染必须留在宿主 -->
 			<view v-else class="page-stack">
 				<!-- 当前页层 -->
 				<view class="page-layer" :class="flipSettling ? 'page-layer-settle' : ''" :style="'background-color:' + readerBg + ';' + currentLayerStyle">
@@ -249,11 +252,13 @@
 	import { useUserStore, avatarPathOf } from '@/stores/user.uts'
 	import { LocalBook, BookProgress, findBook, loadBookProgress, saveBookProgress, updateBookReading, addTodayMinutes } from '@/utils/books.uts'
 	import { parseChapters, readTextFile } from '@/utils/bookparse.uts'
-	import { Chapter, Bookmark, NoteRecord, SelSpan, SpanSeg, TextMetrics, ParaRect, ReaderSettings, FONT_OPTIONS, fontOptionOf, loadUnderlines, loadThoughts, findUnderlineEntry, loadBookmarks, loadSettings, comparePos, normalizeSpan, rowSpacing } from '@/utils/readerTypes.uts'
-	import SelectionPopover from '@/components/SelectionPopover/SelectionPopover.uvue'
-	import ReaderControl from '@/components/ReaderControl/ReaderControl.uvue'
-	import ReaderFooterBar from '@/components/ReaderFooterBar/ReaderFooterBar.uvue'
-	import ReaderToast from '@/components/ReaderToast/ReaderToast.uvue'
+	import { Chapter, Paragraph, NoteRecord, ShareQuoteCtx, SelSpan, SpanSeg, TextMetrics, ParaRect, ReaderSettings, FONT_OPTIONS, fontOptionOf, loadUnderlines, loadThoughts, findUnderlineEntry, loadBookmarks, loadSettings, normalizeSpan, rowSpacing, buildNoteRecords, buildShareQuoteCtx } from '@/utils/readerTypes.uts'
+	import { computePageBreaks } from '@/utils/pagination.uts'
+	import { flipCurrentLayerStyle, flipPrevLayerStyle, flipNextLayerStyle, flipCoverNextOpacity, flipCoverCurrentOpacity } from '@/utils/flipstyle.uts'
+	import SelectionPopover from '@/components/selection/SelectionPopover.uvue'
+	import ReaderControl from '@/components/reader/ReaderControl.uvue'
+	import ReaderFooterBar from '@/components/reader/ReaderFooterBar.uvue'
+	import ReaderToast from '@/components/reader/ReaderToast.uvue'
 
 	/** 组件引用：气泡（划词建立/清除与锚点、拖动矩形回传）、控制框（书签增删）、信息栏（滚动信号）、提示卡片 */
 	const popoverRef = ref<SelectionPopover | null>(null)
@@ -264,10 +269,6 @@
 	/** 想法查看卡片关闭通知：复位划线段点击协调标志（卡片遮罩期间标志残留会吞掉关闭后首次点击） */
 	function onThoughtViewClosed() : void {
 		paragraphTapHandled = false
-	}
-
-	type Paragraph = {
-		text: string
 	}
 
 	/** 当前页渲染项（origin 为段落在章内的索引，划词状态按其定位） */
@@ -282,11 +283,11 @@
 	/** 目录章节（默认空；真实书籍数据统一经 loadBookContent 注入，id 即章序号） */
 	const chapters = ref<Chapter[]>([])
 
-	/** 全书各章段落（章 id → 段落文本数组；切章/跨章预渲染按 id 取用） */
-	const chapterParas = ref<string[][]>([])
+	/** 全书各章段落（章 id → 段落列表；切章/跨章预渲染按 id 取用） */
+	const chapterParas = ref<Paragraph[][]>([])
 
-	/** 指定章的段落文本（越界返回空数组） */
-	function paragraphsOf(cid : number) : string[] {
+	/** 指定章的段落列表（越界返回空数组） */
+	function paragraphsOf(cid : number) : Paragraph[] {
 		if (cid >= 0 && cid < chapterParas.value.length) {
 			return chapterParas.value[cid]
 		}
@@ -324,41 +325,9 @@
 	/** 正文区底部留白（px）：页脚浮层文字行之上留足间距，正文与页脚不紧挨 */
 	const contentBottomPx = computed(() : number => safeAreaBottomPx.value + 80)
 
-	/** 分页结果：每页的章内段落索引数组——按可用高度百分比做高度预算，段落高度（整行×行高）逐段累计，装不下的段落流到下一页；章首页扣除章节头高度 */
+	/** 分页结果：每页的章内段落索引数组（排版规则与高度预算见 utils/pagination.uts，随字号/窗口/正文变化重算） */
 	const pageBreaks = computed(() : number[][] => {
-		const paras = paragraphs.value
-		const pages: number[][] = []
-		let current: number[] = []
-		let usedH = 0
-		if (pageW.value <= 0 || pageH.value <= 0 || fontSize.value <= 0) {
-			return paras.map((p, i) : number[] => [i])
-		}
-		const lineH = fontSize.value * 1.7
-		// 每行字数计入字距 0.4rpx（约 0.2px/字）
-		const perLine = Math.max(1, Math.floor((pageW.value - uni.upx2px(124)) / (fontSize.value + 0.2)))
-		const paraGap = uni.upx2px(40)
-		const headerH = uni.upx2px(294)
-		// 页面高度预算 = 可用高度（屏高-顶部起点-底部留白）的 95%，留排版误差余量
-		const budget = Math.max(lineH, (pageH.value - contentTopPx.value - contentBottomPx.value) * 0.95)
-		// 章节头（标签行+大标题+分隔条+下边距，约 294rpx）仅占用章首页
-		let curBudget = Math.max(lineH, budget - headerH)
-		for (let i = 0; i < paras.length; i++) {
-			const paraH = Math.ceil(paras[i].text.length / perLine) * lineH
-			let gap = current.length > 0 ? paraGap : 0
-			if (usedH + gap + paraH > curBudget && current.length > 0) {
-				pages.push(current)
-				current = []
-				usedH = 0
-				gap = 0
-				curBudget = budget
-			}
-			current.push(i)
-			usedH += gap + paraH
-		}
-		if (current.length > 0) {
-			pages.push(current)
-		}
-		return pages
+		return computePageBreaks(paragraphs.value.map((p : Paragraph) : string => p.text), pageW.value, pageH.value, fontSize.value, contentTopPx.value, contentBottomPx.value)
 	})
 
 	/** 分页变化（字号调节/设置恢复触发重分页）后钳制当前页码，避免指向不存在的空页 */
@@ -383,13 +352,6 @@
 		return pageItemsAt(pageIndex.value)
 	})
 
-	/** 上下滚动模式：整章段落连续渲染（滚动多少显示多少） */
-	const allParagraphItems = computed(() : PageItem[] => {
-		return paragraphs.value.map((p, i) : PageItem => {
-			return { origin: i, text: p.text } as PageItem
-		})
-	})
-
 	/** 滚动模式程序滚动位置（绑 :scroll-top，仅切章复位/置底时更新，避免与原生滚动形成反馈循环） */
 	const scrollModeTop = ref(0)
 	/** 滚动模式实际阅读位置（@scroll 实时记录，用于进度持久化） */
@@ -407,8 +369,8 @@
 	/** 注入真实书籍数据（章节目录 + 各章段落正文）并重置阅读位置：本地文件解析完成后调用一次，目录、分页、划线/想法/书签渲染全部基于注入后的数据重建 */
 	function loadBookContent(chs : Chapter[], allParas : string[][]) : void {
 		chapters.value = chs
-		chapterParas.value = allParas
-		paragraphs.value = allParas.length > 0 ? allParas[0] : []
+		chapterParas.value = allParas.map((texts : string[]) : Paragraph[] => toParagraphs(texts))
+		paragraphs.value = allParas.length > 0 ? toParagraphs(allParas[0]) : []
 		currentChapterId.value = 0
 		pageIndex.value = 0
 		scrollChapters.value = [0]
@@ -598,73 +560,20 @@
 		return false
 	})
 
-	/** 当前页层样式：按翻页模式产生位移与层级（跟手与回弹共用） */
-	const currentLayerStyle = computed(() : string => {
-		if (!flipActive.value && !flipSettling.value) {
-			return ''
-		}
-		const o = flipOffset.value
-		const d = flipDir.value
-		const mode = pageTurn.value
-		if (mode == '平移') {
-			if (d == 0) {
-				// 落定帧不产生位移（避免新页从边缘重新滑入一道边界），与跟手末帧满屏内容无缝衔接
-				return 'z-index:1'
-			}
-			return 'transform:translateX(' + (d * o * -1) + 'px);z-index:1'
-		}
-		// #ifdef APP
-		if (mode == '仿真') {
-			// 仿真（APP 端专属实现）：当前页静置下层，目标页连同卷筒/投影自页外滑入覆盖
-			return 'z-index:1'
-		}
-		// #endif
-		if (mode == '覆盖') {
-			// 覆盖：当前页静置底层，其上暗化遮罩随滑动由浅入深（被覆盖越多越深），由目标页滑入覆盖
-			return 'z-index:1'
-		}
-		return ''
-	})
+	/** 当前页层样式（几何规则见 utils/flipstyle.uts，随翻页模式/方向/位移变化） */
+	const currentLayerStyle = computed(() : string => flipCurrentLayerStyle(pageTurn.value, flipDir.value, flipOffset.value, flipActive.value, flipSettling.value))
 
-	/** 上一页层样式：常驻屏左外预渲染（pageW 未就绪时先透明），回翻跟手/补间时作为目标层滑入（覆盖/仿真/平移通用） */
-	const prevLayerStyle = computed(() : string => {
-		if (pageW.value <= 0) {
-			return 'opacity:0;z-index:2'
-		}
-		if (flipActive.value && flipDir.value == -1) {
-			const o = flipOffset.value
-			return 'transform:translateX(' + (o - pageW.value) + 'px);z-index:2'
-		}
-		return 'transform:translateX(-' + pageW.value + 'px);z-index:2'
-	})
+	/** 上一页层样式：常驻屏左外预渲染，回翻跟手/补间时作为目标层滑入 */
+	const prevLayerStyle = computed(() : string => flipPrevLayerStyle(pageW.value, flipDir.value, flipOffset.value, flipActive.value))
 
-	/** 下一页层样式：常驻屏右外预渲染，前翻跟手/补间时作为目标层滑入（覆盖/仿真/平移通用） */
-	const nextLayerStyle = computed(() : string => {
-		if (pageW.value <= 0) {
-			return 'opacity:0;z-index:2'
-		}
-		if (flipActive.value && flipDir.value == 1) {
-			const o = flipOffset.value
-			return 'transform:translateX(' + (pageW.value - o) + 'px);z-index:2'
-		}
-		return 'transform:translateX(' + pageW.value + 'px);z-index:2'
-	})
+	/** 下一页层样式：常驻屏右外预渲染，前翻跟手/补间时作为目标层滑入 */
+	const nextLayerStyle = computed(() : string => flipNextLayerStyle(pageW.value, flipDir.value, flipOffset.value, flipActive.value))
 
 	/** 覆盖模式遮罩透明度（滑入的下一页上，仅前翻）：出现越多遮罩越浅，落定归零 */
-	const coverNextMaskOpacity = computed(() : number => {
-		if (pageW.value <= 0) {
-			return 0
-		}
-		return 1 - Math.min(flipOffset.value / pageW.value, 1)
-	})
+	const coverNextMaskOpacity = computed(() : number => flipCoverNextOpacity(pageW.value, flipOffset.value))
 
 	/** 覆盖模式遮罩透明度（当前页上，仅回翻）：被上一页取代越多越深 */
-	const coverCurrentMaskOpacity = computed(() : number => {
-		if (pageW.value <= 0) {
-			return 0
-		}
-		return Math.min(flipOffset.value / pageW.value, 1)
-	})
+	const coverCurrentMaskOpacity = computed(() : number => flipCoverCurrentOpacity(pageW.value, flipOffset.value))
 
 	/** 覆盖遮罩面色（主题适配）：浅色纸面用墨色加深，暗色纸面用浅白提亮（与书签遮罩/浮层的暗底区分惯例一致） */
 	const coverMaskBg = computed(() : string => {
@@ -1212,47 +1121,9 @@
 			}).exec()
 			}
 
-	/** 想法/划线卡片列表（NoteRecord 类型见 utils/readerTypes.uts）：划线区间派生卡片并关联想法（想法覆盖的划线区间不再单出划线卡），无匹配区间的想法独立成卡；按章/段落/位置排序 */
+	/** 想法/划线卡片列表（组装规则见 readerTypes.buildNoteRecords：划线派生卡片关联想法、无匹配想法独立成卡、按章/段/位置排序） */
 	const noteRecords = computed(() : NoteRecord[] => {
-		const records : NoteRecord[] = []
-		const usedThoughts : boolean[] = thoughts.value.map(() : boolean => false)
-		for (const e of underlineStore.value) {
-			// 划线文本按记录所在章取：跨章划线的卡片引用不能用当前章段落数组
-			const p = paragraphsOf(e.cid)[e.origin]
-			if (p == null) {
-				// 章节段落未注入（首帧渲染早于书籍加载）或记录指向已不存在的章：跳过避免越界
-				continue
-			}
-			for (const u of e.ranges) {
-				const quote = p.text.slice(u[0], u[1] + 1)
-				let content = ''
-				for (let ti = 0; ti < thoughts.value.length; ti++) {
-					const t = thoughts.value[ti]
-					if (t.fromCid == e.cid && t.fromOrigin == e.origin && t.fromStart == u[0] && t.toCid == e.cid && t.toOrigin == e.origin && t.toEnd == u[1]) {
-						content = t.content
-						usedThoughts[ti] = true
-						break
-					}
-				}
-				records.push({ cid: e.cid, origin: e.origin, qStart: u[0], quote: quote, content: content } as NoteRecord)
-			}
-		}
-		for (let ti = 0; ti < thoughts.value.length; ti++) {
-			if (!usedThoughts[ti]) {
-				const t = thoughts.value[ti]
-				records.push({ cid: t.fromCid, origin: t.fromOrigin, qStart: t.fromStart, quote: t.quote, content: t.content } as NoteRecord)
-			}
-		}
-		records.sort((a : NoteRecord, b : NoteRecord) : number => {
-			if (a.cid != b.cid) {
-				return a.cid - b.cid
-			}
-			if (a.origin != b.origin) {
-				return a.origin - b.origin
-			}
-			return a.qStart - b.qStart
-		})
-		return records
+		return buildNoteRecords(underlineStore.value, thoughts.value, chapterParas.value)
 	})
 
 	/** 启动恢复本地设置镜像（真源同一存储，与 ReaderControl 组件各自恢复保持一致；字号/翻页模式/主题） */
@@ -1757,41 +1628,19 @@
 		return selectionText()
 	})
 
-	/** 分享卡片内容快照（上下文渐出四段 + 引文 + 关联想法 + 出处；跨段选区取首段前文/末段后文） */
+	/** 分享卡片内容快照（组装规则见 readerTypes.buildShareQuoteCtx；上下文按选区端点所在章取——滚动模式跨章选区的端点分属两章） */
 	const shareCtx = computed<ShareQuoteCtx | null>(() : ShareQuoteCtx | null => {
 		const s = selSpan.value
 		if (s == null) {
 			return null
 		}
-		// 上下文按选区端点所在章取（滚动模式跨章选区的端点分属两章）
 		const fromP = paragraphsOf(s.fromCid)[s.fromOrigin]
 		const toP = paragraphsOf(s.toCid)[s.toOrigin]
-		const ctxStart = Math.max(0, s.fromStart - 24)
-		const ctxEnd = Math.min(toP.text.length, s.toEnd + 25)
-		const before = fromP.text.slice(ctxStart, s.fromStart)
-		const after = toP.text.slice(s.toEnd + 1, ctxEnd)
-		const halfB = Math.ceil(before.length / 2)
-		const halfA = Math.floor(after.length / 2)
-		let thoughtText = ''
-		for (const t of thoughts.value) {
-			// 选区与想法区间相交即展示（拖动微调后仍关联）
-			const tEndAfterSpanFrom = comparePos(t.toCid, t.toOrigin, t.toEnd, s.fromCid, s.fromOrigin, s.fromStart) >= 0
-			const tStartBeforeSpanEnd = comparePos(t.fromCid, t.fromOrigin, t.fromStart, s.toCid, s.toOrigin, s.toEnd) <= 0
-			if (tEndAfterSpanFrom && tStartBeforeSpanEnd) {
-				thoughtText = t.content
-				break
-			}
+		if (fromP == null || toP == null) {
+			// 段落未注入（数据未就绪即出现选区的防御）：不产出分享上下文
+			return null
 		}
-		return {
-			farBefore: before.slice(0, halfB),
-			nearBefore: before.slice(halfB),
-			quote: selectionText(),
-			nearAfter: after.slice(0, halfA),
-			farAfter: after.slice(halfA),
-			thoughtText: thoughtText,
-			source: chapterAt(s.toCid).title,
-			bookTitle: bookTitle.value
-		} as ShareQuoteCtx
+		return buildShareQuoteCtx(s, fromP.text, toP.text, thoughts.value, selectionText(), chapterAt(s.toCid).title, bookTitle.value)
 	})
 
 	/** 分享卡片头像：登录用户取其头像 key 映射的静态图，未登录/无头像用默认 hei */

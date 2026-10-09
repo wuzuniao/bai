@@ -178,7 +178,7 @@
 </template>
 
 <script setup lang="uts">
-	import BottomNavBar from '@/components/BottomNavBar/BottomNavBar.uvue'
+	import BottomNavBar from '@/components/common/BottomNavBar.uvue'
 	import { PLACEHOLDER_STYLE } from '@/utils/theme.uts'
 	import { LocalBook, loadBooks, saveBooks, removeBookData, getTodayMinutes } from '@/utils/books.uts'
 	import { importBook } from '@/utils/bookparse.uts'

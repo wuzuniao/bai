@@ -1,0 +1,554 @@
+<template>
+	<view class="share-root">
+		<!-- 分享卡片预览（头像半出卡片顶部正中/产品名/引文渐出/想法预览限高滚动；导出为全量长图；分享按钮仅微信端） -->
+		<view v-if="shareOpen" class="share-mask" @click="closeShare">
+			<view class="share-pop">
+				<view class="share-card">
+					<text class="share-card-app">无足鸟古诗词学习助手</text>
+					<scroll-view scroll-y class="share-card-scroll" :style="'max-height:' + shareCardMaxH + 'px'">
+						<text class="share-card-text"><text class="share-ctx-far">{{ shareData.farBefore }}</text><text class="share-ctx-near">{{ shareData.nearBefore }}</text><text class="share-quote-mark">“</text><text class="share-quote-main">{{ shareData.quote }}</text><text class="share-quote-mark">”</text><text class="share-ctx-near">{{ shareData.nearAfter }}</text><text class="share-ctx-far">{{ shareData.farAfter }}</text></text>
+						<view v-if="shareData.thoughtText.length > 0" class="share-card-thought">
+							<text class="share-card-thought-text">{{ shareData.thoughtText }}</text>
+						</view>
+					</scroll-view>
+					<text class="share-card-source">《{{ shareData.bookTitle }}》 · {{ shareData.source }}</text>
+				</view>
+				<view class="share-card-logo-ring">
+					<image class="share-card-logo" :src="logoSrc" />
+				</view>
+				<view class="share-actions">
+					<view class="share-action" @click="saveShareImage">
+						<text class="share-action-text">保存为图片</text>
+					</view>
+					<!-- #ifdef MP-WEIXIN -->
+					<button class="share-action share-action-share" open-type="share">
+						<text class="share-action-text share-action-text-primary">分享</text>
+					</button>
+					<!-- #endif -->
+				</view>
+			</view>
+		</view>
+
+		<!-- 分享卡片绘制画布（隐藏，仅用于导出图片） -->
+		<canvas id="share-canvas" type="2d" class="share-canvas"></canvas>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { getCurrentInstance } from 'vue'
+	import { ShareQuoteCtx } from '@/utils/readerTypes.uts'
+
+	/**
+	 * ShareCard —— 分享卡片子组件（预览浮层 + canvas 导出长图内聚）
+	 * --------------------------------------------------------------------------
+	 * 打开时按宿主下行的分享快照（shareCtx）渲染预览；保存为图片时查询组件内
+	 * 隐藏 canvas（.in 自身实例）按排版常量绘制全量长图（与预览 CSS 逐项换算）并
+	 * 存相册；微信端经 button open-type=share 转发（触发宿主页面 onShareAppMessage）。
+	 * 打开经 ref 调 open()（无选区快照时忽略），提示经 emit('toast') 上行。
+	 */
+	const props = defineProps<{
+		/** 分享卡片内容快照（宿主按选区计算；null=无选区不可分享） */
+		shareCtx: ShareQuoteCtx | null
+		/** 分享卡片头像路径（宿主按登录态映射，未登录默认头像） */
+		logoSrc: string
+		/** 页面高度（px，预览滚动区最大高度换算） */
+		pageH: number
+	}>()
+	const emit = defineEmits(['toast'])
+
+	/** 分享预览展开态 */
+	const shareOpen = ref(false)
+	/** 打开分享时的内容快照（渲染与绘制共用非空数据） */
+	const shareData = ref<ShareQuoteCtx>({
+		farBefore: '',
+		nearBefore: '',
+		quote: '',
+		nearAfter: '',
+		farAfter: '',
+		thoughtText: '',
+		source: '',
+		bookTitle: ''
+	} as ShareQuoteCtx)
+	/** 分享卡片预览滚动区最大高度（px）：屏高的 45% */
+	const shareCardMaxH = computed(() : number => props.pageH * 0.45)
+
+	/** 打开分享预览（宿主气泡分享按钮调用；无选区快照时忽略） */
+	function open() : void {
+		const c = props.shareCtx
+		if (c == null) {
+			return
+		}
+		shareData.value = {
+			farBefore: c.farBefore,
+			nearBefore: c.nearBefore,
+			quote: c.quote,
+			nearAfter: c.nearAfter,
+			farAfter: c.farAfter,
+			thoughtText: c.thoughtText,
+			source: c.source,
+			bookTitle: c.bookTitle
+		} as ShareQuoteCtx
+		shareOpen.value = true
+	}
+
+	function closeShare() : void {
+		shareOpen.value = false
+	}
+
+	/** 绘制排版常量（与预览 CSS 逐项换算：rpx 值减半为 px） */
+	const SHARE_CARD_W = 295.0
+	const SHARE_CARD_TOP = 29.0
+	const SHARE_HEADER_H = 30.0
+	const SHARE_PAD = 15.5
+	const SHARE_TEXT_X = SHARE_PAD
+	const SHARE_TEXT_W = SHARE_CARD_W - SHARE_PAD * 2
+	const SHARE_LINE_H = 21.0
+	const SHARE_BASE12 = 10.0
+	const SHARE_BASE10 = 8.5
+	const SHARE_RING_R = 23.0
+	const SHARE_LOGO_R = 20.0
+	const SHARE_INK = '#0e0f0c'
+
+	/** 分享卡片绘制辅助：文本按宽度折行（\n 强制换行保留段落结构；返回行数组，供画布高度预算与逐行绘制） */
+	function wrapCanvasLines(ctx : CanvasRenderingContext2D, text : string, maxW : number, font : string) : string[] {
+		ctx.font = font
+		const lines : string[] = []
+		let line = ''
+		for (let i = 0; i < text.length; i++) {
+			const ch = text.charAt(i)
+			if (ch == '\n') {
+				lines.push(line)
+				line = ''
+				continue
+			}
+			if (ctx.measureText(line + ch).width > maxW && line.length > 0) {
+				lines.push(line)
+				line = ch
+			} else {
+				line = line + ch
+			}
+		}
+		if (line.length > 0) {
+			lines.push(line)
+		}
+		return lines
+	}
+
+	/** 分享卡片绘制辅助：逐行绘制（yTop 为首行行盒顶，与预览 text 行盒模型一致；baseline 为字号对应基线偏移），返回块底 yTop */
+	function drawCanvasLines(ctx : CanvasRenderingContext2D, lines : string[], x : number, yTop : number, lineH : number, font : string, color : string, baseline : number) : number {
+		ctx.font = font
+		ctx.fillStyle = color
+		let top = yTop
+		for (const line of lines) {
+			ctx.fillText(line, x, top + baseline)
+			top += lineH
+		}
+		return top
+	}
+
+	/** 分享卡片富文本运行段（字号/加粗/颜色/内容） */
+	type ShareRun = {
+		text : string
+		fs : number
+		bold : boolean
+		color : string
+	}
+
+	/** 富文本行（行内运行段顺序混排，基线对齐） */
+	type RenderLine = {
+		runs : ShareRun[]
+	}
+
+	function shareRunFont(r : ShareRun) : string {
+		return (r.bold ? 'bold ' : '') + r.fs + 'px sans-serif'
+	}
+
+	/** 富文本流式折行排版（逐字符测量、\n 强制换行、行内同款运行段合并），返回行数组 */
+	function layoutShareRuns(ctx : CanvasRenderingContext2D, runs : ShareRun[], maxW : number) : RenderLine[] {
+		const out : RenderLine[] = []
+		let curRuns : ShareRun[] = [] as ShareRun[]
+		let curW = 0.0
+		const pushLine = () : void => {
+			if (curRuns.length > 0) {
+				out.push({ runs: curRuns } as RenderLine)
+				curRuns = [] as ShareRun[]
+				curW = 0.0
+			}
+		}
+		for (const run of runs) {
+			ctx.font = shareRunFont(run)
+			for (let i = 0; i < run.text.length; i++) {
+				const ch = run.text.charAt(i)
+				if (ch == '\n') {
+					pushLine()
+					continue
+				}
+				const w = ctx.measureText(ch).width
+				if (curW + w > maxW && curW > 0) {
+					pushLine()
+				}
+				const last = curRuns.length > 0 ? curRuns[curRuns.length - 1] : null
+				if (last != null && last.fs == run.fs && last.bold == run.bold && last.color == run.color) {
+					last.text = last.text + ch
+				} else {
+					curRuns.push({ text: ch, fs: run.fs, bold: run.bold, color: run.color } as ShareRun)
+				}
+				curW += w
+			}
+		}
+		pushLine()
+		return out
+	}
+
+	/** 富文本行绘制（行内基线按行内最大字号对齐），返回块底 yTop */
+	function drawRenderLines(ctx : CanvasRenderingContext2D, lines : RenderLine[], x : number, yTop : number, lineH : number) : number {
+		let top = yTop
+		for (const line of lines) {
+			let maxFs = 12.5
+			for (const r of line.runs) {
+				if (r.fs > maxFs) {
+					maxFs = r.fs
+				}
+			}
+			const bl = top + maxFs * 0.8
+			let rx = x
+			for (const r of line.runs) {
+				ctx.font = shareRunFont(r)
+				ctx.fillStyle = r.color
+				ctx.fillText(r.text, rx, bl)
+				rx += ctx.measureText(r.text).width
+			}
+			top += lineH
+		}
+		return top
+	}
+
+	/** 构建引文富文本运行段（上/下文渐出 + 大引号 + 选中文本） */
+	function buildShareQuoteRuns() : ShareRun[] {
+		const runs : ShareRun[] = [] as ShareRun[]
+		const d = shareData.value
+		if (d.farBefore.length > 0) {
+			runs.push({ text: d.farBefore, fs: 12.5, bold: false, color: 'rgba(14, 15, 12, 0.18)' } as ShareRun)
+		}
+		if (d.nearBefore.length > 0) {
+			runs.push({ text: d.nearBefore, fs: 12.5, bold: false, color: 'rgba(14, 15, 12, 0.4)' } as ShareRun)
+		}
+		runs.push({ text: '“', fs: 20, bold: true, color: 'rgba(14, 15, 12, 0.25)' } as ShareRun)
+		runs.push({ text: d.quote, fs: 13.5, bold: true, color: SHARE_INK } as ShareRun)
+		runs.push({ text: '”', fs: 20, bold: true, color: 'rgba(14, 15, 12, 0.25)' } as ShareRun)
+		if (d.nearAfter.length > 0) {
+			runs.push({ text: d.nearAfter, fs: 12.5, bold: false, color: 'rgba(14, 15, 12, 0.4)' } as ShareRun)
+		}
+		if (d.farAfter.length > 0) {
+			runs.push({ text: d.farAfter, fs: 12.5, bold: false, color: 'rgba(14, 15, 12, 0.18)' } as ShareRun)
+		}
+		return runs
+	}
+
+	/** 分享卡片布局：各块行盒顶位置与卡片/画布高度（想法块按行数占位，间距与预览 CSS 换算一致） */
+	type ShareCardLayout = {
+		thoughtTop : number
+		sourceTop : number
+		cardH : number
+		H : number
+	}
+
+	function layoutShareCard(quoteLines : RenderLine[], thL : string[]) : ShareCardLayout {
+		const quoteTop = SHARE_CARD_TOP + SHARE_HEADER_H + SHARE_LINE_H + 11.5
+		const quoteBlockH = quoteLines.length * SHARE_LINE_H
+		let thoughtTop = quoteTop + quoteBlockH + 11.5
+		if (thL.length > 0) {
+			thoughtTop += 1 + 9.5
+		}
+		const sourceTop = thoughtTop + (thL.length > 0 ? thL.length * SHARE_LINE_H : 0) + 11.5
+		const cardH = sourceTop + 15.0 - SHARE_CARD_TOP
+		return { thoughtTop: thoughtTop, sourceTop: sourceTop, cardH: cardH, H: SHARE_CARD_TOP + cardH } as ShareCardLayout
+	}
+
+	/** 绘制卡片底（顶部头像带浅灰 + 卡片白底）与产品名 */
+	function drawShareCardBase(ctx : CanvasRenderingContext2D, cardH : number) : void {
+		ctx.fillStyle = '#efefec'
+		ctx.fillRect(0, 0, SHARE_CARD_W, SHARE_CARD_TOP)
+		ctx.fillStyle = '#ffffff'
+		ctx.fillRect(0, SHARE_CARD_TOP, SHARE_CARD_W, cardH)
+		ctx.fillStyle = 'rgba(14, 15, 12, 0.45)'
+		ctx.font = '12.5px sans-serif'
+		ctx.textAlign = 'center'
+		ctx.fillText('无足鸟古诗词学习助手', SHARE_CARD_W / 2, SHARE_CARD_TOP + SHARE_HEADER_H + SHARE_BASE12)
+		ctx.textAlign = 'left'
+	}
+
+	/** 绘制引文块（富文本流式：大引号 + 上/下文渐出 + 选中文本加粗） */
+	function drawShareQuoteBlock(ctx : CanvasRenderingContext2D, quoteLines : RenderLine[]) : void {
+		drawRenderLines(ctx, quoteLines, SHARE_TEXT_X, SHARE_CARD_TOP + SHARE_HEADER_H + SHARE_LINE_H + 11.5, SHARE_LINE_H)
+	}
+
+	/** 绘制想法块（蓝色） */
+	function drawShareThoughtBlock(ctx : CanvasRenderingContext2D, thL : string[], top : number) : void {
+		drawCanvasLines(ctx, thL, SHARE_TEXT_X, top, SHARE_LINE_H, '12.5px sans-serif', '#1e40af', SHARE_BASE12)
+	}
+
+	/** 绘制出处（左对齐，与预览一致） */
+	function drawShareSource(ctx : CanvasRenderingContext2D, top : number) : void {
+		ctx.fillStyle = 'rgba(14, 15, 12, 0.4)'
+		ctx.font = '10.5px sans-serif'
+		ctx.fillText('《' + shareData.value.bookTitle + '》 · ' + shareData.value.source, SHARE_TEXT_X, top + SHARE_BASE10)
+	}
+
+	/** 绘制头像（白环包裹跨卡片顶边；withLogo=false 时以浅色圆替代） */
+	function drawShareLogo(ctx : CanvasRenderingContext2D, logo : CanvasImage, withLogo : boolean) : void {
+		ctx.fillStyle = '#ffffff'
+		ctx.beginPath()
+		ctx.arc(SHARE_CARD_W / 2, SHARE_CARD_TOP, SHARE_RING_R, 0, Math.PI * 2)
+		ctx.fill()
+		if (withLogo) {
+			ctx.save()
+			ctx.beginPath()
+			ctx.arc(SHARE_CARD_W / 2, SHARE_CARD_TOP, SHARE_LOGO_R, 0, Math.PI * 2)
+			ctx.clip()
+			ctx.drawImage(logo, SHARE_CARD_W / 2 - SHARE_LOGO_R, SHARE_CARD_TOP - SHARE_LOGO_R, SHARE_LOGO_R * 2, SHARE_LOGO_R * 2)
+			ctx.restore()
+		} else {
+			ctx.fillStyle = '#d9d9d5'
+			ctx.beginPath()
+			ctx.arc(SHARE_CARD_W / 2, SHARE_CARD_TOP, SHARE_LOGO_R, 0, Math.PI * 2)
+			ctx.fill()
+		}
+	}
+
+	/** 导出画布为临时图并保存到相册（单次） */
+	function exportShareCanvas(canvas : CanvasNode) : void {
+		uni.canvasToTempFilePath({
+			canvas: canvas,
+			success: (res2) => {
+				uni.saveImageToPhotosAlbum({
+					filePath: res2.tempFilePath,
+					success: () => {
+						emit('toast', '已保存到相册')
+					},
+					fail: () => {
+						emit('toast', '保存失败，请检查相册权限')
+					}
+				})
+			},
+			fail: () => {
+				emit('toast', '保存失败，请重试')
+			}
+		})
+	}
+
+	/** 绘制分享卡片到隐藏 canvas 并保存为长图（排版与预览 CSS 换算一致；头像半出卡片顶部白环包裹；想法全量渲染不截断） */
+	function saveShareImage() : void {
+		uni.createSelectorQuery().in(getCurrentInstance()!.proxy!).select('#share-canvas').fields({ node: true, size: true }, (res : any) : void => {
+			if (res == null || res.node == null) {
+				emit('toast', '保存失败，请重试')
+				return
+			}
+			const canvas = res.node as CanvasNode
+			const dpr = uni.getWindowInfo().pixelRatio
+			const ctx = canvas.getContext('2d')
+			if (ctx == null) {
+				emit('toast', '保存失败，请重试')
+				return
+			}
+			// 排版：富文本折行 + 想法折行 + 各块位置（测量在画布尺寸设定前完成，赋值后重新 scale）
+			const quoteLines = layoutShareRuns(ctx, buildShareQuoteRuns(), SHARE_TEXT_W)
+			const thL = shareData.value.thoughtText.length > 0 ? wrapCanvasLines(ctx, shareData.value.thoughtText, SHARE_TEXT_W, '12.5px sans-serif') : ([] as string[])
+			const L = layoutShareCard(quoteLines, thL)
+			canvas.width = SHARE_CARD_W * dpr
+			canvas.height = L.H * dpr
+			ctx.scale(dpr, dpr)
+			drawShareCardBase(ctx, L.cardH)
+			drawShareQuoteBlock(ctx, quoteLines)
+			if (thL.length > 0) {
+				drawShareThoughtBlock(ctx, thL, L.thoughtTop)
+			}
+			drawShareSource(ctx, L.sourceTop)
+			// 头像（异步加载，完成后导出；加载失败/超时以浅色圆替代）
+			let headerDrawn = false
+			let exported = false
+			const drawLogo = (withLogo : boolean) : void => {
+				if (headerDrawn) {
+					return
+				}
+				headerDrawn = true
+				drawShareLogo(ctx, logo, withLogo)
+			}
+			const exportCanvas = () : void => {
+				if (exported) {
+					return
+				}
+				exported = true
+				exportShareCanvas(canvas)
+			}
+			const logo = canvas.createImage()
+			logo.src = props.logoSrc
+			logo.onload = () => {
+				drawLogo(true)
+				exportCanvas()
+			}
+			logo.onerror = () => {
+				drawLogo(false)
+				exportCanvas()
+			}
+			// 加载异常兜底：超时后按浅色圆导出
+			setTimeout(() => {
+				drawLogo(false)
+				exportCanvas()
+			}, 1500)
+		}).exec()
+	}
+
+	defineExpose({
+		open
+	})
+</script>
+
+<style lang="scss">
+	/* 组件根：零尺寸占位（fixed 子浮层相对页面视口定位） */
+	.share-root {
+		width: 0;
+		height: 0;
+	}
+
+	/* 分享卡片预览（居中白卡：头像/引文渐出/想法/出处，固定日间配色便于分享） */
+	.share-mask {
+		position: fixed;
+		left: 0;
+		right: 0;
+		top: 0;
+		bottom: 0;
+		background-color: rgba($bai-ink, 0.6);
+		z-index: 96;
+		justify-content: center;
+		align-items: center;
+		/* 头像环一半出弹窗容器，沿途容器不裁剪 */
+		overflow: visible;
+	}
+
+	.share-pop {
+		position: relative;
+		flex-direction: column;
+		align-items: center;
+		overflow: visible;
+	}
+
+	.share-card {
+		width: 590rpx;
+		background-color: #ffffff;
+		border-radius: $bai-rounded-lg;
+		padding: 62rpx 31rpx 31rpx 31rpx;
+	}
+
+	/* 头像圆环包裹（环色与卡片一致）：绝对定位钉在卡片上边框正中，一半出卡，绘制于卡片上层 */
+	.share-card-logo-ring {
+		position: absolute;
+		top: -46rpx;
+		left: 50%;
+		margin-left: -46rpx;
+		width: 92rpx;
+		height: 92rpx;
+		border-radius: $bai-rounded-pill;
+		background-color: #ffffff;
+		padding: 6rpx;
+		z-index: 2;
+	}
+
+	.share-card-logo {
+		width: 80rpx;
+		height: 80rpx;
+		border-radius: $bai-rounded-pill;
+	}
+
+	.share-card-app {
+		font-size: 25rpx;
+		color: rgba(14, 15, 12, 0.45);
+		text-align: center;
+		margin-bottom: 23rpx;
+	}
+
+	.share-card-scroll {
+		flex-direction: column;
+	}
+
+	.share-card-text {
+		font-size: 25rpx;
+		line-height: 42rpx;
+	}
+
+	.share-ctx-far {
+		color: rgba(14, 15, 12, 0.18);
+	}
+
+	.share-ctx-near {
+		color: rgba(14, 15, 12, 0.4);
+	}
+
+	.share-quote-mark {
+		font-size: 40rpx;
+		font-weight: 800;
+		color: rgba(14, 15, 12, 0.25);
+	}
+
+	.share-quote-main {
+		font-size: 27rpx;
+		font-weight: 700;
+		color: #0e0f0c;
+	}
+
+	.share-card-thought {
+		margin-top: 23rpx;
+	}
+
+	.share-card-thought-text {
+		font-size: 25rpx;
+		line-height: 42rpx;
+		color: $bai-positive;
+	}
+
+	.share-card-source {
+		font-size: 21rpx;
+		color: rgba(14, 15, 12, 0.4);
+		margin-top: 23rpx;
+	}
+
+	.share-actions {
+		flex-direction: row;
+		gap: 15rpx;
+		margin-top: 31rpx;
+		width: 590rpx;
+	}
+
+	.share-action {
+		flex: 1;
+		height: 80rpx;
+		border-radius: $bai-rounded-pill;
+		background-color: #ffffff;
+		border: 1px solid rgba(14, 15, 12, 0.15);
+		align-items: center;
+		justify-content: center;
+	}
+
+	.share-action-text {
+		font-size: 27rpx;
+		color: #0e0f0c;
+	}
+
+	.share-action-share {
+		background-color: #0e0f0c;
+		border-color: #0e0f0c;
+	}
+
+	.share-action-text-primary {
+		color: #ffffff;
+	}
+
+	/* 分享卡片绘制画布（移出屏幕外，仅用于导出图片） */
+	.share-canvas {
+		position: fixed;
+		left: -9999px;
+		top: 0;
+		width: 375px;
+		height: 500px;
+	}
+</style>

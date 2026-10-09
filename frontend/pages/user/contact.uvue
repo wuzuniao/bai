@@ -1,12 +1,5 @@
 <template>
-	<view class="contact-page">
-		<!-- 顶部返回按钮（次级页面统一返回组件） -->
-		<BackButton />
-
-		<scroll-view class="contact-page__scroll" direction="vertical" :show-scrollbar="false">
-			<view class="contact-page__canvas" :style="'padding-top:' + mainTop + 'px'">
-				<PageHeader title="联系我们" desc="如果您在使用过程中遇到任何问题，欢迎随时联系我们。" />
-
+	<PageShell title="联系我们" desc="如果您在使用过程中遇到任何问题，欢迎随时联系我们。" :center="false">
 				<!-- 白色卡片：联系方式列表 -->
 				<view class="contact-page__card">
 					<view class="contact-page__list">
@@ -35,43 +28,14 @@
 						</view>
 					</view>
 				</view>
-			</view>
-		</scroll-view>
-	</view>
 </template>
 
 <script setup lang="uts">
-	import BackButton from '@/components/BackButton/BackButton.uvue'
-	import PageHeader from '@/components/PageHeader/PageHeader.uvue'
-
-	/** 顶部留白：返回按钮（状态栏高度 + 40px）之下再留 12px */
-	const mainTop = ref(96)
-	const win = uni.getWindowInfo()
-	if (win.statusBarHeight > 0) {
-		mainTop.value = win.statusBarHeight + 52
-	}
+	import PageShell from '@/components/common/PageShell.uvue'
 </script>
 
 <style lang="scss">
-	.contact-page {
-		flex: 1;
-		position: relative;
-		background-color: $bai-canvas-soft;
-	}
-
-	.contact-page__scroll {
-		flex: 1;
-	}
-
-	.contact-page__canvas {
-		padding-left: 48rpx;
-		padding-right: 48rpx;
-		padding-bottom: 64rpx;
-		box-sizing: border-box;
-		flex-direction: column;
-	}
-
-	/* ===== 白色卡片 ===== */
+	/* ===== 白色卡片（页面壳样式随 PageShell 组件） ===== */
 	.contact-page__card {
 		margin-top: 64rpx;
 		padding: 48rpx;

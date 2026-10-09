@@ -1,0 +1,746 @@
+<template>
+	<view class="sp-root">
+		<!-- 划词手柄（选区两端水滴形大手柄：拖动调节选中范围，触摸热区大于视觉体便于拖动；锚点实测完成后才显示，避免位置跳变） -->
+		<template v-if="bubbleVisible">
+			<view
+				id="sel-handle-start"
+				class="sel-handle sel-handle-start"
+				:style="'left:' + handleStartLeft + 'px;top:' + handleStartTop + 'px'"
+				@touchstart="onStartHandleTouchStart"
+				@touchmove="onStartHandleTouchMove"
+				@touchend="onStartHandleTouchEnd"
+				@touchcancel="onStartHandleTouchEnd"
+			>
+				<view class="sel-handle-drop"></view>
+				<view class="sel-handle-tip sel-handle-tip-down"></view>
+			</view>
+			<view
+				id="sel-handle-end"
+				class="sel-handle sel-handle-end"
+				:style="'left:' + handleEndLeft + 'px;top:' + handleEndTop + 'px'"
+				@touchstart="onEndHandleTouchStart"
+				@touchmove="onEndHandleTouchMove"
+				@touchend="onEndHandleTouchEnd"
+				@touchcancel="onEndHandleTouchEnd"
+			>
+				<view class="sel-handle-tip sel-handle-tip-up"></view>
+				<view class="sel-handle-drop"></view>
+			</view>
+		</template>
+		<!-- 划词气泡（Stitch: 黑底圆角 12px 内边距 12x8，操作项竖排图标+文字；位置由内联绑定——水平对准选区中心、垂直置于选区上/下侧，箭头随朝向指向选区） -->
+		<view
+			v-if="bubbleVisible"
+			class="selection-popover"
+			:style="'left:' + popoverLeft + 'px;top:' + popoverTop + 'px'"
+			@click="emit('dismiss')"
+		>
+			<!-- 气泡在选区下方时三角贴体顶朝上 -->
+			<view
+				v-if="below"
+				class="popover-arrow popover-arrow-above"
+				:style="'margin-left:' + arrowLeft + 'px;background-color:' + bg"
+			></view>
+			<view class="popover-body" :class="twoLine ? 'popover-body-two' : ''" :style="'background-color:' + bg">
+				<template v-if="twoLine">
+					<view class="popover-row">
+						<view class="popover-btn" @click="onAction($event, 'copy')">
+							<image class="popover-icon" src="/static/icons/popover-copy.svg" />
+							<text class="popover-text">复制</text>
+						</view>
+						<view class="popover-divider"></view>
+						<view class="popover-btn" @click="onAction($event, 'idea')">
+							<image class="popover-icon" src="/static/icons/popover-idea.svg" />
+							<text class="popover-text">写想法</text>
+						</view>
+						<view class="popover-divider"></view>
+						<view class="popover-btn" @click="onAction($event, 'underline')">
+							<image class="popover-icon" src="/static/icons/popover-underline.svg" />
+							<text class="popover-text">划线</text>
+						</view>
+					</view>
+					<view class="popover-divider-h"></view>
+					<view class="popover-row">
+						<view class="popover-btn" @click="onAction($event, 'query')">
+							<image class="popover-icon" src="/static/icons/popover-query.svg" />
+							<text class="popover-text">查询</text>
+						</view>
+						<view class="popover-divider"></view>
+						<view class="popover-btn" @click="onAction($event, 'share')">
+							<image class="popover-icon" src="/static/icons/popover-share.svg" />
+							<text class="popover-text">分享</text>
+						</view>
+					</view>
+				</template>
+				<template v-else>
+					<view class="popover-btn" @click="onAction($event, 'copy')">
+						<image class="popover-icon" src="/static/icons/popover-copy.svg" />
+						<text class="popover-text">复制</text>
+					</view>
+					<view class="popover-divider"></view>
+					<view class="popover-btn" @click="onAction($event, 'idea')">
+						<image class="popover-icon" src="/static/icons/popover-idea.svg" />
+						<text class="popover-text">写想法</text>
+					</view>
+					<view class="popover-divider"></view>
+					<view class="popover-btn" @click="onAction($event, 'underline')">
+						<image class="popover-icon" src="/static/icons/popover-underline.svg" />
+						<text class="popover-text">划线</text>
+					</view>
+					<view class="popover-divider"></view>
+					<view class="popover-btn" @click="onAction($event, 'query')">
+						<image class="popover-icon" src="/static/icons/popover-query.svg" />
+						<text class="popover-text">查询</text>
+					</view>
+					<view class="popover-divider"></view>
+					<view class="popover-btn" @click="onAction($event, 'share')">
+						<image class="popover-icon" src="/static/icons/popover-share.svg" />
+						<text class="popover-text">分享</text>
+					</view>
+				</template>
+			</view>
+			<!-- 气泡在选区上方时三角贴体底朝下 -->
+			<view
+				v-if="!below"
+				class="popover-arrow popover-arrow-below"
+				:style="'margin-left:' + arrowLeft + 'px;background-color:' + bg"
+			></view>
+		</view>
+
+		<!-- 想法子组件（查看卡片 + 写想法编辑器内聚：开关/定位/实测/保存经 ref 与事件接线） -->
+		<ThoughtPanel
+			ref="thoughtPanelRef"
+			:segs="segs"
+			:quote-color="quoteColor"
+			:panel-bg="panelBg"
+			:content-color="contentColor"
+			:shadow="shadow"
+			:page-w="pageW"
+			:page-h="pageH"
+			:nav-top="navTop"
+			@sync="emit('sync')"
+			@dismiss="emit('dismiss')"
+			@toast="emit('toast', $event)"
+			@thought-view-closed="emit('thoughtViewClosed')"
+		/>
+
+		<!-- 分享卡片子组件（预览浮层 + canvas 导出内聚：打开快照/绘制/存相册经 ref 与事件接线） -->
+		<ShareCard
+			ref="shareCardRef"
+			:share-ctx="shareCtx"
+			:logo-src="logoSrc"
+			:page-h="pageH"
+			@toast="emit('toast', $event)"
+		/>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { getCurrentInstance } from 'vue'
+	import { SelSpan, SpanSeg, TextMetrics, ParaRect, ShareQuoteCtx, comparePos, normalizeSpan, applySpanUnderlineToStorage, rowSpacing } from '@/utils/readerTypes.uts'
+	import ThoughtPanel from '@/components/selection/ThoughtPanel.uvue'
+	import ShareCard from '@/components/selection/ShareCard.uvue'
+
+	/**
+	 * SelectionPopover —— 阅读页划词气泡（可复用组件，框架层）
+	 * --------------------------------------------------------------
+	 * 职责：划词子系统（选区状态/手柄拖动/句间吸附/气泡定位显隐）+
+	 * 气泡五项操作分发；想法（查看卡片/编辑器）与分享（预览/canvas 导出）
+	 * 已拆分为 ThoughtPanel/ShareCard 子组件，本组件经 ref 与事件接线。
+	 * 划词：宿主长按正文完成 rect 查询与字符换算后经 ref 调
+	 *       beginSelection() 建立选区（正文锚点零宽字符与拖动段落矩形
+	 *       在宿主模板内，跨组件查询不可行，由宿主查询后经
+	 *       setAnchorRects/setDragRects 回传组件吸附换算）；选区变化
+	 *       emit('spanChanged') 供宿主渲染高亮镜像。
+	 * 复制：写入剪贴板（微信端系统提示，其他端页面内提示）。
+	 * 划线：本地存储区间运算（切换式：完全覆盖取消、否则并入），存储 key
+	 *       reader_underlines 为真源。
+	 * 查询：占位提示。
+	 * 写想法/查看卡片/分享：经 thoughtPanelRef/shareCardRef 调子组件
+	 *       （openEditor/open/showThoughtView/hideThoughtView）。
+	 * 划线/想法写入后子组件 emit('sync') 通知宿主重读本地存储刷新渲染；
+	 * 选区清除经 emit('dismiss')，提示经 emit('toast')。
+	 * 选区上下文（文本/段序列/分享快照）由宿主按选区计算下行。
+	 */
+	const props = defineProps<{
+		/** 气泡底色（随主题，夜间提亮） */
+		bg: string
+		/** 正文区顶部起点（px，气泡上置下界） */
+		navTop: number
+		/** 页面宽高（px，钳制与双行判定） */
+		pageW: number
+		pageH: number
+		/** 排版度量（每行字数/行高/字距，宿主随字号与屏宽下行，划词换算用） */
+		metrics: TextMetrics
+		/** 选区覆盖段序列（宿主按选区与各章段落展开；划线按项写入所在章） */
+		segs: SpanSeg[]
+		/** 选区文本（跨段拼接，宿主计算） */
+		text: string
+		/** 分享卡片内容快照（宿主按选区计算；null=无选区不可分享） */
+		shareCtx: ShareQuoteCtx | null
+		/** 分享卡片头像路径（宿主按登录态映射，未登录默认头像） */
+		logoSrc: string
+		/** 引用文本颜色（随主题，想法编辑器引用块） */
+		quoteColor: string
+		/** 想法查看卡片面板底色（随主题，夜间深色浮层） */
+		panelBg: string
+		/** 想法查看卡片内容文字色（随主题） */
+		contentColor: string
+		/** 浮层投影（随主题，想法查看卡片沿用底栏投影） */
+		shadow: string
+	}>()
+
+	const emit = defineEmits(['sync', 'dismiss', 'toast', 'thoughtViewClosed', 'spanChanged', 'dragStarted', 'queryAnchors'])
+
+	/** ===== 想法/分享子组件引用（浮层功能内聚子组件，本组件经 ref 接线转发） ===== */
+	const thoughtPanelRef = ref<ThoughtPanel | null>(null)
+	const shareCardRef = ref<ShareCard | null>(null)
+
+	/** 气泡定位（px，视口坐标）：体中心跟随焦点（钳制屏幕内），垂直优先上方、空间不足转下方 */
+	const popoverLeft = ref(0)
+	const popoverTop = ref(0)
+	/** 气泡是否位于选区下方（箭头朝上指向选区） */
+	const below = ref(false)
+	/** 箭头在气泡体内的水平位置（px，相对气泡体左缘，钳制不悬空） */
+	const arrowLeft = ref(0)
+	/** 气泡体尺寸缓存（内容固定，显示后查询一次校正；未就绪用估算值兜底） */
+	let popoverW = 0
+	let popoverH = 0
+	let popoverMeasured = false
+	const POPOVER_EST_W = 230
+	const POPOVER_EST_H = 52
+	/** 气泡双行布局：五项单行所需宽超过屏宽可用宽时切换，按屏宽判定一次 */
+	const twoLine = ref(false)
+	{
+		const needW = uni.upx2px(449) + 24
+		const availW = props.pageW - uni.upx2px(48)
+		twoLine.value = needW > availW
+	}
+
+	/** ===== 划词子系统（选区状态/手柄/拖动/句间吸附内聚；正文锚点与段落矩形由宿主查询回传） ===== */
+	/** 划词选区（跨段选区：从起点段/字符到终点段/字符的闭区间） */
+	const selSpan = ref<SelSpan | null>(null)
+	/** 起点段视口位置（px，长按时缓存；滚动/翻页/字号变化即清选区防止手柄错位） */
+	const selRectLeft = ref(0)
+	const selRectTop = ref(0)
+	/** 手柄位置（px，视口坐标，随选区端点更新） */
+	const handleStartLeft = ref(0)
+	const handleStartTop = ref(0)
+	const handleEndLeft = ref(0)
+	const handleEndTop = ref(0)
+	/** 选区几何（px，视口坐标，气泡定位用）：估算即时填充，锚点实测后覆盖为真实值 */
+	const selTopPx = ref(0)
+	const selBottomPx = ref(0)
+	/** 手柄热区/视觉体尺寸（rpx）：热区大于视觉体便于拖动 */
+	const HANDLE_HOT_RPX = 76
+	const HANDLE_VISUAL_RPX = 50
+	/** 手柄拖动状态（触摸目标在 touchstart 时锁定，move/end 持续派发至该手柄；响应式供气泡显隐联动） */
+	const dragStartActive = ref(false)
+	const dragEndActive = ref(false)
+	/** 箭头指向的视口 x：长按触点位置，拖动手柄后为被拖端的新边界 */
+	const selFocusX = ref(0)
+	/** 最后操作的手柄端：0=未拖动（箭头指长按触点）/ -1=起点 / 1=终点 */
+	let lastDragEnd = 0
+	/** 选区已实测定位（锚点测量完成后手柄/气泡才出现，避免估算兜底位置跳变为实测位置） */
+	const selectionLaidOut = ref(false)
+	/** 宿主回传的锚点实测矩形（起点/终点，齐备后吸附） */
+	let pendingAnchorStart : NodeInfo | null = null
+	let pendingAnchorEnd : NodeInfo | null = null
+	/** 宿主回传的拖动段落视口矩形（拖动开始时宿主查询回传） */
+	let dragRects : ParaRect[] = []
+	/** 建立选区时缓存的起点段文本长度（同段选区手柄估算用） */
+	let beginParaLen = 0
+	/** 气泡显示：有选区且已实测定位、不在拖动手柄中（拖动中隐藏，松手按新选区重定位显示） */
+	const bubbleVisible = computed(() : boolean => {
+		return selSpan.value != null && selectionLaidOut.value && !dragStartActive.value && !dragEndActive.value
+	})
+
+	/** 字符边界视口坐标（[x, y]）：isEnd=末字符右缘/其行底，否则首字符左缘/其行顶；字距按所在行取满行均分/末行自然值 */
+	function charEdgePos(charIdx : number, isEnd : boolean, len : number) : number[] {
+		const m = props.metrics
+		const maxRow = Math.max(0, Math.floor((len - 1) / m.perLine))
+		const row = Math.max(0, Math.min(Math.floor(charIdx / m.perLine), maxRow))
+		const col = charIdx - row * m.perLine
+		const spacing = rowSpacing(m, len, maxRow, row)
+		const lineTop = selRectTop.value + row * m.lineH
+		const x = selRectLeft.value + (isEnd ? (col + 1) * spacing : col * spacing)
+		return [x, isEnd ? lineTop + m.lineH : lineTop]
+	}
+
+	/** 按选区端点估算刷新手柄与选区几何（即时显示兜底；跨段选区估算失效，由锚点实测定位） */
+	function updateHandles() : void {
+		const s = selSpan.value
+		if (s == null) {
+			return
+		}
+		if (s.fromOrigin != s.toOrigin || s.fromCid != s.toCid) {
+			return
+		}
+		const hotH = uni.upx2px(HANDLE_HOT_RPX)
+		const visH = uni.upx2px(HANDLE_VISUAL_RPX)
+		// 选区同段内才能按排版估算；段长为建立选区时宿主提供的起点段文本长度
+		const len = beginParaLen
+		if (len <= 0) {
+			return
+		}
+		const sp = charEdgePos(s.fromStart, false, len)
+		handleStartLeft.value = sp[0] - hotH / 2
+		handleStartTop.value = sp[1] - visH
+		const ep = charEdgePos(s.toEnd, true, len)
+		handleEndLeft.value = ep[0] - hotH / 2
+		handleEndTop.value = ep[1] - hotH + visH
+		selTopPx.value = sp[1]
+		selBottomPx.value = ep[1]
+	}
+
+	/** 两个锚点实测矩形齐备后吸附：手柄贴真实字符边界，选区几何与气泡随之精化 */
+	function applyAnchors() : void {
+		const s = pendingAnchorStart
+		const e = pendingAnchorEnd
+		if (selSpan.value == null || s == null || e == null) {
+			return
+		}
+		const hotH = uni.upx2px(HANDLE_HOT_RPX)
+		const visH = uni.upx2px(HANDLE_VISUAL_RPX)
+		handleStartLeft.value = s.left - hotH / 2
+		handleStartTop.value = s.top - visH
+		handleEndLeft.value = e.right - hotH / 2
+		handleEndTop.value = e.bottom - hotH + visH
+		selTopPx.value = s.top
+		selBottomPx.value = e.bottom
+		// 拖动过手柄后箭头指向被拖端的新边界，未拖动时保持指向长按触点
+		if (lastDragEnd == -1) {
+			selFocusX.value = s.left
+		} else if (lastDragEnd == 1) {
+			selFocusX.value = e.right
+		}
+		// 实测完成，手柄与气泡以精确位置首次显示
+		selectionLaidOut.value = true
+	}
+
+	/** 手柄拖动（跨段）：触点映射到段落与字符并更新被拖端点；越过另一端时端点互换（原生选择交互）；拖动中手柄视觉跟随手指，松手后由锚点实测吸附真实边界 */
+	function applyHandleDrag(e : UniTouchEvent, isEnd : boolean) : void {
+		const span = selSpan.value
+		if (e.touches.length == 0 || span == null || dragRects.length == 0) {
+			return
+		}
+		const m = props.metrics
+		const touch = e.touches[0]
+		// 触点命中段落（纵向区间，未命中钳制首末段）
+		let idx = -1
+		for (let i = 0; i < dragRects.length; i++) {
+			if (touch.clientY >= dragRects[i].top && touch.clientY <= dragRects[i].bottom) {
+				idx = i
+				break
+			}
+		}
+		if (idx < 0) {
+			idx = touch.clientY < dragRects[0].top ? 0 : dragRects.length - 1
+		}
+		const pr = dragRects[idx]
+		// 拖动到的段落长度：以段序列口径不可用（跨章/跨段展开顺序≠rect 顺序），由宿主随矩形回传段长
+		const len = pr.len
+		if (len <= 0) {
+			return
+		}
+		const maxRow = Math.max(0, Math.floor((len - 1) / m.perLine))
+		let row = Math.floor((touch.clientY - pr.top) / m.lineH)
+		row = Math.max(0, Math.min(row, maxRow))
+		let col = Math.floor((touch.clientX - pr.left) / rowSpacing(m, len, maxRow, row))
+		col = Math.max(0, Math.min(col, m.perLine - 1))
+		const charIdx = Math.min(row * m.perLine + col, len - 1)
+		if (isEnd) {
+			// 终点柄：新位置在起点之前则互换端点，否则更新终点
+			if (comparePos(pr.cid, pr.origin, charIdx, span.fromCid, span.fromOrigin, span.fromStart) >= 0) {
+				span.toCid = pr.cid
+				span.toOrigin = pr.origin
+				span.toEnd = charIdx
+			} else {
+				span.toCid = span.fromCid
+				span.toOrigin = span.fromOrigin
+				span.toEnd = span.fromStart
+				span.fromCid = pr.cid
+				span.fromOrigin = pr.origin
+				span.fromStart = charIdx
+			}
+		} else {
+			// 起点柄：新位置在终点之后则互换端点，否则更新起点
+			if (comparePos(pr.cid, pr.origin, charIdx, span.toCid, span.toOrigin, span.toEnd) <= 0) {
+				span.fromCid = pr.cid
+				span.fromOrigin = pr.origin
+				span.fromStart = charIdx
+			} else {
+				span.fromCid = span.toCid
+				span.fromOrigin = span.toOrigin
+				span.fromStart = span.toEnd
+				span.toCid = pr.cid
+				span.toOrigin = pr.origin
+				span.toEnd = charIdx
+			}
+		}
+		const hotH = uni.upx2px(HANDLE_HOT_RPX)
+		// 箭头焦点跟随触点（跨段拖动时气泡随手指移动，避免停留在旧位置无法点击）
+		selFocusX.value = touch.clientX
+		if (isEnd) {
+			handleEndLeft.value = touch.clientX - hotH / 2
+			handleEndTop.value = touch.clientY - hotH / 2
+		} else {
+			handleStartLeft.value = touch.clientX - hotH / 2
+			handleStartTop.value = touch.clientY - hotH / 2
+		}
+		// 选区端点变化上行（宿主渲染高亮与派生上下文）
+		emit('spanChanged', span)
+	}
+
+	function onStartHandleTouchStart() : void {
+		dragStartActive.value = true
+		lastDragEnd = -1
+		emit('dragStarted')
+	}
+
+	function onStartHandleTouchMove(e : UniTouchEvent) : void {
+		if (dragStartActive.value) {
+			applyHandleDrag(e, false)
+		}
+	}
+
+	function onStartHandleTouchEnd() : void {
+		dragStartActive.value = false
+		emit('queryAnchors')
+	}
+
+	function onEndHandleTouchStart() : void {
+		dragEndActive.value = true
+		lastDragEnd = 1
+		emit('dragStarted')
+	}
+
+	function onEndHandleTouchMove(e : UniTouchEvent) : void {
+		if (dragEndActive.value) {
+			applyHandleDrag(e, true)
+		}
+	}
+
+	function onEndHandleTouchEnd() : void {
+		dragEndActive.value = false
+		emit('queryAnchors')
+	}
+
+	/** 建立选区（宿主长按正文完成 rect 查询/字符换算/想法恢复/句界计算后调用）：状态建立、手柄估算、请求锚点实测 */
+	function beginSelection(span : SelSpan, rectLeft : number, rectTop : number, focusX : number, paraLen : number) : void {
+		selRectLeft.value = rectLeft
+		selRectTop.value = rectTop
+		beginParaLen = paraLen
+		selSpan.value = normalizeSpan(span)
+		emit('spanChanged', selSpan.value)
+		// 箭头初始指向长按触点位置
+		selFocusX.value = focusX
+		lastDragEnd = 0
+		// 复位定位标记：手柄与气泡等锚点实测完成后才出现（估算位置仅作兜底，避免先显示估算位置再跳到实测位置）
+		selectionLaidOut.value = false
+		pendingAnchorStart = null
+		pendingAnchorEnd = null
+		updateHandles()
+		emit('queryAnchors')
+		// 锚点测量异常兜底：仍以估算位置显示手柄与气泡，保证功能可用
+		setTimeout(() => {
+			if (selSpan.value != null && !selectionLaidOut.value) {
+				selectionLaidOut.value = true
+			}
+		}, 250)
+	}
+
+	/** 宿主回传锚点实测矩形（which：0=起点锚点 / 1=终点锚点；齐备后吸附） */
+	function setAnchorRects(which : number, r : NodeInfo | null) : void {
+		if (which == 0) {
+			pendingAnchorStart = r
+		} else {
+			pendingAnchorEnd = r
+		}
+		applyAnchors()
+	}
+
+	/** 宿主回传拖动段落视口矩形（拖动开始时宿主查询正文段落并回传） */
+	function setDragRects(rects : ParaRect[]) : void {
+		dragRects = rects
+	}
+
+	/** 清除选区（滚动/翻页/字号变化/跳转等场景宿主调用）：状态复位并联动收起想法查看卡片（子组件） */
+	function hideSelection() : void {
+		selSpan.value = null
+		selectionLaidOut.value = false
+		pendingAnchorStart = null
+		pendingAnchorEnd = null
+		dragRects = []
+		thoughtPanelRef.value?.hideThoughtView()
+		emit('spanChanged', null)
+	}
+
+	/** 按选区几何重定位（估算兜底按布局模式区分，实测后以真实尺寸校正） */
+	function relocate() : void {
+		if (!bubbleVisible.value) {
+			return
+		}
+		const selTop = selTopPx.value
+		const selBottom = selBottomPx.value
+		const w = popoverW > 0 ? popoverW : (twoLine.value ? uni.upx2px(290) : POPOVER_EST_W)
+		const h = popoverH > 0 ? popoverH : (twoLine.value ? 100 : POPOVER_EST_H)
+		// 上下间距避开手柄视觉体：起点柄悬于行顶上方、终点柄圆头垂于行底下方，另留 16rpx 呼吸空隙
+		const hotH = uni.upx2px(76)
+		const visH = uni.upx2px(50)
+		const gapUp = visH + uni.upx2px(16)
+		const gapDown = hotH - visH + uni.upx2px(16)
+		const arrowH = uni.upx2px(13)
+		// 水平：气泡体中心跟随焦点位置，两侧留边钳制不出屏
+		const margin = uni.upx2px(24)
+		popoverLeft.value = Math.max(margin, Math.min(selFocusX.value - w / 2, props.pageW - margin - w))
+		// 垂直：上方放得下置上方；否则取上下空间宽裕侧（下方时箭头朝上）
+		const topSpace = selTop - gapUp - arrowH - h
+		const bottomSpace = props.pageH - selBottom - gapDown - arrowH - h
+		if (topSpace >= props.navTop || topSpace >= bottomSpace) {
+			below.value = false
+			popoverTop.value = Math.max(props.navTop, selTop - gapUp - arrowH - h)
+		} else {
+			below.value = true
+			popoverTop.value = Math.min(selBottom + gapDown + arrowH, props.pageH - h - uni.upx2px(60))
+		}
+		// 箭头（20rpx 方块）指向焦点：焦点在气泡体内时对准其位置、出体时钳到边缘，左缘再扣半宽
+		const arrowMargin = uni.upx2px(30)
+		const arrowCenter = Math.max(arrowMargin, Math.min(selFocusX.value - popoverLeft.value, w - arrowMargin))
+		arrowLeft.value = arrowCenter - uni.upx2px(10)
+	}
+
+	watch(
+		[bubbleVisible, () => selTopPx.value, () => selBottomPx.value, () => selFocusX.value],
+		() => {
+			relocate()
+			if (bubbleVisible.value && !popoverMeasured) {
+				setTimeout(() => {
+					measure()
+				}, 80)
+			}
+		}
+	)
+
+	/** 查询气泡体实际尺寸并校正定位（内容固定仅查一次，查询失败允许重试；组件内查询必须 .in 实例） */
+	function measure() : void {
+		uni.createSelectorQuery().in(getCurrentInstance()!.proxy!).select('.popover-body').boundingClientRect((rect : NodeInfo | null) : void => {
+			if (rect != null && rect.width > 0 && rect.height > 0) {
+				popoverW = rect.width
+				popoverH = rect.height
+				popoverMeasured = true
+				relocate()
+			}
+		}).exec()
+	}
+
+	/** 延迟清选区（复制/查询操作后留出感知时间） */
+	function delayDismiss() : void {
+		setTimeout(() => {
+			emit('dismiss')
+		}, 500)
+	}
+
+	/** 气泡操作分发（阻止冒泡避免触发容器点击清选区） */
+	function onAction(e : UniPointerEvent, action : string) : void {
+		e.stopPropagation()
+		if (action === 'copy') {
+			doCopy()
+		} else if (action === 'idea') {
+			// 打开想法编辑器（子组件内聚：输入/保存/同步划线），编辑期间保留选区
+			thoughtPanelRef.value?.openEditor(props.text)
+		} else if (action === 'underline') {
+			doUnderline()
+		} else if (action === 'query') {
+			emit('toast', '查询功能即将上线')
+			delayDismiss()
+		} else if (action === 'share') {
+			shareCardRef.value?.open()
+		}
+	}
+
+	/** 复制：选区文本写入剪贴板（微信端系统强制「内容已复制」提示，只保留系统提示） */
+	function doCopy() : void {
+		const content = props.text
+		if (content.length == 0) {
+			return
+		}
+		// #ifdef MP-WEIXIN
+		uni.setClipboardData({
+			data: content,
+			fail: () => {
+				emit('toast', '复制失败，请重试')
+			}
+		})
+		// #endif
+		// #ifndef MP-WEIXIN
+		uni.setClipboardData({
+			data: content,
+			showToast: false,
+			success: () => {
+				emit('toast', '已复制到剪贴板')
+			},
+			fail: () => {
+				emit('toast', '复制失败，请重试')
+			}
+		})
+		// #endif
+		delayDismiss()
+	}
+
+	/** 划线：选区段序列逐段做区间切换（已完全划线取消、否则并入）并持久化，随后通知宿主重读 */
+	function doUnderline() : void {
+		if (props.segs.length == 0) {
+			return
+		}
+		applySpanUnderlineToStorage(props.segs, false)
+		emit('sync')
+		emit('dismiss')
+	}
+
+	/** ===== 宿主调用入口（划词协议 + 想法查看卡片开关转发子组件） ===== */
+	function showThoughtView(quote : string, content : string, selBottom : number, selTop : number) : void {
+		thoughtPanelRef.value?.showThoughtView(quote, content, selBottom, selTop)
+	}
+
+	function hideThoughtView() : void {
+		thoughtPanelRef.value?.hideThoughtView()
+	}
+
+	defineExpose({
+		beginSelection,
+		hideSelection,
+		setAnchorRects,
+		setDragRects,
+		showThoughtView,
+		hideThoughtView
+	})
+</script>
+
+<style lang="scss">
+	/* 组件根：零尺寸占位（不设 flex 参与宿主 flex 流挤压正文），fixed 子浮层相对页面视口定位 */
+	.sp-root {
+		width: 0;
+		height: 0;
+	}
+
+	/* 划词手柄（选区两端水滴形大手柄：圆头+三角尖，色取正蓝与高亮呼应；热区 76rpx 大于视觉体 50rpx 便于拖动，起点柄贴行顶、终点柄贴行底） */
+	.sel-handle {
+		position: fixed;
+		width: 76rpx;
+		height: 76rpx;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		z-index: 61;
+	}
+
+	.sel-handle-drop {
+		width: 34rpx;
+		height: 34rpx;
+		border-radius: $bai-rounded-pill;
+		background-color: $bai-positive;
+	}
+
+	.sel-handle-tip {
+		width: 0;
+		height: 0;
+		border-left-width: 12rpx;
+		border-left-style: solid;
+		border-left-color: transparent;
+		border-right-width: 12rpx;
+		border-right-style: solid;
+		border-right-color: transparent;
+	}
+
+	.sel-handle-tip-down {
+		border-top-width: 16rpx;
+		border-top-style: solid;
+		border-top-color: $bai-positive;
+		margin-top: -4rpx;
+	}
+
+	.sel-handle-tip-up {
+		border-bottom-width: 16rpx;
+		border-bottom-style: solid;
+		border-bottom-color: $bai-positive;
+		margin-bottom: -4rpx;
+	}
+
+	/* 划词气泡（Stitch: 黑底圆角 12px 内边距 12x8，操作项竖排图标+文字；位置由内联绑定——水平对准选区中心、垂直置于选区上/下侧，箭头随朝向指向选区） */
+	.selection-popover {
+		position: fixed;
+		z-index: 60;
+	}
+
+	.popover-body {
+		position: relative;
+		flex-direction: row;
+		align-items: center;
+		gap: 6rpx;
+		padding: 12rpx 15rpx;
+		/* 背景内联绑定（夜间提亮一档与暗底区分，日间墨黑） */
+		border-radius: $bai-rounded-md;
+	}
+
+	/* 双行布局（屏宽不足以单行展开时）：行靠左、各行与按钮宽度均自适应内容，行间水平细分隔线（stretch 横贯） */
+	.popover-body-two {
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 0;
+	}
+
+	.popover-row {
+		flex-direction: row;
+		align-items: center;
+		gap: 6rpx;
+	}
+
+	.popover-divider-h {
+		align-self: stretch;
+		height: 1px;
+		margin: 10rpx 15rpx;
+		background-color: rgba($bai-on-primary, 0.2);
+	}
+
+	.popover-btn {
+		flex-direction: column;
+		align-items: center;
+		gap: 6rpx;
+		padding: 6rpx 14rpx;
+	}
+
+	.popover-icon {
+		width: 31rpx;
+		height: 31rpx;
+	}
+
+	.popover-text {
+		font-size: 21rpx;
+		font-weight: 500;
+		color: $bai-on-primary;
+	}
+
+	.popover-divider {
+		width: 1px;
+		height: 46rpx;
+		background-color: rgba($bai-on-primary, 0.2);
+	}
+
+	/* 气泡箭头（体旁旋转 45° 实色小方块：一半与体重叠（同色无缝）、露出一半形成三角尖，规避 border 三角 hack 与体圆角裁剪；水平 margin-left 内联绑定指向按住位置，颜色内联绑定与体一致） */
+	.popover-arrow {
+		width: 20rpx;
+		height: 20rpx;
+		transform: rotate(45deg);
+	}
+
+	/* 气泡在选区上方：方块贴体底，上移半格与体重叠，露出下半菱形为朝下尖 */
+	.popover-arrow-below {
+		margin-top: -10rpx;
+	}
+
+	/* 气泡在选区下方：方块贴体顶，下移半格与体重叠，露出下半菱形为朝上尖 */
+	.popover-arrow-above {
+		margin-bottom: -10rpx;
+	}
+
+</style>

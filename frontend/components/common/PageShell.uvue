@@ -1,0 +1,67 @@
+<template>
+	<view class="page-shell">
+		<BackButton />
+		<scroll-view class="page-shell__scroll" direction="vertical" :show-scrollbar="false">
+			<view class="page-shell__canvas" :class="center ? 'page-shell__canvas--center' : ''" :style="'padding-top:' + mainTop + 'px'">
+				<PageHeader v-if="title.length > 0" :title="title" :desc="desc" />
+				<slot />
+			</view>
+		</scroll-view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	/**
+	 * PageShell —— 次级页面骨架组件（返回按钮 + 滚动画布 + 页头）
+	 * --------------------------------------------------------------------------
+	 * 收敛 user 子包与活动页共用的页面壳：BackButton 定位、状态栏避让
+	 * （mainTopPx，utils/layout.uts）、画布左右 48rpx/底部 64rpx 内边距与 PageHeader。
+	 * center=true 用于登录/注册/找回等表单页（画布垂直居中 + 占满视口高）；
+	 * title 传空串时不渲染 PageHeader（标题在卡片内的页面）。
+	 * 站内信页为原生滚动（onReachBottom 触底分页）不适用本组件；reward 页边距
+	 * 为 Stitch 390 基准（38rpx）亦不套用。
+	 */
+	import BackButton from '@/components/common/BackButton.uvue'
+	import PageHeader from '@/components/common/PageHeader.uvue'
+	import { mainTopPx } from '@/utils/layout.uts'
+
+	const props = defineProps<{
+		/** 页头主标题（空串不渲染页头） */
+		title: string
+		/** 页头副标题/描述 */
+		desc: string
+		/** 画布垂直居中（登录/注册/找回表单页） */
+		center: boolean
+	}>()
+
+	/** 顶部留白：返回按钮（状态栏高度 + 40px）之下再留 12px */
+	const mainTop = ref(mainTopPx())
+</script>
+
+<style lang="scss">
+	.page-shell {
+		flex: 1;
+		position: relative;
+		background-color: $bai-canvas-soft;
+	}
+
+	.page-shell__scroll {
+		flex: 1;
+	}
+
+	.page-shell__canvas {
+		padding-left: 48rpx;
+		padding-right: 48rpx;
+		padding-bottom: 64rpx;
+		box-sizing: border-box;
+		flex-direction: column;
+	}
+
+	/* 表单页画布：垂直居中并占满视口（登录/注册/找回） */
+	.page-shell__canvas--center {
+		min-height: 100vh;
+		padding-bottom: 72rpx;
+		justify-content: center;
+		align-items: center;
+	}
+</style>

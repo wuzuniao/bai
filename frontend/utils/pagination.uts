@@ -1,0 +1,45 @@
+/**
+ * 分页引擎（纯函数）：按可用高度预算将章内段落切分为页
+ * 页面仅持 computed 薄壳（响应式依赖经参数传入自动追踪），排版规则单点维护：
+ * 行高 1.7 倍字号、每行字数计入 0.4rpx 字距（约 0.2px/字）、段间距 40rpx、
+ * 章节头约 294rpx 仅占章首页、页高预算为可用高度的 95%（留排版误差余量）。
+ */
+
+/** 分页结果：每页的章内段落索引数组——段落高度（整行×行高）逐段累计，装不下的段落流到下一页 */
+export function computePageBreaks(paraTexts : string[], pageW : number, pageH : number, fontSize : number, topPx : number, bottomPx : number) : number[][] {
+	const pages : number[][] = []
+	let current : number[] = []
+	let usedH = 0
+	if (pageW <= 0 || pageH <= 0 || fontSize <= 0) {
+		// 窗口尺寸未就绪（首帧）：退化为整章单段一页的占位分页
+		return paraTexts.map((t : string, i : number) : number[] => {
+			return [i]
+		})
+	}
+	const lineH = fontSize * 1.7
+	// 每行字数计入字距 0.4rpx（约 0.2px/字）
+	const perLine = Math.max(1, Math.floor((pageW - uni.upx2px(124)) / (fontSize + 0.2)))
+	const paraGap = uni.upx2px(40)
+	const headerH = uni.upx2px(294)
+	// 页面高度预算 = 可用高度（屏高-顶部起点-底部留白）的 95%，留排版误差余量
+	const budget = Math.max(lineH, (pageH - topPx - bottomPx) * 0.95)
+	// 章节头（标签行+大标题+分隔条+下边距，约 294rpx）仅占用章首页
+	let curBudget = Math.max(lineH, budget - headerH)
+	for (let i = 0; i < paraTexts.length; i++) {
+		const paraH = Math.ceil(paraTexts[i].length / perLine) * lineH
+		let gap = current.length > 0 ? paraGap : 0
+		if (usedH + gap + paraH > curBudget && current.length > 0) {
+			pages.push(current)
+			current = []
+			usedH = 0
+			gap = 0
+			curBudget = budget
+		}
+		current.push(i)
+		usedH += gap + paraH
+	}
+	if (current.length > 0) {
+		pages.push(current)
+	}
+	return pages
+}

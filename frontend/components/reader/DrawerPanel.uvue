@@ -1,0 +1,264 @@
+<template>
+	<view class="drawer-panel" :style="'height:' + drawerHeight + 'px'">
+		<view class="settings-grip-row">
+			<view class="settings-grip"></view>
+		</view>
+		<view class="drawer-header">
+			<view :class="drawerTab === 'catalog' ? 'drawer-tab-active' : 'drawer-tab-plain'" @click="switchDrawerTab('catalog')">
+				<text :class="drawerTab === 'catalog' ? 'drawer-tab-title' : 'drawer-tab-plain'">目录</text>
+				<text v-if="drawerTab === 'catalog'" class="drawer-tab-sort" @click="onSortTap($event)">{{ orderDesc ? '↓↑' : '⇅' }}</text>
+			</view>
+			<view :class="drawerTab === 'note' ? 'drawer-tab-active' : 'drawer-tab-plain'" @click="switchDrawerTab('note')">
+				<text :class="drawerTab === 'note' ? 'drawer-tab-title' : 'drawer-tab-plain'">想法/划线</text>
+			</view>
+			<view :class="drawerTab === 'bookmark' ? 'drawer-tab-active' : 'drawer-tab-plain'" @click="switchDrawerTab('bookmark')">
+				<text :class="drawerTab === 'bookmark' ? 'drawer-tab-title' : 'drawer-tab-plain'">书签</text>
+			</view>
+		</view>
+		<scroll-view class="drawer-list" direction="vertical" :show-scrollbar="false">
+			<!-- 目录页（当前阅读章节蓝色高亮由 activeChapterId 驱动；懒渲染：抽屉关闭时卸载，长篇数百章不常驻 DOM，打开时按 activeChapterId 重建） -->
+			<view v-if="open && drawerTab === 'catalog'">
+				<view
+					v-for="(ch, ci) in displayChapters"
+					:key="ch.id"
+					class="chapter-item"
+					@click="onSelectChapter(ch)"
+				>
+					<text class="chapter-item-text" :class="ch.active ? 'chapter-item-text-active' : ''" :style="'color:' + (ch.active ? theme.activeBlue : theme.chapterTextColor)">{{ ch.title }}</text>
+				</view>
+			</view>
+			<!-- 想法/划线页（懒渲染同目录页）：划线记录卡片（宿主 notes 随划线与取消划线实时同步） -->
+			<view v-else-if="open && drawerTab === 'note'">
+				<view v-if="notes.length == 0" class="bookmark-empty">
+					<text class="bookmark-empty-text" :style="'color:' + theme.mutedColor">暂无划线记录，长按正文即可划线</text>
+				</view>
+				<view
+					v-for="(r, ri) in notes"
+					:key="ri"
+					class="note-item"
+					@click="onGoNote(r)"
+				>
+					<text class="note-item-text" :style="'color:' + theme.mutedColor">{{ r.quote }}</text>
+					<text v-if="r.content.length > 0" class="note-item-content" :style="'color:' + theme.chapterTextColor">{{ r.content }}</text>
+				</view>
+			</view>
+			<!-- 书签页（真源在 BookmarkPanel：增删/持久化与列表展示内聚；保持常挂载——书签增删 ref 链经此转发，不随抽屉开关卸载） -->
+			<view v-else>
+				<BookmarkPanel
+					ref="bookmarkPanelRef"
+					:theme="theme"
+					:night="night"
+					:chapters="chapters"
+					@go-bookmark="onGoBookmark"
+					@changed="onBookmarksChanged"
+				/>
+			</view>
+		</scroll-view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { Chapter, Bookmark, NoteRecord, ReaderTheme } from '@/utils/readerTypes.uts'
+	import BookmarkPanel from '@/components/reader/BookmarkPanel.uvue'
+
+	/**
+	 * DrawerPanel —— 目录抽屉子组件（抽屉壳与页签）
+	 * --------------------------------------------------------------------------
+	 * 页签（目录/想法划线/书签）与目录排序为面板内 UI 状态，组件自管理；
+	 * 目录页/想法页渲染与跳转事件上行；书签页内嵌 BookmarkPanel（真源与列表内聚），
+	 * 书签增删 ref 与跳转/变更事件经本组件逐层转发宿主。
+	 * 组件常挂载（宿主经 v-show 控制显隐），open 由隐藏转可见时重置页签与排序，
+	 * 对齐原 v-if 卸载重挂的交互节奏。
+	 * 懒渲染：目录页/想法页内容随 open 条件挂载（长篇数百章不常驻 DOM，
+	 * computed 无订阅即不重算）；书签页保持常挂载（书签增删 ref 链常可用）。
+	 */
+	const props = defineProps<{
+		/** 抽屉可见状态（宿主 v-show 控制显隐；转可见时重置页签/排序） */
+		open: boolean
+		/** 抽屉面板高度（px，宿主按胶囊/状态栏计算下行） */
+		drawerHeight: number
+		/** 主题（成组色值，宿主派生下行） */
+		theme: ReaderTheme
+		/** 夜间态（书签条目图标变体） */
+		night: boolean
+		/** 目录章节列表（正序全量） */
+		chapters: Chapter[]
+		/** 当前阅读章节 id（目录高亮） */
+		activeChapterId: number
+		/** 想法/划线记录卡片列表 */
+		notes: NoteRecord[]
+	}>()
+	const emit = defineEmits(['selectChapter', 'goNote', 'goBookmark', 'toast', 'changed'])
+
+	/** 书签子组件引用（书签增删 ref 转发） */
+	const bookmarkPanelRef = ref<BookmarkPanel | null>(null)
+
+	/** ===== 目录抽屉（页签/排序为面板内 UI 状态，组件自管理） ===== */
+	const drawerTab = ref('catalog')
+	const orderDesc = ref(false)
+
+	/** 目录正/倒序展示（Stitch: ⇅/↓↑ 切换；当前阅读章节蓝色高亮由 activeChapterId 驱动） */
+	const displayChapters = computed<Chapter[]>(() : Chapter[] => {
+		const marked = props.chapters.map((c : Chapter) : Chapter => {
+			return { id: c.id, title: c.title, label: c.label, contentTitle: c.contentTitle, active: c.id == props.activeChapterId } as Chapter
+		})
+		if (!orderDesc.value) {
+			return marked
+		}
+		return marked.slice().reverse()
+	})
+
+	/** 抽屉页签切换 */
+	function switchDrawerTab(tab : string) : void {
+		drawerTab.value = tab
+	}
+
+	/** 目录页签排序箭头：阻止冒泡（防触发父级页签切换）后切换正/倒序 */
+	function onSortTap(e : UniPointerEvent) : void {
+		e.stopPropagation()
+		orderDesc.value = !orderDesc.value
+		emit('toast', orderDesc.value ? '已切换至倒序排列' : '已切换至正序排列')
+	}
+
+	/** 抽屉由隐藏转可见时重置页签与排序（对齐原 v-if 卸载重挂的交互节奏） */
+	watch(() : boolean => props.open, (v : boolean) : void => {
+		if (v) {
+			drawerTab.value = 'catalog'
+			orderDesc.value = false
+		}
+	})
+
+	/** ===== 交互事件上行（导航类耦合宿主正文） ===== */
+	function onSelectChapter(ch : Chapter) : void {
+		emit('selectChapter', ch.id)
+	}
+
+	function onGoNote(r : NoteRecord) : void {
+		emit('goNote', r)
+	}
+
+	function onGoBookmark(bm : Bookmark) : void {
+		emit('goBookmark', bm)
+	}
+
+	function onBookmarksChanged() : void {
+		emit('changed')
+	}
+
+	/** 书签增删转发（宿主下拉/上推手势落定经 ref 调用，逐层下传书签真源组件） */
+	function addBookmark(chapterId : number, pageIndex : number) : void {
+		bookmarkPanelRef.value?.addBookmark(chapterId, pageIndex)
+	}
+
+	function removeBookmark(chapterId : number, pageIndex : number) : void {
+		bookmarkPanelRef.value?.removeBookmark(chapterId, pageIndex)
+	}
+
+	defineExpose({
+		addBookmark,
+		removeBookmark
+	})
+</script>
+
+<style lang="scss">
+	/* 目录抽屉（控制栏内容块：与设置面板一致随控制栏从底部弹出，高度内联绑定；顶部间距与设置面板一致） */
+	.drawer-panel {
+		padding-top: 23rpx;
+		flex-direction: column;
+	}
+
+	.settings-grip-row {
+		flex-direction: row;
+		justify-content: center;
+		padding-bottom: 23rpx;
+	}
+
+	.settings-grip {
+		width: 69rpx;
+		height: 8rpx;
+		border-radius: $bai-rounded-pill;
+		background-color: $bai-neutral;
+	}
+
+	.drawer-header {
+		flex-direction: row;
+		align-items: center;
+		gap: 46rpx;
+		padding: 31rpx 38rpx 23rpx 38rpx;
+	}
+
+	.drawer-tab-active {
+		flex-direction: row;
+		align-items: flex-end;
+		gap: 4rpx;
+		padding-bottom: 4rpx;
+	}
+
+	.drawer-tab-title {
+		font-size: 38rpx;
+		font-weight: 700;
+		color: $bai-positive;
+	}
+
+	.drawer-tab-sort {
+		font-size: 27rpx;
+		line-height: 27rpx;
+		font-weight: 600;
+		color: $bai-positive;
+	}
+
+	.drawer-tab-plain {
+		font-size: 33rpx;
+		color: $bai-mute;
+	}
+
+	.drawer-list {
+		flex: 1;
+	}
+
+	.chapter-item {
+		padding: 27rpx 38rpx;
+	}
+
+	.chapter-item-text {
+		font-size: 29rpx;
+	}
+
+	.chapter-item-text-active {
+		font-weight: 600;
+	}
+
+	/* 划线记录卡片（抽屉想法/划线页签）：左竖条装饰，文本颜色内联绑定跟随主题 */
+	.note-item {
+		margin: 15rpx 38rpx;
+		padding: 20rpx 25rpx;
+		border-left-width: 6rpx;
+		border-left-style: solid;
+		border-left-color: $bai-neutral;
+		border-radius: 8rpx;
+		background-color: rgba($bai-ink, 0.04);
+	}
+
+	/* 引用文本（原文摘录）弱化：弱色小字；想法内容为主文字 */
+	.note-item-text {
+		font-size: 25rpx;
+		line-height: 38rpx;
+	}
+
+	.note-item-content {
+		font-size: 27rpx;
+		line-height: 42rpx;
+		margin-top: 10rpx;
+	}
+
+	/* 想法页空态（样式随 BookmarkPanel 同规格） */
+	.bookmark-empty {
+		padding: 64rpx 38rpx;
+		align-items: center;
+	}
+
+	.bookmark-empty-text {
+		font-size: 27rpx;
+		text-align: center;
+	}
+</style>

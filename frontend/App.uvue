@@ -50,13 +50,4 @@
 	.uni-column {
 		flex-direction: column;
 	}
-
-	/* 右箭头（CSS 三角形）：列表项右侧指示箭头，纯 border 绘制 */
-	.u-arrow-right {
-		width: 0;
-		height: 0;
-		border-top: 12rpx solid transparent;
-		border-bottom: 12rpx solid transparent;
-		border-left: 15rpx solid $bai-mute;
-	}
 </style>

@@ -23,6 +23,11 @@ export type Bookmark = {
 	pageIndex: number
 }
 
+/** 章节段落（正文渲染/分页/划线定位共用；text 为段落文本，段落索引是划线/想法/进度的定位键） */
+export type Paragraph = {
+	text: string
+}
+
 /** 想法/划线卡片（目录抽屉卡片列表项） */
 export type NoteRecord = {
 	cid: number
@@ -144,10 +149,11 @@ export type ShareQuoteCtx = {
 	bookTitle: string
 }
 
-export const UNDERLINE_STORAGE_KEY = 'reader_underlines'
-export const THOUGHT_STORAGE_KEY = 'reader_thoughts'
-export const BOOKMARK_STORAGE_KEY = 'reader_bookmarks'
-export const SETTINGS_STORAGE_KEY = 'reader_settings'
+// 划线/想法/书签/设置的本地存储 key（存储真源收口本文件，外部一律经下方读写工具访问）
+const UNDERLINE_STORAGE_KEY = 'reader_underlines'
+const THOUGHT_STORAGE_KEY = 'reader_thoughts'
+const BOOKMARK_STORAGE_KEY = 'reader_bookmarks'
+const SETTINGS_STORAGE_KEY = 'reader_settings'
 
 /** 阅读设置（字号/翻页模式/主题/字体，真源本地存储：ReaderControl 组件读写，页面应用渲染） */
 export type ReaderSettings = {
@@ -267,7 +273,7 @@ export function findUnderlineEntry(list : UnderlineEntry[], cid : number, origin
  * add=true 恒并入（写想法时确保划线），add=false 为切换（选中区域已完全划线则取消）；
  * 区间清空的记录整条移除，避免存储留空壳
  */
-export function applySegUnderline(list : UnderlineEntry[], cid : number, origin : number, start : number, end : number, add : boolean) : void {
+function applySegUnderline(list : UnderlineEntry[], cid : number, origin : number, start : number, end : number, add : boolean) : void {
 	let entry = findUnderlineEntry(list, cid, origin)
 	if (entry == null) {
 		entry = { cid: cid, origin: origin, ranges: [] } as UnderlineEntry
@@ -324,4 +330,85 @@ export function saveThought(t : Thought) : void {
 	const list = loadThoughts()
 	list.push(t)
 	uni.setStorageSync(THOUGHT_STORAGE_KEY, JSON.stringify(list))
+}
+
+/**
+ * 划线/想法卡片列表组装（目录抽屉数据源）：
+ * 划线区间派生卡片并关联想法（想法覆盖的划线区间不再单出划线卡），无匹配区间的想法独立成卡；
+ * 按 章/段落/位置 升序。章节段落未注入（首帧渲染早于书籍加载）或记录指向已不存在的章时跳过，避免越界。
+ */
+export function buildNoteRecords(underlines : UnderlineEntry[], thoughts : Thought[], chapterParas : Paragraph[][]) : NoteRecord[] {
+	const records : NoteRecord[] = []
+	const usedThoughts : boolean[] = thoughts.map(() : boolean => false)
+	for (const e of underlines) {
+		// 划线文本按记录所在章取：跨章划线的卡片引用不能用当前章段落数组
+		const paras = e.cid >= 0 && e.cid < chapterParas.length ? chapterParas[e.cid] : ([] as Paragraph[])
+		const p = paras[e.origin]
+		if (p == null) {
+			continue
+		}
+		for (const u of e.ranges) {
+			const quote = p.text.slice(u[0], u[1] + 1)
+			let content = ''
+			for (let ti = 0; ti < thoughts.length; ti++) {
+				const t = thoughts[ti]
+				if (t.fromCid == e.cid && t.fromOrigin == e.origin && t.fromStart == u[0] && t.toCid == e.cid && t.toOrigin == e.origin && t.toEnd == u[1]) {
+					content = t.content
+					usedThoughts[ti] = true
+					break
+				}
+			}
+			records.push({ cid: e.cid, origin: e.origin, qStart: u[0], quote: quote, content: content } as NoteRecord)
+		}
+	}
+	for (let ti = 0; ti < thoughts.length; ti++) {
+		if (!usedThoughts[ti]) {
+			const t = thoughts[ti]
+			records.push({ cid: t.fromCid, origin: t.fromOrigin, qStart: t.fromStart, quote: t.quote, content: t.content } as NoteRecord)
+		}
+	}
+	records.sort((a : NoteRecord, b : NoteRecord) : number => {
+		if (a.cid != b.cid) {
+			return a.cid - b.cid
+		}
+		if (a.origin != b.origin) {
+			return a.origin - b.origin
+		}
+		return a.qStart - b.qStart
+	})
+	return records
+}
+
+/**
+ * 分享卡片内容快照组装：上下文渐出四段 + 引文 + 关联想法 + 出处。
+ * 跨段选区取首段前文/末段后文（前文各留 24 字窗口、后文各留 25 字窗口，中点对半分档）；
+ * 想法与选区区间相交即关联（拖动微调后仍展示），出处取选区终点章标题。
+ */
+export function buildShareQuoteCtx(s : SelSpan, fromText : string, toText : string, thoughts : Thought[], quoteText : string, sourceTitle : string, bookTitle : string) : ShareQuoteCtx {
+	const ctxStart = Math.max(0, s.fromStart - 24)
+	const ctxEnd = Math.min(toText.length, s.toEnd + 25)
+	const before = fromText.slice(ctxStart, s.fromStart)
+	const after = toText.slice(s.toEnd + 1, ctxEnd)
+	const halfB = Math.ceil(before.length / 2)
+	const halfA = Math.floor(after.length / 2)
+	let thoughtText = ''
+	for (const t of thoughts) {
+		// 选区与想法区间相交即展示（拖动微调后仍关联）
+		const tEndAfterSpanFrom = comparePos(t.toCid, t.toOrigin, t.toEnd, s.fromCid, s.fromOrigin, s.fromStart) >= 0
+		const tStartBeforeSpanEnd = comparePos(t.fromCid, t.fromOrigin, t.fromStart, s.toCid, s.toOrigin, s.toEnd) <= 0
+		if (tEndAfterSpanFrom && tStartBeforeSpanEnd) {
+			thoughtText = t.content
+			break
+		}
+	}
+	return {
+		farBefore: before.slice(0, halfB),
+		nearBefore: before.slice(halfB),
+		quote: quoteText,
+		nearAfter: after.slice(0, halfA),
+		farAfter: after.slice(halfA),
+		thoughtText: thoughtText,
+		source: sourceTitle,
+		bookTitle: bookTitle
+	} as ShareQuoteCtx
 }

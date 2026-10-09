@@ -31,7 +31,7 @@
 </template>
 
 <script setup lang="uts">
-	import BottomNavBar from '@/components/BottomNavBar/BottomNavBar.uvue'
+	import BottomNavBar from '@/components/common/BottomNavBar.uvue'
 
 	type PoemChar = {
 		char: string

@@ -1,0 +1,98 @@
+<template>
+	<view class="list-cell" :class="cellClass" @click="onTap">
+		<text class="list-cell__text" :class="textClass">{{ label }}</text>
+		<slot />
+		<view v-if="arrow" class="list-cell__arrow"></view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	/**
+	 * ListCell —— 设置列表行项组件（标签 + 右侧箭头/自定义内容 + 分隔线变体）
+	 * --------------------------------------------------------------------------
+	 * 个人信息页与「我的」页的分组行共用。tone 控制文案与分隔线变体：
+	 * default=常规墨色 / danger=危险操作红字 / hint=弱提示（顶部分隔线 + 弱色）；
+	 * bordered=行底部 1px 分隔线；arrow=false 时右侧内容交给默认插槽
+	 * （如语言/指纹开关，开关自带点击不冒泡误触）。
+	 */
+	const props = defineProps<{
+		/** 行标签文案（支持宿主动态表达式） */
+		label: string
+		/** 文案变体：default=墨色 / danger=危险红 / hint=弱提示 */
+		tone: string
+		/** 是否显示行底部分隔线 */
+		bordered: boolean
+		/** 是否显示右侧箭头（false 时右侧交给插槽） */
+		arrow: boolean
+	}>()
+	const emit = defineEmits(['tap'])
+
+	/** 行容器变体类（hint 变体含顶部分隔线） */
+	const cellClass = computed(() : string => {
+		let cls = ''
+		if (props.bordered) {
+			cls = 'list-cell--bordered'
+		}
+		if (props.tone == 'hint') {
+			cls = cls.length > 0 ? cls + ' list-cell--hint' : 'list-cell--hint'
+		}
+		return cls
+	})
+
+	/** 文案变体类 */
+	const textClass = computed(() : string => {
+		if (props.tone == 'danger') {
+			return 'list-cell__text--danger'
+		}
+		if (props.tone == 'hint') {
+			return 'list-cell__text--hint'
+		}
+		return ''
+	})
+
+	function onTap() : void {
+		emit('tap')
+	}
+</script>
+
+<style lang="scss">
+	.list-cell {
+		flex-direction: row;
+		justify-content: space-between;
+		align-items: center;
+		padding: 24rpx 32rpx;
+		box-sizing: border-box;
+		height: 98rpx;
+	}
+
+	.list-cell--bordered {
+		border-bottom: 1px solid $bai-pale;
+	}
+
+	.list-cell--hint {
+		border-top: 1px solid $bai-pale;
+	}
+
+	.list-cell__text {
+		color: $bai-ink;
+		font-size: 32rpx;
+		line-height: 48rpx;
+		font-weight: 500;
+	}
+
+	.list-cell__text--danger {
+		color: $bai-negative;
+	}
+
+	.list-cell__text--hint {
+		color: $bai-mute;
+	}
+
+	.list-cell__arrow {
+		width: 0;
+		height: 0;
+		border-top: 12rpx solid transparent;
+		border-bottom: 12rpx solid transparent;
+		border-left: 15rpx solid $bai-mute;
+	}
+</style>

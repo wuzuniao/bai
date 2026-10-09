@@ -1,10 +1,5 @@
 <template>
-	<view class="login-page">
-		<!-- 顶部返回按钮（次级页面统一返回组件） -->
-		<BackButton />
-
-		<scroll-view class="login-page__scroll" direction="vertical" :show-scrollbar="false">
-			<view class="login-page__canvas" :style="'padding-top:' + mainTop + 'px'">
+	<PageShell title="" desc="" :center="true">
 				<!-- 微信一键登录卡片（仅微信小程序端展示） -->
 				<!-- #ifdef MP-WEIXIN -->
 				<view v-if="loginMode === 'wechat'" class="login-page__card">
@@ -13,14 +8,8 @@
 						<image class="login-page__wechat-icon" src="/static/icons/wechat-login.png" mode="aspectFit" />
 					</view>
 					<!-- 微信登录隐私勾选（独立于账号密码登录的隐私勾选） -->
-					<view class="login-page__remember login-page__remember--center" @click="toggleWechatAgree">
-						<view :class="wechatAgree ? 'login-page__checkbox login-page__checkbox--checked' : 'login-page__checkbox'">
-							<view v-if="wechatAgree" class="login-page__checkmark"></view>
-						</view>
-						<text class="login-page__remember-text">查看并同意</text>
-						<text class="login-page__remember-text" @click.stop="goAgreement">《服务协议》</text>
-						<text class="login-page__remember-text">和</text>
-						<text class="login-page__remember-text" @click.stop="goPrivacy">《隐私政策》</text>
+					<view class="login-page__remember login-page__remember--center">
+						<AgreementCheckbox v-model="wechatAgree" />
 					</view>
 					<!-- 切换到账号密码登录引导 -->
 					<view class="login-page__switch" @click="switchMode('normal')">
@@ -37,14 +26,8 @@
 						<image class="login-page__wechat-icon" src="/static/icons/dl_fingerprint.png" mode="aspectFit" />
 					</view>
 					<!-- 指纹登录隐私勾选（与微信端对称，独立于账号密码登录的隐私勾选） -->
-					<view class="login-page__remember login-page__remember--center" @click="toggleFingerprintAgree">
-						<view :class="fingerprintAgree ? 'login-page__checkbox login-page__checkbox--checked' : 'login-page__checkbox'">
-							<view v-if="fingerprintAgree" class="login-page__checkmark"></view>
-						</view>
-						<text class="login-page__remember-text">查看并同意</text>
-						<text class="login-page__remember-text" @click.stop="goAgreement">《服务协议》</text>
-						<text class="login-page__remember-text">和</text>
-						<text class="login-page__remember-text" @click.stop="goPrivacy">《隐私政策》</text>
+					<view class="login-page__remember login-page__remember--center">
+						<AgreementCheckbox v-model="fingerprintAgree" />
 					</view>
 					<!-- 切换到账号密码登录引导 -->
 					<view class="login-page__switch" @click="switchMode('normal')">
@@ -60,41 +43,12 @@
 					<view class="login-page__form">
 						<!-- 用户名或邮箱 -->
 						<view class="login-page__field">
-							<text class="login-page__label">用户名或邮箱</text>
-							<input
-								class="login-page__input"
-								:class="usernameError.length > 0 ? 'login-page__input--error' : ''"
-								v-model="usernameValue"
-								placeholder="请输入用户名或邮箱"
-								:placeholder-style="PLACEHOLDER_STYLE"
-								:maxlength="254"
-								@blur="onUsernameBlur"
-							/>
-							<text v-if="usernameError.length > 0" class="login-page__error-text">{{ usernameError }}</text>
+							<FormInput v-model="usernameValue" label="用户名或邮箱" placeholder="请输入用户名或邮箱" :maxlength="254" :error="usernameError" @blur="onUsernameBlur" />
 						</view>
 
 						<!-- 密码 -->
 						<view class="login-page__field login-page__field--password">
-							<text class="login-page__label">密码</text>
-							<view
-								class="login-page__password-row"
-								:class="passwordError.length > 0 ? 'login-page__password-row--error' : ''"
-							>
-								<input
-									class="login-page__input login-page__input--password"
-									v-model="passwordValue"
-									:password="!showPassword"
-									:key="'login-pwd-' + showPassword"
-									placeholder="请输入密码"
-									:placeholder-style="PLACEHOLDER_STYLE"
-									:maxlength="20"
-									@blur="onPasswordBlur"
-								/>
-								<view class="login-page__eye" @click="togglePassword">
-									<PasswordEye :visible="showPassword" />
-								</view>
-							</view>
-							<text v-if="passwordError.length > 0" class="login-page__error-text">{{ passwordError }}</text>
+							<PasswordInput v-model="passwordValue" label="密码" placeholder="请输入密码" :maxlength="20" :error="passwordError" @blur="onPasswordBlur" />
 							<view class="login-page__forgot-row">
 								<text class="login-page__forgot" @click="handleForgot">忘记密码？</text>
 							</view>
@@ -102,14 +56,8 @@
 
 						<!-- 操作区 -->
 						<view class="login-page__actions">
-							<view class="login-page__remember" @click="toggleRemember">
-								<view :class="remember ? 'login-page__checkbox login-page__checkbox--checked' : 'login-page__checkbox'">
-									<view v-if="remember" class="login-page__checkmark"></view>
-								</view>
-								<text class="login-page__remember-text">查看并同意</text>
-								<text class="login-page__remember-text" @click.stop="goAgreement">《服务协议》</text>
-								<text class="login-page__remember-text">和</text>
-								<text class="login-page__remember-text" @click.stop="goPrivacy">《隐私政策》</text>
+							<view class="login-page__remember">
+								<AgreementCheckbox v-model="remember" />
 							</view>
 							<view class="login-page__submit" @click="handleLogin">
 								<text class="login-page__submit-text">登录</text>
@@ -130,19 +78,15 @@
 					<text class="login-page__footer-text">还没有账号？</text>
 					<text class="login-page__footer-link" @click="goRegister">立即注册</text>
 				</view>
-			</view>
-		</scroll-view>
-	</view>
 </template>
 
 <script setup lang="uts">
-	import BackButton from '@/components/BackButton/BackButton.uvue'
-	import PasswordEye from '@/components/PasswordEye/PasswordEye.uvue'
-	import { PLACEHOLDER_STYLE } from '@/utils/theme.uts'
+	import PageShell from '@/components/common/PageShell.uvue'
+	import FormInput from '@/components/form/FormInput.uvue'
+	import PasswordInput from '@/components/form/PasswordInput.uvue'
+	import AgreementCheckbox from '@/components/form/AgreementCheckbox.uvue'
 	import { useUserStore } from '@/stores/user.uts'
 	import { ApiResponse } from '@/utils/request.uts'
-	import { AGREEMENT_URL, PRIVACY_URL } from '@/utils/config.uts'
-	import { openExternalLink } from '@/utils/link.uts'
 	import { loginUser } from '@/api/user.uts'
 
 	// #ifdef MP-WEIXIN
@@ -155,13 +99,6 @@
 	// #endif
 
 	const userStore = useUserStore()
-
-	/** 顶部留白：返回按钮（状态栏高度 + 40px）之下再留 12px */
-	const mainTop = ref(96)
-	const win = uni.getWindowInfo()
-	if (win.statusBarHeight > 0) {
-		mainTop.value = win.statusBarHeight + 52
-	}
 
 	// 登录方式：微信小程序端默认微信一键登录，其他端默认账号密码登录；
 	// 注册页跳转时 URL 带 ?mode=normal，则初始展示账号密码卡片
@@ -198,7 +135,6 @@
 	const passwordValue = ref('')
 	const usernameError = ref('')
 	const passwordError = ref('')
-	const showPassword = ref(false)
 	const remember = ref(false)
 	const submitting = ref(false)
 	// #ifdef MP-WEIXIN
@@ -229,20 +165,6 @@
 	function onPasswordBlur() : void {
 		passwordError.value = passwordValue.value.length == 0 ? '请输入密码' : ''
 	}
-
-	function togglePassword() : void {
-		showPassword.value = !showPassword.value
-	}
-
-	function toggleRemember() : void {
-		remember.value = !remember.value
-	}
-
-	// #ifdef MP-WEIXIN
-	function toggleWechatAgree() : void {
-		wechatAgree.value = !wechatAgree.value
-	}
-	// #endif
 
 	/** 登录提交：前端校验 → 隐私协议确认 → 调用 auth 服务 → 写入状态 → 跳转 */
 	function handleLogin() : void {
@@ -464,40 +386,10 @@
 			}
 		})
 	}
-
-	/** 服务协议 / 隐私政策：外部链接，复制后浏览器打开 */
-	function goAgreement() : void {
-		openExternalLink(AGREEMENT_URL)
-	}
-
-	function goPrivacy() : void {
-		openExternalLink(PRIVACY_URL)
-	}
 </script>
 
 <style lang="scss">
-	.login-page {
-		flex: 1;
-		position: relative;
-		background-color: $bai-canvas-soft;
-	}
-
-	.login-page__scroll {
-		flex: 1;
-	}
-
-	.login-page__canvas {
-		min-height: 100vh;
-		padding-left: 48rpx;
-		padding-right: 48rpx;
-		padding-bottom: 67rpx;
-		box-sizing: border-box;
-		flex-direction: column;
-		justify-content: center;
-		align-items: center;
-	}
-
-	/* ===== 登录卡片 ===== */
+	/* ===== 登录卡片（页面壳样式随 PageShell 组件） ===== */
 	.login-page__card {
 		position: relative;
 		z-index: 1;
@@ -532,72 +424,6 @@
 		margin-top: 32rpx;
 	}
 
-	.login-page__label {
-		color: $bai-ink;
-		font-size: 28rpx;
-		line-height: 40rpx;
-		font-weight: 400;
-	}
-
-	.login-page__input {
-		margin-top: 8rpx;
-		height: 98rpx;
-		padding: 28rpx 24rpx 24rpx;
-		box-sizing: border-box;
-		background-color: $bai-canvas;
-		border-radius: $bai-rounded-md;
-		border: 1px solid $bai-ink;
-		color: $bai-ink;
-		font-size: 32rpx;
-		line-height: 42rpx;
-	}
-
-	.login-page__input--error {
-		border-color: $bai-negative;
-	}
-
-	.login-page__error-text {
-		margin-top: 8rpx;
-		color: $bai-negative;
-		font-size: 24rpx;
-		line-height: 32rpx;
-	}
-
-	/* 密码行：统一边框容器，内含输入框与眼睛图标 */
-	.login-page__password-row {
-		position: relative;
-		margin-top: 8rpx;
-		flex-direction: row;
-		align-items: stretch;
-		border: 1px solid $bai-ink;
-		border-radius: 16rpx;
-		background-color: $bai-canvas;
-	}
-
-	.login-page__password-row--error {
-		border-color: $bai-negative;
-	}
-
-	.login-page__input--password {
-		flex: 1;
-		border: none;
-		background-color: transparent;
-		border-radius: 16rpx 0 0 16rpx;
-		padding-right: 24rpx;
-		margin-top: 0;
-	}
-
-	.login-page__eye {
-		flex-shrink: 0;
-		position: relative;
-		z-index: 2;
-		padding: 0 24rpx;
-		border-radius: 0 16rpx 16rpx 0;
-		flex-direction: row;
-		align-items: center;
-		justify-content: center;
-	}
-
 	/* 忘记密码链接行 */
 	.login-page__forgot-row {
 		margin-top: 8rpx;
@@ -617,6 +443,7 @@
 		flex-direction: column;
 	}
 
+	/* 协议勾选行样式随 AgreementCheckbox 组件 */
 	.login-page__remember {
 		height: 32rpx;
 		flex-direction: row;
@@ -626,39 +453,6 @@
 	.login-page__remember--center {
 		justify-content: center;
 		margin-top: 32rpx;
-	}
-
-	.login-page__checkbox {
-		width: 32rpx;
-		height: 32rpx;
-		border-radius: 8rpx;
-		background-color: $bai-canvas;
-		border: 1px solid $bai-neutral;
-		box-sizing: border-box;
-		flex-direction: row;
-		justify-content: center;
-		align-items: center;
-	}
-
-	.login-page__checkbox--checked {
-		background-color: $bai-ink;
-		border-color: $bai-ink;
-	}
-
-	/* 选中态对勾（CSS 绘制） */
-	.login-page__checkmark {
-		width: 10rpx;
-		height: 16rpx;
-		border-right: 1.5px solid $bai-on-primary;
-		border-bottom: 1.5px solid $bai-on-primary;
-		transform: rotate(45deg) translate(-1px, -1px);
-	}
-
-	.login-page__remember-text {
-		margin-left: 16rpx;
-		color: $bai-body;
-		font-size: 24rpx;
-		line-height: 32rpx;
 	}
 
 	.login-page__submit {

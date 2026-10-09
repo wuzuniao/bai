@@ -1,0 +1,135 @@
+<template>
+	<view class="bookmark-panel">
+		<view v-if="bookmarks.length == 0" class="bookmark-empty">
+			<text class="bookmark-empty-text" :style="'color:' + theme.mutedColor">书签列表为空，正文下滑即可添加书签</text>
+		</view>
+		<view
+			v-for="(bm, bi) in bookmarks"
+			:key="bi"
+			class="bookmark-item"
+			@click="onGoBookmark(bm)"
+		>
+			<image class="bookmark-item-icon" :src="themeIcon('reader-bookmark-active')" />
+			<text class="bookmark-item-text" :style="'color:' + theme.chapterTextColor">{{ bookmarkLabel(bm) }}</text>
+		</view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { Chapter, Bookmark, ReaderTheme, loadBookmarks, saveBookmarksToStorage } from '@/utils/readerTypes.uts'
+
+	/**
+	 * BookmarkPanel —— 书签子组件（书签真源）
+	 * --------------------------------------------------------------------------
+	 * 书签添加/移除、持久化（reader_bookmarks）与列表展示（抽屉书签页签）内聚；
+	 * 宿主（ReaderControl，转发 DrawerPanel）在正文下拉/上推手势落定时经 ref 调
+	 * addBookmark/removeBookmark，变更经 changed 事件逐层上行通知页面重读（旗帜渲染）；
+	 * 条目点击经 goBookmark 事件逐层上行（跳转与正文渲染耦合宿主）。
+	 */
+	const props = defineProps<{
+		/** 主题（成组色值，宿主派生下行） */
+		theme: ReaderTheme
+		/** 夜间态（图标 -light 白色变体切换） */
+		night: boolean
+		/** 目录章节列表（书签条目文案按章节标题派生） */
+		chapters: Chapter[]
+	}>()
+	const emit = defineEmits(['goBookmark', 'changed'])
+
+	/** ===== 书签（真源：组件内增删/持久化，列表直接展示） ===== */
+	const bookmarks = ref<Bookmark[]>([])
+	{
+		bookmarks.value = loadBookmarks()
+	}
+
+	/** 主题图标路径：夜间使用 -light 白色变体 */
+	function themeIcon(name : string) : string {
+		return '/static/icons/' + name + (props.night ? '-light' : '') + '.svg'
+	}
+
+	/** 目录安全读取：越界或数据未注入时返回空壳章（书签文案兜底） */
+	function chapterAt(id : number) : Chapter {
+		const c = props.chapters[id]
+		if (c != null) {
+			return c
+		}
+		return { id: id, title: '', label: '', contentTitle: '', active: false } as Chapter
+	}
+
+	/** 书签条目文案（章节标题 · 第 N 页，页码 1-based 展示） */
+	function bookmarkLabel(bm : Bookmark) : string {
+		const ch = chapterAt(bm.chapterId)
+		return ch.title + ' · 第 ' + (bm.pageIndex + 1) + ' 页'
+	}
+
+	/** 当前页是否已有书签 */
+	function indexOfBookmark(chapterId : number, pageIndex : number) : number {
+		for (let i = 0; i < bookmarks.value.length; i++) {
+			const b = bookmarks.value[i]
+			if (b.chapterId == chapterId && b.pageIndex == pageIndex) {
+				return i
+			}
+		}
+		return -1
+	}
+
+	/** 添加当前页书签（宿主下拉落定调用；已有则忽略） */
+	function addBookmark(chapterId : number, pageIndex : number) : void {
+		if (indexOfBookmark(chapterId, pageIndex) >= 0) {
+			return
+		}
+		bookmarks.value.push({ chapterId: chapterId, pageIndex: pageIndex } as Bookmark)
+		saveBookmarksToStorage(bookmarks.value)
+		emit('changed')
+	}
+
+	/** 移除当前页书签（宿主上推落定调用；无则忽略） */
+	function removeBookmark(chapterId : number, pageIndex : number) : void {
+		const i = indexOfBookmark(chapterId, pageIndex)
+		if (i < 0) {
+			return
+		}
+		bookmarks.value.splice(i, 1)
+		saveBookmarksToStorage(bookmarks.value)
+		emit('changed')
+	}
+
+	function onGoBookmark(bm : Bookmark) : void {
+		emit('goBookmark', bm)
+	}
+
+	defineExpose({
+		addBookmark,
+		removeBookmark
+	})
+</script>
+
+<style lang="scss">
+	/* 书签列表（抽屉书签页签） */
+	.bookmark-empty {
+		padding: 64rpx 38rpx;
+		align-items: center;
+	}
+
+	.bookmark-empty-text {
+		font-size: 27rpx;
+		text-align: center;
+	}
+
+	.bookmark-item {
+		flex-direction: row;
+		align-items: center;
+		padding: 27rpx 38rpx;
+	}
+
+	.bookmark-item-icon {
+		width: 38rpx;
+		height: 38rpx;
+	}
+
+	.bookmark-item-text {
+		margin-left: 23rpx;
+		font-size: 27rpx;
+		font-weight: 500;
+	}
+</style>

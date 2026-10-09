@@ -1,0 +1,12 @@
+/**
+ * 页面布局尺寸计算（跨页面复用的顶部避让逻辑）
+ */
+
+/** 次级页面内容区顶部留白（px）：返回按钮（状态栏高度 + 40px）之下再留 12px；Web 端无状态栏回退 96 */
+export function mainTopPx() : number {
+	const win = uni.getWindowInfo()
+	if (win.statusBarHeight > 0) {
+		return win.statusBarHeight + 52
+	}
+	return 96
+}

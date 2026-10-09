@@ -1,15 +1,9 @@
 <template>
-	<view class="delete-account-page">
-		<!-- 顶部返回按钮（次级页面统一返回组件） -->
-		<BackButton />
-
-		<scroll-view class="delete-account-page__scroll" direction="vertical" :show-scrollbar="false">
-			<view class="delete-account-page__canvas" :style="'padding-top:' + mainTop + 'px'">
-				<PageHeader
-					title="账号删除与数据说明"
-					desc="了解如何删除您的账号及与之相关的数据处理方式。本说明页无需登录即可访问。"
-				/>
-
+	<PageShell
+		title="账号删除与数据说明"
+		desc="了解如何删除您的账号及与之相关的数据处理方式。本说明页无需登录即可访问。"
+		:center="false"
+	>
 				<!-- 白色卡片：说明正文 -->
 				<view class="delete-account-page__card">
 					<view class="delete-account-page__list">
@@ -51,21 +45,10 @@
 						</view>
 					</view>
 				</view>
-			</view>
-		</scroll-view>
-	</view>
 </template>
 
 <script setup lang="uts">
-	import BackButton from '@/components/BackButton/BackButton.uvue'
-	import PageHeader from '@/components/PageHeader/PageHeader.uvue'
-
-	/** 顶部留白：返回按钮（状态栏高度 + 40px）之下再留 12px */
-	const mainTop = ref(96)
-	const win = uni.getWindowInfo()
-	if (win.statusBarHeight > 0) {
-		mainTop.value = win.statusBarHeight + 52
-	}
+	import PageShell from '@/components/common/PageShell.uvue'
 
 	/** 跳转登录页（登录后在个人信息页删除账号） */
 	function goLogin() : void {
@@ -74,25 +57,7 @@
 </script>
 
 <style lang="scss">
-	.delete-account-page {
-		flex: 1;
-		position: relative;
-		background-color: $bai-canvas-soft;
-	}
-
-	.delete-account-page__scroll {
-		flex: 1;
-	}
-
-	.delete-account-page__canvas {
-		padding-left: 48rpx;
-		padding-right: 48rpx;
-		padding-bottom: 64rpx;
-		box-sizing: border-box;
-		flex-direction: column;
-	}
-
-	/* ===== 白色卡片 ===== */
+	/* ===== 白色卡片（页面壳样式随 PageShell 组件） ===== */
 	.delete-account-page__card {
 		margin-top: 64rpx;
 		padding: 48rpx;

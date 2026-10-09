@@ -1,0 +1,29 @@
+<template>
+	<view class="list-group" :class="disabled ? 'list-group--disabled' : ''">
+		<slot />
+	</view>
+</template>
+
+<script setup lang="uts">
+	/**
+	 * ListGroup —— 设置列表分组容器（白底大圆角卡片，条目间由 ListCell 分隔线区分）
+	 * disabled=true 时整体置灰（账号待删除状态的资料分组）。
+	 */
+	const props = defineProps<{
+		/** 是否置灰禁用态 */
+		disabled: boolean
+	}>()
+</script>
+
+<style lang="scss">
+	.list-group {
+		margin-top: 64rpx;
+		border-radius: 48rpx;
+		background-color: $bai-canvas;
+		overflow: hidden;
+	}
+
+	.list-group--disabled {
+		opacity: 0.5;
+	}
+</style>

@@ -215,8 +215,9 @@
 </template>
 
 <script setup lang="uts">
-	import BackButton from '@/components/BackButton/BackButton.uvue'
-	import PageHeader from '@/components/PageHeader/PageHeader.uvue'
+	import BackButton from '@/components/common/BackButton.uvue'
+	import PageHeader from '@/components/common/PageHeader.uvue'
+	import { mainTopPx } from '@/utils/layout.uts'
 
 	type PendingDay = {
 		week: string
@@ -231,12 +232,8 @@
 		{ week: '周六', reward: 10 } as PendingDay
 	])
 
-	/** 顶部留白：返回按钮（状态栏高度 + 40px）之下再留 12px */
-	const mainTop = ref(96)
-	const win = uni.getWindowInfo()
-	if (win.statusBarHeight > 0) {
-		mainTop.value = win.statusBarHeight + 52
-	}
+	/** 顶部留白：返回按钮（状态栏高度 + 40px）之下再留 12px（计算逻辑见 utils/layout.uts） */
+	const mainTop = ref(mainTopPx())
 
 	const toastVisible = ref(false)
 	const toastMsg = ref('')

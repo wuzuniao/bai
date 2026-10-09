@@ -1,0 +1,169 @@
+<template>
+	<view class="code-input">
+		<text class="code-input__label">{{ label }}</text>
+		<view class="code-input__row">
+			<input
+				class="code-input__field"
+				:class="error.length > 0 ? 'code-input__field--error' : ''"
+				:value="modelValue"
+				placeholder="请输入验证码"
+				:placeholder-style="PLACEHOLDER_STYLE"
+				:maxlength="6"
+				@input="onInput"
+			/>
+			<view
+				class="code-input__btn"
+				:class="counting || sending ? 'code-input__btn--disabled' : ''"
+				@click="onBtnTap"
+			>
+				<text class="code-input__btn-text">{{ btnText }}</text>
+			</view>
+		</view>
+		<text v-if="error.length > 0" class="code-input__error">{{ error }}</text>
+	</view>
+</template>
+
+<script setup lang="uts">
+	/**
+	 * CodeInput —— 验证码输入组件（标签 + 输入框 + 发送按钮 + 60s 倒计时）
+	 * --------------------------------------------------------------------------
+	 * 倒计时状态机内聚：sec>=0 表示倒计时中，按钮显示 Ns 并禁用；sending 期间显示「发送中...」。
+	 * 点击按钮 emit('request-send') 由宿主校验并发送；发送成功调 startCountdown() 开始倒计时，
+	 * 失败调 reset() 恢复按钮（参照 NoticeButton 的 defineExpose 模式）。
+	 */
+	import { PLACEHOLDER_STYLE } from '@/utils/theme.uts'
+
+	const props = defineProps<{
+		/** 输入值（v-model） */
+		modelValue: string
+		/** 字段标签 */
+		label: string
+		/** 错误提示（空串不渲染） */
+		error: string
+		/** 宿主发送请求进行中（按钮禁用并显示发送中） */
+		sending: boolean
+	}>()
+	const emit = defineEmits(['update:modelValue', 'request-send'])
+
+	/** 倒计时剩余秒数（-1 为未倒计时） */
+	const sec = ref(-1)
+	let timer = 0
+
+	/** 是否倒计时中（模板禁用态） */
+	const counting = computed(() : boolean => sec.value >= 0)
+
+	/** 按钮文案：倒计时中 Ns / 发送中 / 默认 */
+	const btnText = computed(() : string => {
+		if (counting.value) {
+			return `${sec.value}s`
+		}
+		return props.sending ? '发送中...' : '获取验证码'
+	})
+
+	/** 是否倒计时中（宿主防重入判断） */
+	function isCounting() : boolean {
+		return counting.value
+	}
+
+	/** 开始 60s 倒计时（宿主在发送成功后调用） */
+	function startCountdown() : void {
+		if (counting.value) {
+			return
+		}
+		sec.value = 60
+		timer = setInterval(() => {
+			if (sec.value <= 1) {
+				clearInterval(timer)
+				sec.value = -1
+			} else {
+				sec.value--
+			}
+		}, 1000)
+	}
+
+	/** 恢复默认态（宿主在发送失败时调用） */
+	function reset() : void {
+		if (timer > 0) {
+			clearInterval(timer)
+			timer = 0
+		}
+		sec.value = -1
+	}
+
+	function onBtnTap() : void {
+		if (counting.value || props.sending) {
+			return
+		}
+		emit('request-send')
+	}
+
+	function onInput(e : UniInputEvent) : void {
+		emit('update:modelValue', e.detail.value)
+	}
+</script>
+
+<style lang="scss">
+	.code-input {
+		flex-direction: column;
+	}
+
+	.code-input__label {
+		margin-bottom: 16rpx;
+		color: $bai-ink;
+		font-size: 28rpx;
+		line-height: 40rpx;
+		font-weight: 400;
+	}
+
+	.code-input__row {
+		flex-direction: row;
+	}
+
+	.code-input__field {
+		flex: 1;
+		height: 98rpx;
+		padding: 28rpx 24rpx 24rpx;
+		box-sizing: border-box;
+		background-color: $bai-canvas;
+		border-radius: $bai-rounded-md;
+		border: 1px solid $bai-ink;
+		color: $bai-ink;
+		font-size: 32rpx;
+		line-height: 42rpx;
+	}
+
+	.code-input__field--error {
+		border-color: $bai-negative;
+	}
+
+	.code-input__btn {
+		margin-left: 16rpx;
+		width: 192rpx;
+		height: 98rpx;
+		box-sizing: border-box;
+		border-radius: $bai-rounded-md;
+		border: 1px solid $bai-ink;
+		flex-direction: row;
+		justify-content: center;
+		align-items: center;
+		flex-shrink: 0;
+	}
+
+	.code-input__btn--disabled {
+		opacity: 0.6;
+	}
+
+	.code-input__btn-text {
+		color: $bai-ink;
+		font-size: 28rpx;
+		line-height: 40rpx;
+		font-weight: 400;
+	}
+
+	.code-input__error {
+		margin-top: 16rpx;
+		color: $bai-negative;
+		font-size: 24rpx;
+		line-height: 32rpx;
+	}
+</style>

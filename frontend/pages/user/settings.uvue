@@ -63,16 +63,10 @@
 				<!-- 公告管理已随「公告管理迁移 auth」（2026-10-02）下线：管理员经 auth 前端管理公告 -->
 
 				<!-- 帮助入口分组：帮助中心 + 联系我们 -->
-				<view class="settings-page__group2">
-					<view class="settings-page__group2-item settings-page__group2-item--bordered" @click="goHelp">
-						<text class="settings-page__group2-text">帮助中心</text>
-						<view class="u-arrow-right"></view>
-					</view>
-					<view class="settings-page__group2-item" @click="goContact">
-						<text class="settings-page__group2-text">联系我们</text>
-						<view class="u-arrow-right"></view>
-					</view>
-				</view>
+				<ListGroup :disabled="false">
+					<ListCell label="帮助中心" tone="default" :bordered="true" :arrow="true" @tap="goHelp" />
+					<ListCell label="联系我们" tone="default" :bordered="false" :arrow="true" @tap="goContact" />
+				</ListGroup>
 			</view>
 		</scroll-view>
 
@@ -81,8 +75,10 @@
 </template>
 
 <script setup lang="uts">
-	import NoticeButton from '@/components/NoticeButton/NoticeButton.uvue'
-	import BottomNavBar from '@/components/BottomNavBar/BottomNavBar.uvue'
+	import NoticeButton from '@/components/common/NoticeButton.uvue'
+	import BottomNavBar from '@/components/common/BottomNavBar.uvue'
+	import ListGroup from '@/components/list/ListGroup.uvue'
+	import ListCell from '@/components/list/ListCell.uvue'
 	import { useUserStore, avatarPathOf } from '@/stores/user.uts'
 
 	const userStore = useUserStore()
@@ -527,31 +523,5 @@
 		font-weight: 400;
 	}
 
-	/* ===== 帮助入口分组 ===== */
-	.settings-page__group2 {
-		margin-top: 64rpx;
-		border-radius: 48rpx;
-		background-color: $bai-canvas;
-		overflow: hidden;
-	}
-
-	.settings-page__group2-item {
-		flex-direction: row;
-		justify-content: space-between;
-		align-items: center;
-		padding: 24rpx 32rpx;
-		box-sizing: border-box;
-		height: 98rpx;
-	}
-
-	.settings-page__group2-item--bordered {
-		border-bottom: 1px solid $bai-pale;
-	}
-
-	.settings-page__group2-text {
-		color: $bai-ink;
-		font-size: 32rpx;
-		line-height: 48rpx;
-		font-weight: 500;
-	}
+	/* ===== 帮助入口分组（行项样式随 ListGroup/ListCell 组件） ===== */
 </style>

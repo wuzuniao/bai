@@ -1,12 +1,5 @@
 <template>
-	<view class="help-page">
-		<!-- 顶部返回按钮（次级页面统一返回组件） -->
-		<BackButton />
-
-		<scroll-view class="help-page__scroll" direction="vertical" :show-scrollbar="false">
-			<view class="help-page__canvas" :style="'padding-top:' + mainTop + 'px'">
-				<PageHeader title="帮助中心" desc="找到常见问题的解答，解决APP使用问题。" />
-
+	<PageShell title="帮助中心" desc="找到常见问题的解答，解决APP使用问题。" :center="false">
 				<!-- FAQ 卡片列表（仅保留一个示例条目） -->
 				<view class="help-page__list">
 					<view class="help-page__card">
@@ -14,43 +7,14 @@
 						<text class="help-page__card-text">进入「我的 - 个人信息」页，点击对应条目即可修改用户名、头像、签名、密码与邮箱。</text>
 					</view>
 				</view>
-			</view>
-		</scroll-view>
-	</view>
 </template>
 
 <script setup lang="uts">
-	import BackButton from '@/components/BackButton/BackButton.uvue'
-	import PageHeader from '@/components/PageHeader/PageHeader.uvue'
-
-	/** 顶部留白：返回按钮（状态栏高度 + 40px）之下再留 12px */
-	const mainTop = ref(96)
-	const win = uni.getWindowInfo()
-	if (win.statusBarHeight > 0) {
-		mainTop.value = win.statusBarHeight + 52
-	}
+	import PageShell from '@/components/common/PageShell.uvue'
 </script>
 
 <style lang="scss">
-	.help-page {
-		flex: 1;
-		position: relative;
-		background-color: $bai-canvas-soft;
-	}
-
-	.help-page__scroll {
-		flex: 1;
-	}
-
-	.help-page__canvas {
-		padding-left: 48rpx;
-		padding-right: 48rpx;
-		padding-bottom: 64rpx;
-		box-sizing: border-box;
-		flex-direction: column;
-	}
-
-	/* ===== FAQ 卡片列表 ===== */
+	/* ===== FAQ 卡片列表（页面壳样式随 PageShell 组件） ===== */
 	.help-page__list {
 		margin-top: 64rpx;
 		flex-direction: column;
