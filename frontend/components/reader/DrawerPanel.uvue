@@ -58,7 +58,8 @@
 </template>
 
 <script setup lang="uts">
-	import { Chapter, Bookmark, NoteRecord, ReaderTheme } from '@/utils/readerTypes.uts'
+	import { Chapter, Bookmark, NoteRecord } from '@/utils/readerTypes.uts'
+	import { ReaderTheme } from '@/utils/theme.uts'
 	import BookmarkPanel from '@/components/reader/BookmarkPanel.uvue'
 
 	/**

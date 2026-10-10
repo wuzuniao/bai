@@ -16,7 +16,8 @@
 </template>
 
 <script setup lang="uts">
-	import { Chapter, Bookmark, ReaderTheme, loadBookmarks, saveBookmarksToStorage } from '@/utils/readerTypes.uts'
+	import { Chapter, Bookmark, loadBookmarks, saveBookmarksToStorage } from '@/utils/readerTypes.uts'
+	import { ReaderTheme } from '@/utils/theme.uts'
 
 	/**
 	 * BookmarkPanel —— 书签子组件（书签真源）

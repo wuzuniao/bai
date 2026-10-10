@@ -1,9 +1,9 @@
 <template>
 	<view class="control-root">
-		<!-- 顶部导航菜单（Stitch: 返回/书名，呼出态从顶部滑入；内容行与小程序胶囊同行） -->
+		<!-- 顶部导航菜单（Stitch: 返回/书名，呼出态从顶部滑入；内容行与小程序胶囊同行；v-show 硬显隐——:class 切换 transform/opacity 在微信端实测未生效） -->
 		<view
+			v-show="visible && !settingsOpen"
 			class="menu-top"
-			:class="visible && !settingsOpen ? '' : 'menu-top-hidden'"
 			:style="'background-color:' + theme.menuTopBg + ';border-color:' + theme.menuBorderColor + ';padding-top:' + navTop + 'px'"
 		>
 			<view class="menu-top-inner" :style="'height:' + navHeight + 'px'">
@@ -16,10 +16,10 @@
 			</view>
 		</view>
 
-		<!-- 底部控制面板（Stitch: 设置面板 + 听书悬浮球 + 三项导航，呼出态从底部滑入；抽屉打开时保持显示，三控制项不随子项变化） -->
+		<!-- 底部控制面板（Stitch: 设置面板 + 听书悬浮球 + 三项导航，呼出态从底部滑入；抽屉打开时保持显示，三控制项不随子项变化；v-show 硬显隐——:class 切换 transform/opacity 在微信端实测未生效） -->
 		<view
+			v-show="visible || drawerOpen"
 			class="menu-bottom"
-			:class="visible || drawerOpen ? '' : 'menu-bottom-hidden'"
 			:style="'background-color:' + theme.menuBottomBg + ';border-color:' + theme.menuBorderColor + ';box-shadow:' + theme.panelShadow"
 		>
 			<!-- 目录抽屉（子组件化：页签/排序/目录/想法列表自管理，书签真源在其内嵌 BookmarkPanel；
@@ -227,15 +227,16 @@
 </script>
 
 <style lang="scss">
-	/* 组件根：零尺寸占位（不设 flex 参与宿主 flex 流挤压正文），子浮层（absolute）相对宿主页面相对定位容器定位 */
+	/* 组件根：零尺寸占位（不设 flex 参与宿主 flex 流挤压正文）；子浮层用 fixed 定位——
+	   uvue 框架给所有 view 注入 position:relative，absolute 会相对本 0×0 容器定位导致不可见，fixed 相对视口不受影响 */
 	.control-root {
 		width: 0;
 		height: 0;
 	}
 
-	/* 顶部导航菜单（Stitch: 毛玻璃背景、底边框、底部圆角 16px，呼出/隐藏滑移动效） */
+	/* 顶部导航菜单（Stitch: 毛玻璃背景、底边框、底部圆角 16px；fixed 相对视口，top 即页面顶） */
 	.menu-top {
-		position: absolute;
+		position: fixed;
 		left: 0;
 		right: 0;
 		top: 0;
@@ -286,9 +287,9 @@
 		font-weight: 600;
 	}
 
-	/* 底部控制面板（令牌: 顶部圆角 xl 24px、毛玻璃、浮层提升阴影，呼出/隐藏滑移动效） */
+	/* 底部控制面板（令牌: 顶部圆角 xl 24px、毛玻璃、浮层提升阴影；fixed 相对视口，bottom 即页面底） */
 	.menu-bottom {
-		position: absolute;
+		position: fixed;
 		left: 0;
 		right: 0;
 		bottom: 0;

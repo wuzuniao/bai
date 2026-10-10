@@ -1,42 +1,88 @@
 /**
- * 分页引擎（纯函数）：按可用高度预算将章内段落切分为页
- * 页面仅持 computed 薄壳（响应式依赖经参数传入自动追踪），排版规则单点维护：
- * 行高 1.7 倍字号、每行字数计入 0.4rpx 字距（约 0.2px/字）、段间距 40rpx、
- * 章节头约 294rpx 仅占章首页、页高预算为可用高度的 95%（留排版误差余量）。
+ * 分页引擎（纯函数）：按可用高度预算将章内段落切分为页（段落可跨页，页尾段落切断续到下页）
+ * perLine 由调用方传入（运行时标定的实际每行字数，见宿主标定节点），折行估算与真实渲染同口径；
+ * 段落首行缩进占 2 字（首行容量 = perLine-2，续行 = perLine），切片边界对齐行容量。
  */
 
-/** 分页结果：每页的章内段落索引数组——段落高度（整行×行高）逐段累计，装不下的段落流到下一页 */
-export function computePageBreaks(paraTexts : string[], pageW : number, pageH : number, fontSize : number, topPx : number, bottomPx : number) : number[][] {
-	const pages : number[][] = []
-	let current : number[] = []
+/** 页内渲染切片：段落在章内的索引 + 本页展示的字符闭区间 [from, to]（段落未被切断时 from=0、to=段长-1） */
+export type PageSlice = {
+	/** 段落在章内的索引（划线/想法/选区的定位键，坐标基于整段文本） */
+	origin: number
+	/** 本页起始字符（含，整段坐标） */
+	from: number
+	/** 本页结束字符（含，整段坐标） */
+	to: number
+}
+
+/** 分页结果：每页的段落切片数组 */
+export function computePageBreaks(paraTexts : string[], perLine : number, pageH : number, fontSize : number, topPx : number, bottomPx : number) : PageSlice[][] {
+	const pages : PageSlice[][] = []
+	let current : PageSlice[] = []
 	let usedH = 0
-	if (pageW <= 0 || pageH <= 0 || fontSize <= 0) {
-		// 窗口尺寸未就绪（首帧）：退化为整章单段一页的占位分页
-		return paraTexts.map((t : string, i : number) : number[] => {
-			return [i]
+	if (perLine <= 0 || pageH <= 0 || fontSize <= 0) {
+		// 窗口尺寸/标定未就绪（首帧）：退化为整章每段一页的占位分页
+		return paraTexts.map((t : string, i : number) : PageSlice[] => {
+			return [{ origin: i, from: 0, to: t.length - 1 }] as PageSlice[]
 		})
 	}
 	const lineH = fontSize * 1.7
-	// 每行字数计入字距 0.4rpx（约 0.2px/字）
-	const perLine = Math.max(1, Math.floor((pageW - uni.upx2px(124)) / (fontSize + 0.2)))
 	const paraGap = uni.upx2px(40)
 	const headerH = uni.upx2px(294)
-	// 页面高度预算 = 可用高度（屏高-顶部起点-底部留白）的 95%，留排版误差余量
-	const budget = Math.max(lineH, (pageH - topPx - bottomPx) * 0.95)
+	// 页面高度预算 = 可用高度（屏高-顶部起点-底部留白）；行数 ceil 取整已天然偏保守
+	const budget = Math.max(lineH, pageH - topPx - bottomPx)
 	// 章节头（标签行+大标题+分隔条+下边距，约 294rpx）仅占用章首页
 	let curBudget = Math.max(lineH, budget - headerH)
 	for (let i = 0; i < paraTexts.length; i++) {
-		const paraH = Math.ceil(paraTexts[i].length / perLine) * lineH
-		let gap = current.length > 0 ? paraGap : 0
-		if (usedH + gap + paraH > curBudget && current.length > 0) {
-			pages.push(current)
-			current = []
-			usedH = 0
-			gap = 0
-			curBudget = budget
+		const len = paraTexts[i].length
+		if (len == 0) {
+			continue
 		}
-		current.push(i)
-		usedH += gap + paraH
+		const firstCap = Math.max(1, perLine - 2)
+		let from = 0
+		let firstSlice = true
+		while (from < len) {
+			// 段间间距只在新段落的首切片计（跨页续切片不重复计，视觉上为段落续行）
+			const gap = (firstSlice && current.length > 0) ? paraGap : 0
+			const free = curBudget - usedH - gap
+			let rows = Math.floor(free / lineH)
+			if (rows < 1) {
+				if (current.length > 0) {
+					// 本页已满：落页后重算（新页首切片无段间 gap）
+					pages.push(current)
+					current = [] as PageSlice[]
+					usedH = 0
+					curBudget = budget
+					continue
+				}
+				// 空页兜底至少放一行，防死循环（仅异常参数下出现）
+				rows = 1
+			}
+			// 剩余字符所需行数与 rows 行的字符容量：段首切片首行容量 firstCap，续切片/续行均为 perLine
+			let remainRows : number
+			let cap : number
+			if (from == 0) {
+				remainRows = 1 + Math.ceil(Math.max(0, len - firstCap) / perLine)
+				cap = firstCap + (rows - 1) * perLine
+			} else {
+				remainRows = Math.ceil((len - from) / perLine)
+				cap = rows * perLine
+			}
+			const useRows = Math.min(rows, remainRows)
+			let to : number
+			if (useRows < rows) {
+				// 段落在本页内结束：切片直达段尾
+				to = len - 1
+			} else {
+				to = from + cap - 1
+				if (to >= len) {
+					to = len - 1
+				}
+			}
+			current.push({ origin: i, from: from, to: to } as PageSlice)
+			usedH += gap + useRows * lineH
+			from = to + 1
+			firstSlice = false
+		}
 	}
 	if (current.length > 0) {
 		pages.push(current)

@@ -215,6 +215,8 @@ export type TextMetrics = {
 	charW: number
 	/** 满行实际字距（正文两端对齐拉伸后按行宽均分） */
 	fullCharW: number
+	/** 段落首行缩进（px，= 字号×2；首行字符容量为 perLine-2，行列换算与分页容量共用此值） */
+	indentPx: number
 }
 
 /** 指定行的字距：满行经两端对齐拉伸按行宽均分，末行未满不拉伸按自然字距（与渲染排版对齐） */
@@ -223,7 +225,7 @@ export function rowSpacing(m : TextMetrics, len : number, maxRow : number, row :
 	return (row < maxRow || rest == m.perLine) ? m.fullCharW : m.charW
 }
 
-/** 拖动中的段落视口矩形缓存项（触点→段落映射，支撑跨段拖动；len 为段落文本长度供字符换算） */
+/** 拖动中的段落视口矩形缓存项（触点→段落映射，支撑跨段拖动；len 为本 rect 文本切片长度供字符换算，from 为切片在整段中的起始偏移） */
 export type ParaRect = {
 	cid : number
 	origin : number
@@ -231,6 +233,8 @@ export type ParaRect = {
 	top : number
 	bottom : number
 	len : number
+	/** 本 rect 文本切片在整段中的起始字符（流式分页段落跨页时非 0；换算原段坐标需加此偏移） */
+	from : number
 }
 
 /** 读取本地划线记录（空/损坏容错返回空表） */

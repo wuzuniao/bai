@@ -5,7 +5,7 @@
 			<view class="share-pop">
 				<view class="share-card">
 					<text class="share-card-app">无足鸟古诗词学习助手</text>
-					<scroll-view scroll-y class="share-card-scroll" :style="'max-height:' + shareCardMaxH + 'px'">
+					<scroll-view direction="vertical" class="share-card-scroll" :style="'max-height:' + shareCardMaxH + 'px'">
 						<text class="share-card-text"><text class="share-ctx-far">{{ shareData.farBefore }}</text><text class="share-ctx-near">{{ shareData.nearBefore }}</text><text class="share-quote-mark">“</text><text class="share-quote-main">{{ shareData.quote }}</text><text class="share-quote-mark">”</text><text class="share-ctx-near">{{ shareData.nearAfter }}</text><text class="share-ctx-far">{{ shareData.farAfter }}</text></text>
 						<view v-if="shareData.thoughtText.length > 0" class="share-card-thought">
 							<text class="share-card-thought-text">{{ shareData.thoughtText }}</text>
@@ -46,6 +46,8 @@
 	 * 存相册；微信端经 button open-type=share 转发（触发宿主页面 onShareAppMessage）。
 	 * 打开经 ref 调 open()（无选区快照时忽略），提示经 emit('toast') 上行。
 	 */
+	/** 组件实例（setup 同步期捕获：getCurrentInstance 仅 setup 同步期可用，异步回调中调用返回 null） */
+	const self = getCurrentInstance()
 	const props = defineProps<{
 		/** 分享卡片内容快照（宿主按选区计算；null=无选区不可分享） */
 		shareCtx: ShareQuoteCtx | null
@@ -339,7 +341,12 @@
 
 	/** 绘制分享卡片到隐藏 canvas 并保存为长图（排版与预览 CSS 换算一致；头像半出卡片顶部白环包裹；想法全量渲染不截断） */
 	function saveShareImage() : void {
-		uni.createSelectorQuery().in(getCurrentInstance()!.proxy!).select('#share-canvas').fields({ node: true, size: true }, (res : any) : void => {
+		const proxy = self == null ? null : self.proxy
+		if (proxy == null) {
+			emit('toast', '保存失败，请重试')
+			return
+		}
+		uni.createSelectorQuery().in(proxy).select('#share-canvas').fields({ node: true, size: true }, (res : any) : void => {
 			if (res == null || res.node == null) {
 				emit('toast', '保存失败，请重试')
 				return

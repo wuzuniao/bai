@@ -145,6 +145,7 @@
 					<ListCell :label="isDeletionScheduled ? '取消删除' : '删除账号'" tone="danger" :bordered="false" :arrow="true" @tap="handleDeletion" />
 					<ListCell label="了解账号删除与数据说明" tone="hint" :bordered="false" :arrow="true" @tap="goDeleteAccountHelp" />
 				</ListGroup>
+	</PageShell>
 </template>
 
 <script setup lang="uts">

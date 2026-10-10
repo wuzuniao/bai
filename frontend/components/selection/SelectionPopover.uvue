@@ -136,7 +136,7 @@
 
 <script setup lang="uts">
 	import { getCurrentInstance } from 'vue'
-	import { SelSpan, SpanSeg, TextMetrics, ParaRect, ShareQuoteCtx, comparePos, normalizeSpan, applySpanUnderlineToStorage, rowSpacing } from '@/utils/readerTypes.uts'
+	import { SelSpan, SpanSeg, TextMetrics, ParaRect, ShareQuoteCtx, comparePos, normalizeSpan, applySpanUnderlineToStorage } from '@/utils/readerTypes.uts'
 	import ThoughtPanel from '@/components/selection/ThoughtPanel.uvue'
 	import ShareCard from '@/components/selection/ShareCard.uvue'
 
@@ -149,7 +149,7 @@
 	 * 划词：宿主长按正文完成 rect 查询与字符换算后经 ref 调
 	 *       beginSelection() 建立选区（正文锚点零宽字符与拖动段落矩形
 	 *       在宿主模板内，跨组件查询不可行，由宿主查询后经
-	 *       setAnchorRects/setDragRects 回传组件吸附换算）；选区变化
+	 *       setAnchors/setDragRects 回传组件差分定位）；选区变化
 	 *       emit('spanChanged') 供宿主渲染高亮镜像。
 	 * 复制：写入剪贴板（微信端系统提示，其他端页面内提示）。
 	 * 划线：本地存储区间运算（切换式：完全覆盖取消、否则并入），存储 key
@@ -161,6 +161,8 @@
 	 * 选区清除经 emit('dismiss')，提示经 emit('toast')。
 	 * 选区上下文（文本/段序列/分享快照）由宿主按选区计算下行。
 	 */
+	/** 组件实例（setup 同步期捕获：getCurrentInstance 仅 setup 同步期可用，异步回调中调用返回 null） */
+	const self = getCurrentInstance()
 	const props = defineProps<{
 		/** 气泡底色（随主题，夜间提亮） */
 		bg: string
@@ -242,27 +244,45 @@
 	let lastDragEnd = 0
 	/** 选区已实测定位（锚点测量完成后手柄/气泡才出现，避免估算兜底位置跳变为实测位置） */
 	const selectionLaidOut = ref(false)
-	/** 宿主回传的锚点实测矩形（起点/终点，齐备后吸附） */
-	let pendingAnchorStart : NodeInfo | null = null
-	let pendingAnchorEnd : NodeInfo | null = null
 	/** 宿主回传的拖动段落视口矩形（拖动开始时宿主查询回传） */
 	let dragRects : ParaRect[] = []
 	/** 建立选区时缓存的起点段文本长度（同段选区手柄估算用） */
 	let beginParaLen = 0
+	/** 建立选区时缓存的起点段切片在整段中的起始偏移（连续流恒为 0，保留兼容） */
+	let beginSliceFrom = 0
 	/** 气泡显示：有选区且已实测定位、不在拖动手柄中（拖动中隐藏，松手按新选区重定位显示） */
 	const bubbleVisible = computed(() : boolean => {
 		return selSpan.value != null && selectionLaidOut.value && !dragStartActive.value && !dragEndActive.value
 	})
 
-	/** 字符边界视口坐标（[x, y]）：isEnd=末字符右缘/其行底，否则首字符左缘/其行顶；字距按所在行取满行均分/末行自然值 */
+	/** 整段字符索引 → 行列（首行缩进占 2 字：首行容量 = perLine-2，续行 = perLine） */
+	function rowColOf(charIdx : number, perLine : number) : number[] {
+		const firstCap = Math.max(1, perLine - 2)
+		if (charIdx < firstCap) {
+			return [0, charIdx]
+		}
+		const row = 1 + Math.floor((charIdx - firstCap) / perLine)
+		const col = charIdx - firstCap - (row - 1) * perLine
+		return [row, col]
+	}
+
+	/** 行字距：首行（缩进未满额）与未满行用自然字距，满行（两端对齐拉伸）用拉伸字距 */
+	function spacingOfRow(col : number, perLine : number) : number {
+		const m = props.metrics
+		return (col + 1 >= perLine) ? m.fullCharW : m.charW
+	}
+
+	/** 字符边界视口坐标（[x, y]）：isEnd=末字符右缘/其行底，否则首字符左缘/其行顶。
+	 *  charIdx 为整段坐标（连续流整段渲染无切片偏移）；首行 x 加缩进宽，字距按行取值（与宿主行列换算同口径） */
 	function charEdgePos(charIdx : number, isEnd : boolean, len : number) : number[] {
 		const m = props.metrics
-		const maxRow = Math.max(0, Math.floor((len - 1) / m.perLine))
-		const row = Math.max(0, Math.min(Math.floor(charIdx / m.perLine), maxRow))
-		const col = charIdx - row * m.perLine
-		const spacing = rowSpacing(m, len, maxRow, row)
+		const rc = rowColOf(Math.max(0, Math.min(charIdx, len - 1)), m.perLine)
+		const row = rc[0]
+		const col = rc[1]
+		const indent = row == 0 ? m.indentPx : 0
+		const spacing = spacingOfRow(col, m.perLine)
 		const lineTop = selRectTop.value + row * m.lineH
-		const x = selRectLeft.value + (isEnd ? (col + 1) * spacing : col * spacing)
+		const x = selRectLeft.value + indent + (isEnd ? (col + 1) * spacing : col * spacing)
 		return [x, isEnd ? lineTop + m.lineH : lineTop]
 	}
 
@@ -292,26 +312,48 @@
 		selBottomPx.value = ep[1]
 	}
 
-	/** 两个锚点实测矩形齐备后吸附：手柄贴真实字符边界，选区几何与气泡随之精化 */
-	function applyAnchors() : void {
-		const s = pendingAnchorStart
-		const e = pendingAnchorEnd
-		if (selSpan.value == null || s == null || e == null) {
-			return
-		}
+	/** 宿主批量回传同一查询批次的矩形（锚点起/终 + 选区起/终段落），执行差分定位：
+	 *  手柄位置 = 段落 rect 原点 + 段内行列×排版常量——同一查询批次内相对量可靠，
+	 *  跨坐标系（transform 祖先内的 rect）系统偏差在差分中相消；跨章或段落矩形缺失时退回锚点绝对坐标 */
+	function setAnchors(span : SelSpan, anchorStart : NodeInfo | null, anchorEnd : NodeInfo | null, fromPara : NodeInfo | null, toPara : NodeInfo | null) : void {
+		const m = props.metrics
 		const hotH = uni.upx2px(HANDLE_HOT_RPX)
 		const visH = uni.upx2px(HANDLE_VISUAL_RPX)
-		handleStartLeft.value = s.left - hotH / 2
-		handleStartTop.value = s.top - visH
-		handleEndLeft.value = e.right - hotH / 2
-		handleEndTop.value = e.bottom - hotH + visH
-		selTopPx.value = s.top
-		selBottomPx.value = e.bottom
+		const sameChapter = span.fromCid == span.toCid
+		if (sameChapter && fromPara != null && (span.fromOrigin == span.toOrigin || toPara != null)) {
+			const endPara = span.fromOrigin == span.toOrigin ? fromPara : toPara!
+			const sc = rowColOf(span.fromStart, m.perLine)
+			const ec = rowColOf(span.toEnd, m.perLine)
+			const startRow = sc[0]
+			const startCol = sc[1]
+			const endRow = ec[0]
+			const endCol = ec[1]
+			const startSpacing = spacingOfRow(startCol, m.perLine)
+			const endSpacing = spacingOfRow(endCol, m.perLine)
+			const startIndent = startRow == 0 ? m.indentPx : 0
+			const endIndent = endRow == 0 ? m.indentPx : 0
+			handleStartLeft.value = fromPara.left + startIndent + startCol * startSpacing - hotH / 2
+			handleStartTop.value = fromPara.top + startRow * m.lineH - visH
+			handleEndLeft.value = endPara.left + endIndent + (endCol + 1) * endSpacing - hotH / 2
+			handleEndTop.value = endPara.top + endRow * m.lineH + m.lineH - hotH + visH
+			selTopPx.value = fromPara.top + startRow * m.lineH
+			selBottomPx.value = endPara.top + (endRow + 1) * m.lineH
+		} else if (anchorStart != null && anchorEnd != null) {
+			// 跨章/段落矩形缺失：退回锚点绝对坐标
+			handleStartLeft.value = anchorStart.left - hotH / 2
+			handleStartTop.value = anchorStart.top - visH
+			handleEndLeft.value = anchorEnd.right - hotH / 2
+			handleEndTop.value = anchorEnd.bottom - hotH + visH
+			selTopPx.value = anchorStart.top
+			selBottomPx.value = anchorEnd.bottom
+		} else {
+			return
+		}
 		// 拖动过手柄后箭头指向被拖端的新边界，未拖动时保持指向长按触点
 		if (lastDragEnd == -1) {
-			selFocusX.value = s.left
+			selFocusX.value = handleStartLeft.value + hotH / 2
 		} else if (lastDragEnd == 1) {
-			selFocusX.value = e.right
+			selFocusX.value = handleEndLeft.value + hotH / 2
 		}
 		// 实测完成，手柄与气泡以精确位置首次显示
 		selectionLaidOut.value = true
@@ -342,12 +384,24 @@
 		if (len <= 0) {
 			return
 		}
-		const maxRow = Math.max(0, Math.floor((len - 1) / m.perLine))
+		// 切片行数：段首切片（pr.from==0）首行容量 = perLine-2（缩进占 2 字），续切片每行 perLine
+		let maxRow : number
+		if (pr.from == 0) {
+			const rest = len - (m.perLine - 2)
+			maxRow = rest <= 0 ? 0 : Math.ceil(rest / m.perLine)
+		} else {
+			maxRow = Math.max(0, Math.ceil(len / m.perLine) - 1)
+		}
 		let row = Math.floor((touch.clientY - pr.top) / m.lineH)
 		row = Math.max(0, Math.min(row, maxRow))
-		let col = Math.floor((touch.clientX - pr.left) / rowSpacing(m, len, maxRow, row))
+		// 首行触点先扣除缩进宽（两个全角空格），字距：首行与末行未拉伸用自然字距，中间满行用拉伸字距
+		const indent = (pr.from == 0 && row == 0) ? m.indentPx : 0
+		const spacing = row == 0 ? m.charW : (row < maxRow ? m.fullCharW : m.charW)
+		let col = Math.floor((touch.clientX - pr.left - indent) / spacing)
 		col = Math.max(0, Math.min(col, m.perLine - 1))
-		const charIdx = Math.min(row * m.perLine + col, len - 1)
+		// 切片内字符索引（首行容量 perLine-2）加切片偏移 = 整段坐标（流式分页段落跨页时 pr.from 非 0）
+		const sliceIdx = row == 0 ? col : (m.perLine - 2) + (row - 1) * m.perLine + col
+		const charIdx = Math.min(sliceIdx, len - 1) + pr.from
 		if (isEnd) {
 			// 终点柄：新位置在起点之前则互换端点，否则更新终点
 			if (comparePos(pr.cid, pr.origin, charIdx, span.fromCid, span.fromOrigin, span.fromStart) >= 0) {
@@ -425,11 +479,13 @@
 		emit('queryAnchors')
 	}
 
-	/** 建立选区（宿主长按正文完成 rect 查询/字符换算/想法恢复/句界计算后调用）：状态建立、手柄估算、请求锚点实测 */
-	function beginSelection(span : SelSpan, rectLeft : number, rectTop : number, focusX : number, paraLen : number) : void {
+	/** 建立选区（宿主长按正文完成 rect 查询/字符换算/想法恢复/句界计算后调用）：状态建立、手柄估算、请求锚点实测；
+	 *  sliceFrom 为长按切片在整段中的起始偏移（流式分页段落跨页时非 0），手柄估算的行列换算需按切片口径 */
+	function beginSelection(span : SelSpan, rectLeft : number, rectTop : number, focusX : number, paraLen : number, sliceFrom : number) : void {
 		selRectLeft.value = rectLeft
 		selRectTop.value = rectTop
 		beginParaLen = paraLen
+		beginSliceFrom = sliceFrom
 		selSpan.value = normalizeSpan(span)
 		emit('spanChanged', selSpan.value)
 		// 箭头初始指向长按触点位置
@@ -437,8 +493,6 @@
 		lastDragEnd = 0
 		// 复位定位标记：手柄与气泡等锚点实测完成后才出现（估算位置仅作兜底，避免先显示估算位置再跳到实测位置）
 		selectionLaidOut.value = false
-		pendingAnchorStart = null
-		pendingAnchorEnd = null
 		updateHandles()
 		emit('queryAnchors')
 		// 锚点测量异常兜底：仍以估算位置显示手柄与气泡，保证功能可用
@@ -447,16 +501,6 @@
 				selectionLaidOut.value = true
 			}
 		}, 250)
-	}
-
-	/** 宿主回传锚点实测矩形（which：0=起点锚点 / 1=终点锚点；齐备后吸附） */
-	function setAnchorRects(which : number, r : NodeInfo | null) : void {
-		if (which == 0) {
-			pendingAnchorStart = r
-		} else {
-			pendingAnchorEnd = r
-		}
-		applyAnchors()
 	}
 
 	/** 宿主回传拖动段落视口矩形（拖动开始时宿主查询正文段落并回传） */
@@ -468,8 +512,6 @@
 	function hideSelection() : void {
 		selSpan.value = null
 		selectionLaidOut.value = false
-		pendingAnchorStart = null
-		pendingAnchorEnd = null
 		dragRects = []
 		thoughtPanelRef.value?.hideThoughtView()
 		emit('spanChanged', null)
@@ -509,21 +551,29 @@
 		arrowLeft.value = arrowCenter - uni.upx2px(10)
 	}
 
-	watch(
-		[bubbleVisible, () => selTopPx.value, () => selBottomPx.value, () => selFocusX.value],
-		() => {
-			relocate()
-			if (bubbleVisible.value && !popoverMeasured) {
-				setTimeout(() => {
-					measure()
-				}, 80)
-			}
+	/** 气泡重定位回调（任一几何源变化均触发；气泡可见且未实测时延迟实测校正） */
+	function onRelocateSourceChange() : void {
+		relocate()
+		if (bubbleVisible.value && !popoverMeasured) {
+			setTimeout(() => {
+				measure()
+			}, 80)
 		}
-	)
+	}
+
+	// 单 getter 源逐个 watch（UTS 强类型下混合类型数组源推断不稳，与项目其余 watch 写法对齐）
+	watch(() => bubbleVisible.value, onRelocateSourceChange)
+	watch(() => selTopPx.value, onRelocateSourceChange)
+	watch(() => selBottomPx.value, onRelocateSourceChange)
+	watch(() => selFocusX.value, onRelocateSourceChange)
 
 	/** 查询气泡体实际尺寸并校正定位（内容固定仅查一次，查询失败允许重试；组件内查询必须 .in 实例） */
 	function measure() : void {
-		uni.createSelectorQuery().in(getCurrentInstance()!.proxy!).select('.popover-body').boundingClientRect((rect : NodeInfo | null) : void => {
+		const proxy = self == null ? null : self.proxy
+		if (proxy == null) {
+			return
+		}
+		uni.createSelectorQuery().in(proxy).select('.popover-body').boundingClientRect((rect : NodeInfo | null) : void => {
 			if (rect != null && rect.width > 0 && rect.height > 0) {
 				popoverW = rect.width
 				popoverH = rect.height
@@ -609,7 +659,7 @@
 	defineExpose({
 		beginSelection,
 		hideSelection,
-		setAnchorRects,
+		setAnchors,
 		setDragRects,
 		showThoughtView,
 		hideThoughtView

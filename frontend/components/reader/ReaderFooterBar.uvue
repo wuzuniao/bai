@@ -3,7 +3,7 @@
 	<view class="reader-footer" :style="'padding-bottom:' + bottomPx + 'px;opacity:' + opacity">
 		<view class="footer-left">
 			<view class="footer-dot"></view>
-			<text class="footer-time">14:30</text>
+			<text class="footer-time">{{ timeText }}</text>
 		</view>
 		<view class="footer-right">
 			<text class="footer-progress">{{ progress }}</text>
@@ -55,6 +55,32 @@
 
 	/** 页脚贴底内边距（px）：文字行底仅比手势条横条高一点（下沉 10px，不低于 4px 兜底） */
 	const bottomPx = computed(() : number => Math.max(4, props.safeBottom - 10))
+
+	/** ===== 本地时间（客户端系统时间，24 小时制 HH:mm:ss，每秒刷新） ===== */
+	const timeText = ref('')
+	let timeTimer = -1
+
+	function refreshTime() : void {
+		const d = new Date()
+		const h = d.getHours()
+		const m = d.getMinutes()
+		const s = d.getSeconds()
+		timeText.value = (h < 10 ? '0' + h : '' + h) + ':' + (m < 10 ? '0' + m : '' + m) + ':' + (s < 10 ? '0' + s : '' + s)
+	}
+
+	onMounted(() => {
+		refreshTime()
+		timeTimer = setInterval(() => {
+			refreshTime()
+		}, 1000)
+	})
+
+	onUnmounted(() => {
+		if (timeTimer >= 0) {
+			clearInterval(timeTimer)
+			timeTimer = -1
+		}
+	})
 
 	/** ===== 出现时机（滚动模式淡入淡出计时内聚） ===== */
 	const visible = ref(false)

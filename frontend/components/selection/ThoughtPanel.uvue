@@ -7,7 +7,7 @@
 				:style="'left:' + cardLeft + 'px;top:' + cardTop + 'px;width:' + cardW + 'px;background-color:' + panelBg + ';box-shadow:' + shadow"
 				@click="closeCard"
 			>
-				<scroll-view scroll-y class="thought-view-scroll" :style="'max-height:' + cardMaxH + 'px'">
+				<scroll-view direction="vertical" class="thought-view-scroll" :style="'max-height:' + cardMaxH + 'px'">
 					<text class="thought-view-content" :style="'color:' + contentColor">{{ cardContent }}</text>
 				</scroll-view>
 			</view>
@@ -57,6 +57,8 @@
 	 * 确保划线（add=true 并入）一并持久化，emit('sync') 通知宿主重读、
 	 * emit('dismiss') 清选区；取消仅 emit('dismiss')。
 	 */
+	/** 组件实例（setup 同步期捕获：getCurrentInstance 仅 setup 同步期可用，异步回调中调用返回 null） */
+	const self = getCurrentInstance()
 	const props = defineProps<{
 		/** 选区覆盖段序列（宿主按选区与各章段落展开；想法区间取首末项） */
 		segs: SpanSeg[]
@@ -110,7 +112,11 @@
 
 	/** 面板显示后实测高度并校正垂直定位（想法长度不同高度不同，每次打开都测；组件内查询须 .in 实例） */
 	function measureCard() : void {
-		uni.createSelectorQuery().in(getCurrentInstance()!.proxy!).select('.thought-view-panel').boundingClientRect((rect : NodeInfo | null) : void => {
+		const proxy = self == null ? null : self.proxy
+		if (proxy == null) {
+			return
+		}
+		uni.createSelectorQuery().in(proxy).select('.thought-view-panel').boundingClientRect((rect : NodeInfo | null) : void => {
 			if (rect != null && rect.height > 0) {
 				cardH = rect.height
 				positionCard(cardSelBottom, cardSelTop)
@@ -148,12 +154,15 @@
 	const editorFocus = ref(false)
 	/** 打开时的划线文本快照（微信端冒泡清选区不影响） */
 	const editorQuote = ref('')
+	/** 打开时的选区段序列快照（微信端按钮点击冒泡会触发清选区，props.segs 随之变空；保存必须用打开时快照） */
+	const editorSegs = ref<SpanSeg[]>([])
 	/** 想法输入框最大高度（px）：屏高的 40%，auto-height 随内容增长到此封顶（内部滚动） */
 	const editorMaxH = computed(() : number => props.pageH * 0.4)
 
 	/** 打开写想法编辑器（宿主气泡「写想法」按钮调用，quote 为选区文本快照） */
 	function openEditor(quote : string) : void {
 		editorQuote.value = quote
+		editorSegs.value = props.segs
 		editorInput.value = ''
 		editorFocus.value = false
 		editorOpen.value = true
@@ -168,7 +177,7 @@
 			emit('toast', '请输入想法内容')
 			return
 		}
-		const segs = props.segs
+		const segs = editorSegs.value
 		if (segs.length == 0) {
 			closeEditor()
 			return

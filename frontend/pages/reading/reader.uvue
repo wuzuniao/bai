@@ -45,12 +45,12 @@
 									:key="cid + '-' + item.origin"
 									class="novel-paragraph para-scroll"
 									:id="'scroll-para-' + cid + '-' + item.origin"
-									@longpress="onLongPress(item.origin, cid, $event)"
-									@click="onParaTap($event, item.origin, cid)"
+									@longpress="onLongPress(item.origin, cid, $event, item.from, item.to)"
+									@click="onParaTap($event, item.origin, cid, item.from, item.to)"
 								>
 									<text class="novel-text">
 										<text
-											v-for="(seg, si) in paragraphSegments(item.origin, cid)"
+											v-for="(seg, si) in paragraphSegments(item, cid)"
 											:key="si"
 											:id="seg.anchor == 1 ? 'sel-anchor-start' : (seg.anchor == 2 ? 'sel-anchor-end' : '')"
 											:class="segClass(seg)"
@@ -83,12 +83,12 @@
 									:key="item.origin"
 									class="novel-paragraph para-page"
 									:id="'ppara-' + item.origin"
-									@longpress="onLongPress(item.origin, -1, $event)"
-									@click="onParaTap($event, item.origin, -1)"
+									@longpress="onLongPress(item.origin, -1, $event, item.from, item.to)"
+									@click="onParaTap($event, item.origin, -1, item.from, item.to)"
 								>
 								<text class="novel-text">
 									<text
-										v-for="(seg, si) in paragraphSegments(item.origin, currentChapterId)"
+										v-for="(seg, si) in paragraphSegments(item, currentChapterId)"
 										:key="si"
 										:id="seg.anchor == 1 ? 'sel-anchor-start' : (seg.anchor == 2 ? 'sel-anchor-end' : '')"
 										:class="segClass(seg)"
@@ -125,8 +125,9 @@
 							>
 								<text class="novel-text">
 									<text
-										v-for="(seg, si) in paragraphSegments(item.origin, prevPageChapterId)"
+										v-for="(seg, si) in paragraphSegments(item, prevPageChapterId)"
 										:key="si"
+										:id="seg.anchor == 1 ? 'psel-anchor-start' : (seg.anchor == 2 ? 'psel-anchor-end' : '')"
 										:class="segClass(seg)"
 										:style="'font-size:' + fontSize + 'px'"
 									>{{ seg.text }}</text>
@@ -159,8 +160,9 @@
 							>
 								<text class="novel-text">
 									<text
-										v-for="(seg, si) in paragraphSegments(item.origin, nextPageChapterId)"
+										v-for="(seg, si) in paragraphSegments(item, nextPageChapterId)"
 										:key="si"
+										:id="seg.anchor == 1 ? 'nsel-anchor-start' : (seg.anchor == 2 ? 'nsel-anchor-end' : '')"
 										:class="segClass(seg)"
 										:style="'font-size:' + fontSize + 'px'"
 									>{{ seg.text }}</text>
@@ -244,6 +246,11 @@
 
 		<!-- 全局信息提示（组件化：文案/显隐/自动消失计时内聚 ReaderToast） -->
 		<ReaderToast ref="toastRef" :night="nightMode" />
+
+		<!-- 每行字数标定节点（屏幕外不可见：与正文同款式渲染约 20 行文字，实测高度反推实际每行字数） -->
+		<view class="calib-box" :style="'left:-9999px;top:0;width:' + calibWidth + 'px'">
+			<text class="calib-text" :style="'font-size:' + fontSize + 'px;font-family:' + fontFamily">{{ calibText }}</text>
+		</view>
 	</view>
 </template>
 
@@ -252,8 +259,8 @@
 	import { useUserStore, avatarPathOf } from '@/stores/user.uts'
 	import { LocalBook, BookProgress, findBook, loadBookProgress, saveBookProgress, updateBookReading, addTodayMinutes } from '@/utils/books.uts'
 	import { parseChapters, readTextFile } from '@/utils/bookparse.uts'
-	import { Chapter, Paragraph, NoteRecord, ShareQuoteCtx, SelSpan, SpanSeg, TextMetrics, ParaRect, ReaderSettings, FONT_OPTIONS, fontOptionOf, loadUnderlines, loadThoughts, findUnderlineEntry, loadBookmarks, loadSettings, normalizeSpan, rowSpacing, buildNoteRecords, buildShareQuoteCtx } from '@/utils/readerTypes.uts'
-	import { computePageBreaks } from '@/utils/pagination.uts'
+	import { Chapter, Paragraph, Bookmark, Thought, UnderlineEntry, NoteRecord, ShareQuoteCtx, SelSpan, SpanSeg, TextMetrics, ParaRect, ReaderSettings, FONT_OPTIONS, fontOptionOf, loadUnderlines, loadThoughts, findUnderlineEntry, loadBookmarks, loadSettings, normalizeSpan, buildNoteRecords, buildShareQuoteCtx } from '@/utils/readerTypes.uts'
+	import { PageSlice, computePageBreaks } from '@/utils/pagination.uts'
 	import { flipCurrentLayerStyle, flipPrevLayerStyle, flipNextLayerStyle, flipCoverNextOpacity, flipCoverCurrentOpacity } from '@/utils/flipstyle.uts'
 	import SelectionPopover from '@/components/selection/SelectionPopover.uvue'
 	import ReaderControl from '@/components/reader/ReaderControl.uvue'
@@ -271,9 +278,13 @@
 		paragraphTapHandled = false
 	}
 
-	/** 当前页渲染项（origin 为段落在章内的索引，划词状态按其定位） */
+	/** 当前页渲染项（origin 为段落在章内的索引，划词状态按其定位；翻页模式下段落可跨页，from/to 为本页切片的整段字符闭区间） */
 	type PageItem = {
 		origin: number
+		/** 本页切片起始字符（含，整段坐标；滚动模式/未切断时为 0） */
+		from: number
+		/** 本页切片结束字符（含，整段坐标） */
+		to: number
 		text: string
 	}
 
@@ -322,15 +333,50 @@
 	/** 当前页码（章内 0-based，左右滑动翻页切换） */
 	const pageIndex = ref(0)
 
-	/** 正文区底部留白（px）：页脚浮层文字行之上留足间距，正文与页脚不紧挨 */
-	const contentBottomPx = computed(() : number => safeAreaBottomPx.value + 80)
+	/** 正文区底部留白（px）：仅避让常驻信息栏文字行（贴底内边距 24 + 文字行约 13），控制框呼出时为浮层覆盖正文、不占排版空间 */
+	const contentBottomPx = computed(() : number => safeAreaBottomPx.value + 40)
 
-	/** 分页结果：每页的章内段落索引数组（排版规则与高度预算见 utils/pagination.uts，随字号/窗口/正文变化重算） */
-	const pageBreaks = computed(() : number[][] => {
-		return computePageBreaks(paragraphs.value.map((p : Paragraph) : string => p.text), pageW.value, pageH.value, fontSize.value, contentTopPx.value, contentBottomPx.value)
+	/** ===== 每行字数标定（渲染实测）：纯计算折行与真实渲染存在字距/标点禁则偏差，页尾空白据此累积；
+	 *  屏幕外标定节点（约 20 行字数）实测高度反推实际每行字数，标定前回退纯字宽估算 ===== */
+	const perLineExact = ref(0)
+	const perLineEstimate = computed(() : number => {
+		return Math.max(1, Math.floor((pageW.value - uni.upx2px(124)) / fontSize.value))
+	})
+	const perLineEffective = computed(() : number => {
+		return perLineExact.value > 0 ? perLineExact.value : perLineEstimate.value
+	})
+	/** 标定文本（约 20 行字数：行数累计放大偏差，ceil 反推可检出 ±1 字/行的差异） */
+	const calibText = computed(() : string => {
+		let s = ''
+		const n = perLineEstimate.value * 20
+		for (let i = 0; i < n; i++) {
+			s += '测'
+		}
+		return s
+	})
+	const calibWidth = computed(() : number => pageW.value - uni.upx2px(124))
+
+	/** 分页结果：每页的段落切片数组（流式分页，段落可跨页；perLine 为运行时标定的实际每行字数，
+	 *  与真实渲染折行同口径；排版规则见 utils/pagination.uts，随字号/窗口/正文/标定变化重算） */
+	const pageBreaks = computed(() : PageSlice[][] => {
+		return computePageBreaks(paragraphs.value.map((p : Paragraph) : string => p.text), perLineEffective.value, pageH.value, fontSize.value, contentTopPx.value, contentBottomPx.value)
 	})
 
-	/** 分页变化（字号调节/设置恢复触发重分页）后钳制当前页码，避免指向不存在的空页 */
+	/** 指定章的分页结果（与当前章 pageBreaks 同参；跨章预渲染取相邻章末页/首页用） */
+	function chapterBreaks(cid : number) : PageSlice[][] {
+		return computePageBreaks(paragraphsOf(cid).map((p : Paragraph) : string => p.text), perLineEffective.value, pageH.value, fontSize.value, contentTopPx.value, contentBottomPx.value)
+	}
+
+	/** 切片 → 渲染项（在指定章的段落上取文本切片；text 为切片文本） */
+	function slicesToItems(cid : number, slices : PageSlice[]) : PageItem[] {
+		const paras = paragraphsOf(cid)
+		return slices.map((s) : PageItem => {
+			const full = s.origin >= 0 && s.origin < paras.length ? paras[s.origin].text : ''
+			return { origin: s.origin, from: s.from, to: s.to, text: full.substring(s.from, s.to + 1) } as PageItem
+		})
+	}
+
+	/** 分页变化（字号调节/设置恢复/标定更新）后钳制当前页码，避免指向不存在的空页 */
 	function clampPageIndex() : void {
 		if (pageIndex.value > pageBreaks.value.length - 1) {
 			pageIndex.value = Math.max(0, pageBreaks.value.length - 1)
@@ -339,12 +385,11 @@
 
 	/** 指定页渲染项 */
 	function pageItemsAt(pi : number) : PageItem[] {
-		const paras = paragraphs.value
 		const breaks = pageBreaks.value
-		const page = pi >= 0 && pi < breaks.length ? breaks[pi] : []
-		return page.map((i) : PageItem => {
-			return { origin: i, text: paras[i].text } as PageItem
-		})
+		if (pi < 0 || pi >= breaks.length) {
+			return [] as PageItem[]
+		}
+		return slicesToItems(currentChapterId.value, breaks[pi])
 	}
 
 	/** 当前页渲染项（随 pageIndex 变化） */
@@ -366,6 +411,13 @@
 	const bookId = ref('')
 	const bookTitle = ref('')
 
+	/** 段落文本数组 → 段落对象数组（本地 txt 解析结果注入前的统一转换） */
+	function toParagraphs(texts : string[]) : Paragraph[] {
+		return texts.map((t : string) : Paragraph => {
+			return { text: t } as Paragraph
+		})
+	}
+
 	/** 注入真实书籍数据（章节目录 + 各章段落正文）并重置阅读位置：本地文件解析完成后调用一次，目录、分页、划线/想法/书签渲染全部基于注入后的数据重建 */
 	function loadBookContent(chs : Chapter[], allParas : string[][]) : void {
 		chapters.value = chs
@@ -377,7 +429,8 @@
 		scrollModeTop.value = 0
 		scrollModePos.value = 0
 		clampPageIndex()
-		saveProgress()
+		// 不在此处 saveProgress：openLocalBook 随后调 restoreProgress 恢复旧进度，
+		// 先写会把重置值 {0,0} 覆盖存储中的真实进度，导致每次打开都回到第一章
 	}
 
 	/** ===== 阅读进度（章节/页码/滚动位置，按 bookId 隔离持久化） ===== */
@@ -464,11 +517,11 @@
 		}
 	}
 
-	/** 指定章的段落渲染项（key 带章 id 防止多章同段落索引冲突；滚动模式多章连续渲染按章取段落） */
+	/** 指定章的段落渲染项（key 带章 id 防止多章同段落索引冲突；滚动模式整段渲染不切片，from=0/to=段尾） */
 	function chapterParagraphItems(cid : number) : PageItem[] {
 		const paras = paragraphsOf(cid)
 		return paras.map((p, i) : PageItem => {
-			return { origin: i, text: p } as PageItem
+			return { origin: i, from: 0, to: p.text.length - 1, text: p.text } as PageItem
 		})
 	}
 
@@ -480,18 +533,17 @@
 	const flipOffset = ref(0)
 	const flipSettling = ref(false)
 
-	/** 上一页渲染项（常驻预渲染：章内相邻页；章首跨上一章末页——取上一章尾部等量段落近似，落定后按上一章真实分页渲染；第一章无上一页为空数组）——目标层视图常驻，跟手时零创建延迟，首次翻到新页无渲染空白 */
+	/** 上一页渲染项（常驻预渲染：章内相邻页；章首跨上一章末页——按上一章分页取末页；第一章无上一页为空数组）——目标层视图常驻，跟手时零创建延迟，首次翻到新页无渲染空白 */
 	const prevPageItems = computed(() : PageItem[] => {
 		if (pageIndex.value > 0) {
 			return pageItemsAt(pageIndex.value - 1)
 		}
 		if (currentChapterId.value > 0) {
-			const paras = paragraphsOf(currentChapterId.value - 1)
-			const tailCount = pageBreaks.value.length > 0 ? pageBreaks.value[pageBreaks.value.length - 1].length : 0
-			const start = Math.max(0, paras.length - tailCount)
-			return paras.slice(start).map((p, i) : PageItem => {
-				return { origin: start + i, text: p } as PageItem
-			})
+			const pb = chapterBreaks(currentChapterId.value - 1)
+			if (pb.length == 0) {
+				return [] as PageItem[]
+			}
+			return slicesToItems(currentChapterId.value - 1, pb[pb.length - 1])
 		}
 		return [] as PageItem[]
 	})
@@ -499,9 +551,13 @@
 	/** 是否存在上一页（书首为 false） */
 	const hasPrevPage = computed(() : boolean => pageIndex.value > 0 || currentChapterId.value > 0)
 
-	/** 上一页的章内页索引（章内相邻页；跨章取上一章末页；原型阶段全章共用同一份正文，分页一致） */
+	/** 上一页的章内页索引（章内相邻页；跨章取上一章末页） */
 	const prevPageIndex = computed(() : number => {
-		return pageIndex.value > 0 ? pageIndex.value - 1 : pageBreaks.value.length - 1
+		if (pageIndex.value > 0) {
+			return pageIndex.value - 1
+		}
+		const pb = chapterBreaks(currentChapterId.value - 1)
+		return pb.length - 1
 	})
 
 	/** 上一页所在章 id（章内=当前章；章首跨上一章） */
@@ -509,17 +565,17 @@
 		return pageIndex.value > 0 ? currentChapterId.value : (currentChapterId.value > 0 ? currentChapterId.value - 1 : currentChapterId.value)
 	})
 
-	/** 下一页渲染项（常驻预渲染：章内相邻页；章尾跨下一章首页——取下一章头部等量段落近似，落定后按下一章真实分页渲染；末章无下一页为空数组） */
+	/** 下一页渲染项（常驻预渲染：章内相邻页；章尾跨下一章首页——按下一章分页取首页；末章无下一页为空数组） */
 	const nextPageItems = computed(() : PageItem[] => {
 		if (pageIndex.value < pageBreaks.value.length - 1) {
 			return pageItemsAt(pageIndex.value + 1)
 		}
 		if (currentChapterId.value < chapters.value.length - 1) {
-			const paras = paragraphsOf(currentChapterId.value + 1)
-			const headCount = pageBreaks.value.length > 0 ? pageBreaks.value[0].length : 0
-			return paras.slice(0, headCount).map((p, i) : PageItem => {
-				return { origin: i, text: p } as PageItem
-			})
+			const pb = chapterBreaks(currentChapterId.value + 1)
+			if (pb.length == 0) {
+				return [] as PageItem[]
+			}
+			return slicesToItems(currentChapterId.value + 1, pb[0])
 		}
 		return [] as PageItem[]
 	})
@@ -603,6 +659,33 @@
 	const fontSize = ref(18)
 	const selectedBg = ref(READER_THEME_LIGHT.readerBg)
 	const pageTurn = ref('滚动')
+
+	/** ===== 每行字数标定（fontSize/字体变化后重跑；标定节点渲染完成约需一帧，延时后实测） ===== */
+	function calibratePerLine() : void {
+		if (calibText.value.length == 0 || fontSize.value <= 0) {
+			return
+		}
+		uni.createSelectorQuery().select('.calib-text').boundingClientRect((r : NodeInfo | null) : void => {
+			if (r == null || r.height <= 0) {
+				return
+			}
+			const lineH = fontSize.value * 1.7
+			const n = Math.max(1, Math.round(r.height / lineH))
+			perLineExact.value = Math.max(1, Math.ceil(calibText.value.length / n))
+		}).exec()
+	}
+
+	onReady(() => {
+		calibratePerLine()
+	})
+
+	watch(fontSize, () => {
+		setTimeout(() => {
+			calibratePerLine()
+			clampPageIndex()
+		}, 120)
+	})
+
 	/** 是否上下滚动模式（语义化别名，正文手势/定位/渲染均按此分支；信息栏显隐随其下行组件） */
 	const scrollMode = computed(() : boolean => pageTurn.value == '滚动')
 
@@ -851,6 +934,7 @@
 			if (r.cid != currentChapterId.value) {
 				goToChapter(r.cid, false)
 			}
+			// 定位到记录所在段落的分页（切片含该段落 origin 的页）
 			let targetPage = -1
 			for (let pi = 0; pi < pageBreaks.value.length; pi++) {
 				if (pageBreaks.value[pi].indexOf(r.origin) >= 0) {
@@ -956,35 +1040,55 @@
 		anchor: number
 	}
 
-	/** 段落文本分段：renderCid 为渲染内容所属章（选区/划线/想法按章匹配，多章共用原型正文防串显）；选区支持跨段 */
-	function paragraphSegments(origin : number, renderCid : number) : TextSeg[] {
+	/** 段落文本分段（切片窗口化）：renderCid 为渲染内容所属章；item.from/to 为本页展示的整段字符闭区间——
+	 *  划线/想法/选区区间先与窗口求交再平移到切片内坐标（跨页切断的区间在两页各显示一半），文本取自整段切片；
+	 *  滚动模式传整段切片（from=0/to=段尾），行为与旧整段渲染一致；选区支持跨段跨页 */
+	function paragraphSegments(item : PageItem, renderCid : number) : TextSeg[] {
 		// 按渲染章取段落：跨章预渲染层（上/下一页层）的 origin 属于相邻章，不能用当前章段落索引；越界（数据未就绪）返回空段
-		const p = paragraphsOf(renderCid)[origin]
+		const p = paragraphsOf(renderCid)[item.origin]
 		if (p == null) {
 			return [] as TextSeg[]
 		}
-		const len = p.length
-		if (len == 0) {
+		const winFrom = item.from
+		const winTo = item.to
+		const len = winTo - winFrom + 1
+		if (len <= 0) {
 			return [] as TextSeg[]
 		}
-		const ranges = rangesAt(renderCid, origin)
-		// 当前章该段落的想法区间（想法段下划线样式与纯划线区分，想法支持跨段）
-		const thoughtRanges : number[][] = []
-		for (const t of thoughts.value) {
-			const r = spanRangeAt(t.fromCid, t.fromOrigin, t.fromStart, t.toCid, t.toOrigin, t.toEnd, renderCid, origin)
-			if (r.length == 2) {
-				thoughtRanges.push(r)
+		// 划线区间与窗口求交并平移到切片内坐标
+		const ranges : number[][] = []
+		for (const u of rangesAt(renderCid, item.origin)) {
+			const s = Math.max(u[0], winFrom)
+			const e = Math.min(u[1], winTo)
+			if (s <= e) {
+				ranges.push([s - winFrom, e - winFrom])
 			}
 		}
-		// 当前章该段落的选区交集（跨段选区）
+		// 当前章该段落的想法区间（想法段下划线样式与纯划线区分，想法支持跨段），同窗口化
+		const thoughtRanges : number[][] = []
+		for (const t of thoughts.value) {
+			const r = spanRangeAt(t.fromCid, t.fromOrigin, t.fromStart, t.toCid, t.toOrigin, t.toEnd, renderCid, item.origin)
+			if (r.length == 2) {
+				const s = Math.max(r[0], winFrom)
+				const e = Math.min(r[1], winTo)
+				if (s <= e) {
+					thoughtRanges.push([s - winFrom, e - winFrom])
+				}
+			}
+		}
+		// 当前章该段落的选区交集（跨段跨页选区），同窗口化
 		let selS = -1
 		let selE = -1
 		const span = selSpan.value
 		if (span != null) {
-			const r = spanRangeAt(span.fromCid, span.fromOrigin, span.fromStart, span.toCid, span.toOrigin, span.toEnd, renderCid, origin)
+			const r = spanRangeAt(span.fromCid, span.fromOrigin, span.fromStart, span.toCid, span.toOrigin, span.toEnd, renderCid, item.origin)
 			if (r.length == 2) {
-				selS = r[0]
-				selE = r[1]
+				const s = Math.max(r[0], winFrom)
+				const e = Math.min(r[1], winTo)
+				if (s <= e) {
+					selS = s - winFrom
+					selE = e - winFrom
+				}
 			}
 		}
 		const isSel = selS >= 0 && selE >= selS
@@ -1026,20 +1130,25 @@
 					break
 				}
 			}
-			// 选区起点锚点段：插在选中首段之前（起点段）
-			if (span != null && inSel && renderCid == span.fromCid && origin == span.fromOrigin) {
+			// 选区起点锚点段：仅当本切片含选区起点字符时插入（跨页选区起点在另一页时不插）
+			if (span != null && inSel && renderCid == span.fromCid && item.origin == span.fromOrigin && span.fromStart >= winFrom && span.fromStart <= winTo) {
 				segs.push({ start: a, text: ANCHOR_CHAR, selected: false, underlined: false, thought: false, anchor: 1 } as TextSeg)
 			}
 			const last = segs.length > 0 ? segs[segs.length - 1] : null
 			if (last != null && last.anchor == 0 && last.selected == inSel && last.underlined == inUl && last.thought == inThought) {
-				last.text = last.text + p.slice(a, b)
+				last.text = last.text + p.text.slice(winFrom + a, winFrom + b)
 			} else {
-				segs.push({ start: a, text: p.slice(a, b), selected: inSel, underlined: inUl, thought: inThought, anchor: 0 } as TextSeg)
+				segs.push({ start: a, text: p.text.slice(winFrom + a, winFrom + b), selected: inSel, underlined: inUl, thought: inThought, anchor: 0 } as TextSeg)
 			}
-			// 选区终点锚点段：插在选中末段之后（终点段）
-			if (span != null && inSel && renderCid == span.toCid && origin == span.toOrigin) {
+			// 选区终点锚点段：仅当本切片含选区终点字符时插入
+			if (span != null && inSel && renderCid == span.toCid && item.origin == span.toOrigin && span.toEnd >= winFrom && span.toEnd <= winTo) {
 				segs.push({ start: b, text: ANCHOR_CHAR, selected: false, underlined: false, thought: false, anchor: 2 } as TextSeg)
 			}
+		}
+		if (item.from == 0 && len > 0) {
+			// 段落首行缩进：渲染流头部插入两个全角空格（宽度=2×字号，全端字符级生效，不依赖 CSS text-indent；
+			// 空格为渲染装饰不入数据，划线/想法坐标与分页容量已按首行少 2 字适配）
+			segs.unshift({ start: -1, text: '　　', selected: false, underlined: false, thought: false, anchor: 0 } as TextSeg)
 		}
 		return segs
 	}
@@ -1073,8 +1182,9 @@
 	})
 	// #endif
 
-	/** 点击正文段落（100% 可靠的 view 载体）：段落含划线/想法时吞掉父级点击，异步按点击坐标精判——命中想法弹查看面板，命中纯划线无展示，未命中划线自动补执行父级点击行为 */
-	function onParaTap(e : UniPointerEvent, origin : number, cid : number) : void {
+	/** 点击正文段落（100% 可靠的 view 载体）：段落含划线/想法时吞掉父级点击，异步按点击坐标精判——命中想法弹查看面板，命中纯划线无展示，未命中划线自动补执行父级点击行为；
+	 *  from/to 为本页渲染的整段字符切片区间（流式分页段落可跨页），切片内行列换算后加 from 偏移对齐划线/想法的整段坐标 */
+	function onParaTap(e : UniPointerEvent, origin : number, cid : number, from : number, to : number) : void {
 		const renderCid = cid >= 0 ? cid : currentChapterId.value
 		const ranges = rangesAt(renderCid, origin)
 		if (ranges.length == 0) {
@@ -1090,14 +1200,26 @@
 				onContentTap()
 				return
 			}
-			const p = paragraphsOf(renderCid)[origin]
 			const m = layoutMetrics()
-			const maxRow = Math.max(0, Math.floor((p.text.length - 1) / m.perLine))
+			const sliceLen = to - from + 1
+			// 切片行数：段首切片（from==0）首行容量 = perLine-2（缩进占 2 字），续切片每行 perLine
+			let maxRow : number
+			if (from == 0) {
+				const rest = sliceLen - (m.perLine - 2)
+				maxRow = rest <= 0 ? 0 : Math.ceil(rest / m.perLine)
+			} else {
+				maxRow = Math.max(0, Math.ceil(sliceLen / m.perLine) - 1)
+			}
 			let row = Math.floor((clientY - rect.top) / m.lineH)
 			row = Math.max(0, Math.min(row, maxRow))
-			let col = Math.floor((clientX - rect.left) / rowSpacing(m, p.text.length, maxRow, row))
+			// 首行触点先扣除缩进宽（两个全角空格），字距：首行与末行未拉伸用自然字距，中间满行用两端对齐拉伸字距
+			const indent = (from == 0 && row == 0) ? m.indentPx : 0
+			const spacing = row == 0 ? m.charW : (row < maxRow ? m.fullCharW : m.charW)
+			let col = Math.floor((clientX - rect.left - indent) / spacing)
 			col = Math.max(0, Math.min(col, m.perLine - 1))
-			const charIdx = Math.min(row * m.perLine + col, p.text.length - 1)
+			// 切片内字符索引（首行容量 perLine-2）加切片偏移 = 整段坐标
+			const sliceIdx = row == 0 ? col : (m.perLine - 2) + (row - 1) * m.perLine + col
+			const charIdx = Math.min(sliceIdx, sliceLen - 1) + from
 			let inUl = false
 			for (const u of ranges) {
 				if (charIdx >= u[0] && charIdx <= u[1]) {
@@ -1146,7 +1268,7 @@
 		}
 	}
 
-	/** 恢复上次阅读进度（进度按 bookId 隔离存储，无书名串用问题；章节/页码/滚动位置）。在 loadBookContent 注入数据后调用：pageBreaks 依赖窗口尺寸与字号 ref（均已就绪），恢复页码按真实分页校验 */
+	/** 恢复上次阅读进度（进度按 bookId 隔离存储，无书名串用问题；章节/页码/滚动位置）。在 loadBookContent 注入数据后调用：窗口页序依赖流高实测（未实测前按估算钳制） */
 	function restoreProgress(bid : string) : void {
 		const p = loadBookProgress(bid)
 		if (p == null) {
@@ -1362,7 +1484,6 @@
 
 	/** 翻页（左滑下一页、右滑上一页；章首/章尾越界时切换上一章末页/下一章首页，Stitch 边界 toast 提示） */
 	function flipPage(delta: number) : void {
-		const totalPages = pageBreaks.value.length
 		const next = pageIndex.value + delta
 		if (next < 0) {
 			if (currentChapterId.value === 0) {
@@ -1372,7 +1493,7 @@
 			goToChapter(currentChapterId.value - 1, true)
 			return
 		}
-		if (next > totalPages - 1) {
+		if (next > pageBreaks.value.length - 1) {
 			if (currentChapterId.value === chapters.value.length - 1) {
 				showToast('已经是最后一章')
 				return
@@ -1385,7 +1506,7 @@
 		saveProgress()
 	}
 
-	/** 切换章节并定位页（进入新章默认首页，回退上一章定位末页；段落切换到目标章后分页重算；滚动模式复位章节序列与滚动位置） */
+	/** 切换章节并定位页（进入新章默认首页，回退上一章定位末页；流窗口随章切换重算；滚动模式复位章节序列与滚动位置） */
 	function goToChapter(id: number, atLastPage: boolean) : void {
 		// 章界防御：书签/进度等存量索引可能指向未注入数据中不存在的章
 		if (id < 0 || id >= chapters.value.length) {
@@ -1432,18 +1553,17 @@
 		uni.navigateBack()
 	}
 
-	/** 划词排版度量（TextMetrics/rowSpacing 见 utils/readerTypes.uts 共享层，气泡组件随 metrics props 使用同源参数） */
+	/** 划词排版度量（TextMetrics 见 utils/readerTypes.uts 共享层，气泡组件随 metrics props 使用同源参数）；perLine 用渲染标定值，与分页引擎同源 */
 	function layoutMetrics() : TextMetrics {
-		// 每行字数须与真实渲染一致：letter-spacing 0.4rpx（约 0.2px）在 APP 原生渲染中未生效，
-		// 计入会导致每行字数少估 1，划词手柄每跨一行累计右偏 1 字符（pageBreaks 的高度预算为保守估计，另按原公式不动）
 		const charW = fontSize.value
 		const contentW = pageW.value - uni.upx2px(124)
-		const perLine = Math.max(1, Math.floor(contentW / charW))
+		const perLine = perLineEffective.value
 		return {
 			perLine: perLine,
 			lineH: fontSize.value * 1.7,
 			charW: charW,
-			fullCharW: contentW / perLine
+			fullCharW: contentW / perLine,
+			indentPx: fontSize.value * 2
 		} as TextMetrics
 	}
 
@@ -1483,17 +1603,21 @@
 		return '#ppara-' + pi
 	}
 
-	/** 测量选区两端锚点真实渲染位置（零宽字符排入选中文本流，位置即字符边界真实位置），矩形回传气泡组件吸附 */
+	/** 测量选区两端锚点与起/终段落的渲染矩形（同一查询批次，坐标系一致），批量回传气泡组件做差分定位 */
 	function measureAnchors() : void {
-		if (selSpan.value == null) {
+		const s = selSpan.value
+		if (s == null) {
 			return
 		}
-		uni.createSelectorQuery().select('#sel-anchor-start').boundingClientRect((r : NodeInfo | null) : void => {
-			popoverRef.value?.setAnchorRects(0, r)
-		}).exec()
-		uni.createSelectorQuery().select('#sel-anchor-end').boundingClientRect((r : NodeInfo | null) : void => {
-			popoverRef.value?.setAnchorRects(1, r)
-		}).exec()
+		uni.createSelectorQuery()
+			.select('#sel-anchor-start').boundingClientRect()
+			.select('#sel-anchor-end').boundingClientRect()
+			.select('#ppara-' + s.fromOrigin).boundingClientRect()
+			.select('#ppara-' + s.toOrigin).boundingClientRect()
+			.exec((res) => {
+				const arr = res as Array<NodeInfo | null>
+				popoverRef.value?.setAnchors(s, arr[0], arr[1], arr[2], arr[3])
+			})
 	}
 
 	/** 拖动中的段落视口矩形收集容器（触点→段落映射在气泡组件内换算，正文段落元素查询必须在宿主） */
@@ -1519,7 +1643,8 @@
 							left: rects[idx].left,
 							top: rects[idx].top,
 							bottom: rects[idx].bottom,
-							len: paras[o].text.length
+							len: paras[o].text.length,
+							from: 0
 						} as ParaRect)
 					}
 				}
@@ -1530,14 +1655,18 @@
 				if (rects == null) {
 					return
 				}
-				for (let i = 0; i < rects.length; i++) {
+				// 连续流整章渲染：rect 顺序与全章段集一致（chapterParagraphItems 同源）
+				const items = chapterParagraphItems(currentChapterId.value)
+				for (let i = 0; i < rects.length && i < items.length; i++) {
+					const it = items[i]
 					dragParaRects.push({
 						cid: currentChapterId.value,
-						origin: currentPageItems.value[i].origin,
+						origin: it.origin,
 						left: rects[i].left,
 						top: rects[i].top,
 						bottom: rects[i].bottom,
-						len: currentPageItems.value[i].text.length
+						len: it.to - it.from + 1,
+						from: it.from
 					} as ParaRect)
 				}
 				popoverRef.value?.setDragRects(dragParaRects)
@@ -1547,8 +1676,9 @@
 
 	/** 手柄拖动（跨段）与触摸事件处理已内聚气泡组件（正文段落矩形由宿主查询回传 setDragRects） */
 
-	/** 长按段落：触点位置估算字符索引，定位所在句整句选中并显示拖动手柄（cid=-1 为分页模式，滚动模式传段落所在章 id） */
-	function onLongPress(pi : number, cid : number, e : UniTouchEvent) : void {
+	/** 长按段落：触点位置估算字符索引，定位所在句整句选中并显示拖动手柄（cid=-1 为分页模式，滚动模式传段落所在章 id）；
+	 *  from/to 为本页渲染的整段字符切片区间（流式分页段落可跨页），切片内行列换算后加 from 偏移对齐划线/想法的整段坐标 */
+	function onLongPress(pi : number, cid : number, e : UniTouchEvent, from : number, to : number) : void {
 		if (e.touches.length == 0) {
 			return
 		}
@@ -1563,16 +1693,27 @@
 			if (rect == null) {
 				return
 			}
-			// 段落文本按被长按段落所在章取（滚动模式多章渲染下 pi 属于 spanCid 章）
+			// 段落文本按被长按段落所在章取（滚动模式多章渲染下 pi 属于 spanCid 章）；句界在整段文本上计算（跨页句子的两端坐标仍属整段）
 			const p = paragraphsOf(spanCid)[pi]
 			const m = layoutMetrics()
-			const maxRow = Math.max(0, Math.floor((p.text.length - 1) / m.perLine))
-			// 触点相对段落文本区 → 行列估算字符索引（与分页排版同源公式，字距按行取值）
+			const sliceLen = to - from + 1
+			// 切片行数：段首切片（from==0）首行容量 = perLine-2（缩进占 2 字），续切片每行 perLine
+			let maxRow : number
+			if (from == 0) {
+				const rest = sliceLen - (m.perLine - 2)
+				maxRow = rest <= 0 ? 0 : Math.ceil(rest / m.perLine)
+			} else {
+				maxRow = Math.max(0, Math.ceil(sliceLen / m.perLine) - 1)
+			}
+			// 触点相对段落文本区 → 行列估算字符索引（与分页排版同源公式）；首行触点扣除缩进宽，切片内索引加 from 对齐整段坐标
 			let row = Math.floor((clientY - rect.top) / m.lineH)
 			row = Math.max(0, Math.min(row, maxRow))
-			let col = Math.floor((clientX - rect.left) / rowSpacing(m, p.text.length, maxRow, row))
+			const indent = (from == 0 && row == 0) ? m.indentPx : 0
+			const spacing = row == 0 ? m.charW : (row < maxRow ? m.fullCharW : m.charW)
+			let col = Math.floor((clientX - rect.left - indent) / spacing)
 			col = Math.max(0, Math.min(col, m.perLine - 1))
-			const charIdx = Math.min(row * m.perLine + col, p.text.length - 1)
+			const sliceIdx = row == 0 ? col : (m.perLine - 2) + (row - 1) * m.perLine + col
+			const charIdx = Math.min(sliceIdx, sliceLen - 1) + from
 			if (spanCid != currentChapterId.value) {
 				currentChapterId.value = spanCid
 				saveProgress()
@@ -1603,8 +1744,8 @@
 					toEnd: range[1]
 				} as SelSpan
 			}
-			// 选区状态与手柄/气泡在气泡组件内建立（锚点实测由组件发起请求、宿主查询回传）
-			popoverRef.value?.beginSelection(span, rect.left, rect.top, clientX, p.text.length)
+			// 选区状态与手柄/气泡在气泡组件内建立（锚点实测由组件发起请求、宿主查询回传）；起点段长按本页切片长度与偏移传（手柄估算的切片口径）
+			popoverRef.value?.beginSelection(span, rect.left, rect.top, clientX, Math.min(sliceLen, p.text.length - from), from)
 		}).exec()
 	}
 
@@ -1780,7 +1921,8 @@
 		overflow: hidden;
 	}
 
-	/* 页层正文容器：上下留白内联动态绑定（顶部=控制项下方、底部=页脚浮层上方+安全区），左右为固定排版边距 */
+	/* 页层正文容器：上下留白内联动态绑定（顶部=控制项下方、底部=页脚浮层上方+安全区），左右为固定排版边距；
+	   连续流模式下整章渲染，translateY 按行网格窗口偏移，层裁剪出可视窗口 */
 	.content-inner {
 		padding-left: 62rpx;
 		padding-right: 62rpx;
@@ -1808,6 +1950,7 @@
 		right: 0;
 		top: 0;
 		bottom: 0;
+		overflow: hidden;
 	}
 
 	/* 松手回弹/落定：层位移以过渡动画归位 */
@@ -1918,6 +2061,17 @@
 		line-height: 1.7;
 		letter-spacing: 0.4rpx;
 		text-align: justify;
+	}
+
+	/* 每行字数标定节点：屏幕外占位，折行条件（宽度/字号/字距/行高/字体）与正文 novel-text 完全同款 */
+	.calib-box {
+		position: absolute;
+	}
+
+	.calib-text {
+		line-height: 1.7;
+		letter-spacing: 0.4rpx;
+		color: rgba(0, 0, 0, 0);
 	}
 
 	/* 划线标注（Stitch: 划线持久为波浪下划线样式，颜色取弱文本 mute） */

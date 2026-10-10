@@ -7,6 +7,7 @@
 						<text class="help-page__card-text">进入「我的 - 个人信息」页，点击对应条目即可修改用户名、头像、签名、密码与邮箱。</text>
 					</view>
 				</view>
+	</PageShell>
 </template>
 
 <script setup lang="uts">

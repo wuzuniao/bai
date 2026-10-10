@@ -51,7 +51,8 @@
 				<view class="register-page__footer">
 					<text class="register-page__footer-text">已有账号？</text>
 					<text class="register-page__footer-link" @click="goLogin">去登录</text>
-				</view>
+			</view>
+	</PageShell>
 </template>
 
 <script setup lang="uts">

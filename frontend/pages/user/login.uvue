@@ -77,7 +77,8 @@
 				<view v-if="loginMode === 'normal'" class="login-page__footer">
 					<text class="login-page__footer-text">还没有账号？</text>
 					<text class="login-page__footer-link" @click="goRegister">立即注册</text>
-				</view>
+			</view>
+	</PageShell>
 </template>
 
 <script setup lang="uts">

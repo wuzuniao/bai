@@ -45,6 +45,7 @@
 						</view>
 					</view>
 				</view>
+	</PageShell>
 </template>
 
 <script setup lang="uts">
