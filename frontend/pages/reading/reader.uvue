@@ -52,7 +52,7 @@
 										<text
 											v-for="(seg, si) in paragraphSegments(item, cid)"
 											:key="si"
-											:id="seg.anchor == 1 ? 'sel-anchor-start' : (seg.anchor == 2 ? 'sel-anchor-end' : '')"
+											:id="seg.anchor == 1 ? anchorStartId : (seg.anchor == 2 ? anchorEndId : '')"
 											:class="segClass(seg)"
 										>{{ seg.text }}</text>
 									</text>
@@ -90,7 +90,7 @@
 									<text
 										v-for="(seg, si) in paragraphSegments(item, currentChapterId)"
 										:key="si"
-										:id="seg.anchor == 1 ? 'sel-anchor-start' : (seg.anchor == 2 ? 'sel-anchor-end' : '')"
+										:id="seg.anchor == 1 ? anchorStartId : (seg.anchor == 2 ? anchorEndId : '')"
 										:class="segClass(seg)"
 										:style="'font-size:' + fontSize + 'px'"
 									>{{ seg.text }}</text>
@@ -1583,8 +1583,17 @@
 	const selSpan = ref<SelSpan | null>(null)
 
 	/** 选区变化镜像（气泡组件 spanChanged 事件） */
+	/** 选区代次（锚点 id 组成部分）：选区每次变化递增 */
+	const selEpoch = ref(0)
+	/** 选区两端锚点节点 id（携带代次）：渲染未落地时按新 id 查询落空触发重试，旧代次节点不会被误读为当前锚点 */
+	const anchorStartId = computed(() : string => 'sel-anchor-start-' + selEpoch.value)
+	const anchorEndId = computed(() : string => 'sel-anchor-end-' + selEpoch.value)
+
 	function onSpanChanged(s : SelSpan | null) : void {
 		selSpan.value = s
+		if (s != null) {
+			selEpoch.value++
+		}
 	}
 
 	/** 拖动开始：查询正文段落视口矩形回传组件（触点→段落映射在宿主模板内，跨组件查询不可行） */
@@ -2282,13 +2291,22 @@
 		if (s == null) {
 			return
 		}
+		// 只按当前代次 id 查锚点：选区刚变化时新锚点尚未渲染，查询落空（null）触发下方重试，
+		// 不会读到上一选区旧位置的锚点（不取消选区再次长按时手柄/气泡错位的根因）
+		const startSel = '#' + anchorStartId.value
+		const endSel = '#' + anchorEndId.value
+		const epochAtQuery = selEpoch.value
 		uni.createSelectorQuery()
-			.select('#sel-anchor-start').boundingClientRect()
-			.select('#sel-anchor-end').boundingClientRect()
+			.select(startSel).boundingClientRect()
+			.select(endSel).boundingClientRect()
 			.select('#ppara-' + s.fromOrigin).boundingClientRect()
 			.select('#ppara-' + s.toOrigin).boundingClientRect()
 			.exec((res) => {
 				const arr = res as Array<NodeInfo | null>
+				// 回调期间选区已再次变化：本次结果作废，由新选区自身的测量流程接管
+				if (epochAtQuery != selEpoch.value) {
+					return
+				}
 				if (arr[0] == null && arr[1] == null && attempt < 2) {
 					setTimeout(() => {
 						measureAnchorsAttempt(attempt + 1)
