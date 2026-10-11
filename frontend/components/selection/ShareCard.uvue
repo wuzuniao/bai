@@ -1,12 +1,19 @@
 <template>
 	<view class="share-root">
-		<!-- 分享卡片预览（头像半出卡片顶部正中/产品名/引文渐出/想法预览限高滚动；导出为全量长图；分享按钮仅微信端） -->
+		<!-- 分享卡片预览（头像半出卡片顶部正中/产品名/引文分段排版与正文同参/想法预览限高滚动；导出为全量长图；分享按钮仅微信端） -->
 		<view v-if="shareOpen" class="share-mask" @click="closeShare">
 			<view class="share-pop">
 				<view class="share-card">
 					<text class="share-card-app">无足鸟古诗词学习助手</text>
 					<scroll-view direction="vertical" class="share-card-scroll" :style="'max-height:' + shareCardMaxH + 'px'">
-						<text class="share-card-text"><text class="share-ctx-far">{{ shareData.farBefore }}</text><text class="share-ctx-near">{{ shareData.nearBefore }}</text><text class="share-quote-mark">“</text><text class="share-quote-main">{{ shareData.quote }}</text><text class="share-quote-mark">”</text><text class="share-ctx-near">{{ shareData.nearAfter }}</text><text class="share-ctx-far">{{ shareData.farAfter }}</text></text>
+						<!-- 引文分段渲染：\n 拆段（段边界即原文段落边界）+ 段首两全角空格缩进 + 段间距，与正文段落排版同参 -->
+						<view
+							v-for="(para, pi) in shareParas"
+							:key="pi"
+							:class="pi > 0 ? 'share-para-gap' : ''"
+						>
+							<text class="share-card-text"><text v-for="(r, ri) in para" :key="ri" :class="r.cls">{{ r.text }}</text></text>
+						</view>
 						<view v-if="shareData.thoughtText.length > 0" class="share-card-thought">
 							<text class="share-card-thought-text">{{ shareData.thoughtText }}</text>
 						</view>
@@ -74,6 +81,64 @@
 	/** 分享卡片预览滚动区最大高度（px）：屏高的 45% */
 	const shareCardMaxH = computed(() : number => props.pageH * 0.45)
 
+	/** 分享预览富文本运行段（文本 + 样式类；与画布绘制段 ShareRun 同源异构） */
+	type ShareViewRun = {
+		text : string
+		cls : string
+	}
+
+	/** 选区起于段首判定：前文上下文为空 ⇔ 选区起点即所在段段首（宿主前文取同段 slice(0, fromStart)，非段首必非空）；决定首段是否缩进 */
+	function quoteStartsAtParaStart() : boolean {
+		const d = shareData.value
+		return d.farBefore.length == 0 && d.nearBefore.length == 0
+	}
+
+	/** 引文段落视图（预览）：按 \n 拆段（段边界即原文段落边界），段首插入两全角空格缩进（与正文段首渲染同参，首段仅选区起于段首时缩进），段间距由 share-para-gap 承担；与画布 layoutShareParas 同规则 */
+	const shareParas = computed(() : Array<Array<ShareViewRun>> => {
+		const d = shareData.value
+		const runs : ShareViewRun[] = [] as ShareViewRun[]
+		if (d.farBefore.length > 0) {
+			runs.push({ text: d.farBefore, cls: 'share-ctx-far' } as ShareViewRun)
+		}
+		if (d.nearBefore.length > 0) {
+			runs.push({ text: d.nearBefore, cls: 'share-ctx-near' } as ShareViewRun)
+		}
+		runs.push({ text: '“', cls: 'share-quote-mark' } as ShareViewRun)
+		runs.push({ text: d.quote, cls: 'share-quote-main' } as ShareViewRun)
+		runs.push({ text: '”', cls: 'share-quote-mark' } as ShareViewRun)
+		if (d.nearAfter.length > 0) {
+			runs.push({ text: d.nearAfter, cls: 'share-ctx-near' } as ShareViewRun)
+		}
+		if (d.farAfter.length > 0) {
+			runs.push({ text: d.farAfter, cls: 'share-ctx-far' } as ShareViewRun)
+		}
+		const paras : Array<Array<ShareViewRun>> = [] as Array<Array<ShareViewRun>>
+		let cur : ShareViewRun[] = [] as ShareViewRun[]
+		const flushPara = () : void => {
+			if (cur.length == 0) {
+				return
+			}
+			if (paras.length > 0 || quoteStartsAtParaStart()) {
+				cur.unshift({ text: '　　', cls: '' } as ShareViewRun)
+			}
+			paras.push(cur)
+			cur = [] as ShareViewRun[]
+		}
+		for (const run of runs) {
+			const parts = run.text.split('\n')
+			for (let i = 0; i < parts.length; i++) {
+				if (i > 0) {
+					flushPara()
+				}
+				if (parts[i].length > 0) {
+					cur.push({ text: parts[i], cls: run.cls } as ShareViewRun)
+				}
+			}
+		}
+		flushPara()
+		return paras
+	})
+
 	/** 打开分享预览（宿主气泡分享按钮调用；无选区快照时忽略） */
 	function open() : void {
 		const c = props.shareCtx
@@ -110,6 +175,8 @@
 	const SHARE_RING_R = 23.0
 	const SHARE_LOGO_R = 20.0
 	const SHARE_INK = '#0e0f0c'
+	/** 段落间距（px，正文段间距 40rpx 换算） */
+	const SHARE_PARA_GAP = 20.0
 
 	/** 分享卡片绘制辅助：文本按宽度折行（\n 强制换行保留段落结构；返回行数组，供画布高度预算与逐行绘制） */
 	function wrapCanvasLines(ctx : CanvasRenderingContext2D, text : string, maxW : number, font : string) : string[] {
@@ -225,6 +292,40 @@
 		return top
 	}
 
+	/** 引文段落（\n 拆段后的一段折行结果；段间以 SHARE_PARA_GAP 堆叠） */
+	type QuotePara = {
+		lines : RenderLine[]
+	}
+
+	/** 分段折行排版：按 \n 拆段（段边界即原文段落边界，与预览 shareParas 同规则）→ 段首插入两全角空格缩进（随上下文基础字号 12.5px 计宽，与正文段首渲染同参；首段仅选区起于段首时缩进）→ 逐段折行 */
+	function layoutShareParas(ctx : CanvasRenderingContext2D, runs : ShareRun[], maxW : number, indentFirst : boolean) : QuotePara[] {
+		const out : QuotePara[] = []
+		let paraRuns : ShareRun[] = [] as ShareRun[]
+		const flushPara = () : void => {
+			if (paraRuns.length == 0) {
+				return
+			}
+			if (out.length > 0 || indentFirst) {
+				paraRuns.unshift({ text: '　　', fs: 12.5, bold: false, color: SHARE_INK } as ShareRun)
+			}
+			out.push({ lines: layoutShareRuns(ctx, paraRuns, maxW) } as QuotePara)
+			paraRuns = [] as ShareRun[]
+		}
+		for (const run of runs) {
+			const parts = run.text.split('\n')
+			for (let i = 0; i < parts.length; i++) {
+				if (i > 0) {
+					flushPara()
+				}
+				if (parts[i].length > 0) {
+					paraRuns.push({ text: parts[i], fs: run.fs, bold: run.bold, color: run.color } as ShareRun)
+				}
+			}
+		}
+		flushPara()
+		return out
+	}
+
 	/** 构建引文富文本运行段（上/下文渐出 + 大引号 + 选中文本） */
 	function buildShareQuoteRuns() : ShareRun[] {
 		const runs : ShareRun[] = [] as ShareRun[]
@@ -247,7 +348,7 @@
 		return runs
 	}
 
-	/** 分享卡片布局：各块行盒顶位置与卡片/画布高度（想法块按行数占位，间距与预览 CSS 换算一致） */
+	/** 分享卡片布局：各块行盒顶位置与卡片/画布高度（引文块按段落行数+段间距占位，想法块按行数占位，间距与预览 CSS 换算一致） */
 	type ShareCardLayout = {
 		thoughtTop : number
 		sourceTop : number
@@ -255,9 +356,15 @@
 		H : number
 	}
 
-	function layoutShareCard(quoteLines : RenderLine[], thL : string[]) : ShareCardLayout {
+	function layoutShareCard(quoteParas : QuotePara[], thL : string[]) : ShareCardLayout {
+		let quoteBlockH = 0.0
+		for (let i = 0; i < quoteParas.length; i++) {
+			if (i > 0) {
+				quoteBlockH += SHARE_PARA_GAP
+			}
+			quoteBlockH += quoteParas[i].lines.length * SHARE_LINE_H
+		}
 		const quoteTop = SHARE_CARD_TOP + SHARE_HEADER_H + SHARE_LINE_H + 11.5
-		const quoteBlockH = quoteLines.length * SHARE_LINE_H
 		let thoughtTop = quoteTop + quoteBlockH + 11.5
 		if (thL.length > 0) {
 			thoughtTop += 1 + 9.5
@@ -280,9 +387,15 @@
 		ctx.textAlign = 'left'
 	}
 
-	/** 绘制引文块（富文本流式：大引号 + 上/下文渐出 + 选中文本加粗） */
-	function drawShareQuoteBlock(ctx : CanvasRenderingContext2D, quoteLines : RenderLine[]) : void {
-		drawRenderLines(ctx, quoteLines, SHARE_TEXT_X, SHARE_CARD_TOP + SHARE_HEADER_H + SHARE_LINE_H + 11.5, SHARE_LINE_H)
+	/** 绘制引文块（富文本流式：大引号 + 上/下文渐出 + 选中文本加粗；段间以 SHARE_PARA_GAP 堆叠） */
+	function drawShareQuoteBlock(ctx : CanvasRenderingContext2D, quoteParas : QuotePara[]) : void {
+		let top = SHARE_CARD_TOP + SHARE_HEADER_H + SHARE_LINE_H + 11.5
+		for (let i = 0; i < quoteParas.length; i++) {
+			if (i > 0) {
+				top += SHARE_PARA_GAP
+			}
+			top = drawRenderLines(ctx, quoteParas[i].lines, SHARE_TEXT_X, top, SHARE_LINE_H)
+		}
 	}
 
 	/** 绘制想法块（蓝色） */
@@ -358,15 +471,15 @@
 				emit('toast', '保存失败，请重试')
 				return
 			}
-			// 排版：富文本折行 + 想法折行 + 各块位置（测量在画布尺寸设定前完成，赋值后重新 scale）
-			const quoteLines = layoutShareRuns(ctx, buildShareQuoteRuns(), SHARE_TEXT_W)
+			// 排版：引文分段折行（\n 拆段、段首缩进、段间距与预览一致）+ 想法折行 + 各块位置（测量在画布尺寸设定前完成，赋值后重新 scale）
+			const quoteParas = layoutShareParas(ctx, buildShareQuoteRuns(), SHARE_TEXT_W, quoteStartsAtParaStart())
 			const thL = shareData.value.thoughtText.length > 0 ? wrapCanvasLines(ctx, shareData.value.thoughtText, SHARE_TEXT_W, '12.5px sans-serif') : ([] as string[])
-			const L = layoutShareCard(quoteLines, thL)
+			const L = layoutShareCard(quoteParas, thL)
 			canvas.width = SHARE_CARD_W * dpr
 			canvas.height = L.H * dpr
 			ctx.scale(dpr, dpr)
 			drawShareCardBase(ctx, L.cardH)
-			drawShareQuoteBlock(ctx, quoteLines)
+			drawShareQuoteBlock(ctx, quoteParas)
 			if (thL.length > 0) {
 				drawShareThoughtBlock(ctx, thL, L.thoughtTop)
 			}
@@ -481,6 +594,11 @@
 	.share-card-text {
 		font-size: 25rpx;
 		line-height: 42rpx;
+	}
+
+	/* 引文段落间距（与正文段落间距一致：正文 .novel-body gap 40rpx） */
+	.share-para-gap {
+		margin-top: 40rpx;
 	}
 
 	.share-ctx-far {
