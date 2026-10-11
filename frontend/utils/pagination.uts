@@ -89,3 +89,164 @@ export function computePageBreaks(paraTexts : string[], perLine : number, pageH 
 	}
 	return pages
 }
+
+/**
+ * 实测分页：paraLines 为每段离屏实测行数（与真实渲染同参，整段装页零漂移）；
+ * paraTailChars 为每段末行字符数（0=未探测）。跨页切断按段均行容量切字符：
+ * 容量由末行实测值精确反推（(len-末行+2)/(行数-1)，+2 为首行缩进占位），断页行渲染即满行；
+ * 未探测段落回退整体均值估算。其余预算口径（行高/段距/章头）与 computePageBreaks 一致。
+ */
+export function computePageBreaksMeasured(paraTexts : string[], paraLines : number[], paraTailChars : number[], pageH : number, fontSize : number, topPx : number, bottomPx : number) : PageSlice[][] {
+	const pages : PageSlice[][] = []
+	let current : PageSlice[] = []
+	let usedH = 0
+	if (pageH <= 0 || fontSize <= 0 || paraTexts.length == 0) {
+		// 窗口尺寸未就绪（首帧）：退化为整章每段一页的占位分页
+		return paraTexts.map((t : string, i : number) : PageSlice[] => {
+			return [{ origin: i, from: 0, to: t.length - 1 }] as PageSlice[]
+		})
+	}
+	const lineH = fontSize * 1.7
+	const paraGap = uni.upx2px(40)
+	const headerH = uni.upx2px(294)
+	const budget = Math.max(lineH, pageH - topPx - bottomPx)
+	let curBudget = Math.max(lineH, budget - headerH)
+	for (let i = 0; i < paraTexts.length; i++) {
+		const len = paraTexts[i].length
+		if (len == 0) {
+			continue
+		}
+		const totalLines = Math.max(1, i < paraLines.length ? paraLines[i] : 1)
+		// 段均行容量：末行实测时精确反推，未探测回退整体均值（含首行缩进摊销）
+		let capPerLine : number
+		if (i < paraTailChars.length && paraTailChars[i] > 0 && totalLines > 1) {
+			capPerLine = Math.max(1, Math.round((len - paraTailChars[i] + 2) / (totalLines - 1)))
+		} else {
+			capPerLine = Math.max(1, Math.round((len + 2) / totalLines))
+		}
+		let from = 0
+		let remainLines = totalLines
+		let firstSlice = true
+		while (from < len) {
+			// 段间间距只在新段落的首切片计（跨页续切片不重复计）
+			const gap = (firstSlice && current.length > 0) ? paraGap : 0
+			const free = curBudget - usedH - gap
+			let rows = Math.floor(free / lineH)
+			if (rows < 1) {
+				if (current.length > 0) {
+					pages.push(current)
+					current = [] as PageSlice[]
+					usedH = 0
+					curBudget = budget
+					continue
+				}
+				rows = 1
+			}
+			if (remainLines <= rows) {
+				// 剩余整段装得下：切片直达段尾（实测行数与真实渲染零漂移）
+				current.push({ origin: i, from: from, to: len - 1 } as PageSlice[])
+				usedH += gap + remainLines * lineH
+				from = len
+			} else {
+				// 装不下：切 rows 行的字符（首行含缩进占 2 字位），续文留待下页
+				let to = from + rows * capPerLine - (from == 0 ? 3 : 1)
+				if (to > len - 1) {
+					to = len - 1
+				}
+				if (to < from) {
+					to = from
+				}
+				current.push({ origin: i, from: from, to: to } as PageSlice[])
+				usedH += gap + rows * lineH
+				from = to + 1
+				remainLines -= rows
+				if (remainLines < 0) {
+					remainLines = 0
+				}
+			}
+			firstSlice = false
+		}
+	}
+	if (current.length > 0) {
+		pages.push(current)
+	}
+	return pages
+}
+
+/** 实测逐行断点排版数据（APP 端经 StaticLayout 引擎直读，条件编译；其余端不产生此数据） */
+export type ParaLineLayout = {
+	/** 每段行数 */
+	lines : number[]
+	/** 每段逐行末字符下标（段落坐标 0-based 含端点，与 lines 对齐；行数即断点数） */
+	lineEnds : number[][]
+}
+
+/**
+ * 引擎级精确分页：layout.lineEnds 为文本引擎真实断行结果（每行末字符下标），
+ * 整段装页与跨页切断均为零漂移——断页行即真实整行，第二页首行即其真实续行。
+ * lineHeight 为真实行盒高度（APP 端由同参校准得到；≤0 时回退 fontSize×1.7）。
+ * 其余预算口径（行高/段距/章头）与 computePageBreaks 一致。
+ */
+export function computePageBreaksExact(paraTexts : string[], layout : ParaLineLayout, pageH : number, fontSize : number, lineHeight : number, topPx : number, bottomPx : number) : PageSlice[][] {
+	const pages : PageSlice[][] = []
+	let current : PageSlice[] = []
+	let usedH = 0
+	if (pageH <= 0 || fontSize <= 0 || paraTexts.length == 0) {
+		// 窗口尺寸未就绪（首帧）：退化为整章每段一页的占位分页
+		return paraTexts.map((t : string, i : number) : PageSlice[] => {
+			return [{ origin: i, from: 0, to: t.length - 1 }] as PageSlice[]
+		})
+	}
+	const lineH = lineHeight > 0 ? lineHeight : fontSize * 1.7
+	const paraGap = uni.upx2px(40)
+	const headerH = uni.upx2px(294)
+	const budget = Math.max(lineH, pageH - topPx - bottomPx)
+	let curBudget = Math.max(lineH, budget - headerH)
+	for (let i = 0; i < paraTexts.length; i++) {
+		const len = paraTexts[i].length
+		if (len == 0) {
+			continue
+		}
+		let ends = i < layout.lineEnds.length ? layout.lineEnds[i] : ([] as number[])
+		if (ends.length == 0) {
+			// 断点数据缺失兜底：按单行整段处理，保证内容不丢失
+			ends = [len - 1] as number[]
+		}
+		const totalLines = ends.length
+		let k = 0
+		let firstSlice = true
+		while (k < totalLines) {
+			// 段间间距只在新段落的首切片计（跨页续切片不重复计）
+			const gap = (firstSlice && current.length > 0) ? paraGap : 0
+			const free = curBudget - usedH - gap
+			let rows = Math.floor(free / lineH)
+			if (rows < 1) {
+				if (current.length > 0) {
+					pages.push(current)
+					current = [] as PageSlice[]
+					usedH = 0
+					curBudget = budget
+					continue
+				}
+				rows = 1
+			}
+			const from = k == 0 ? 0 : ends[k - 1] + 1
+			if (k + rows >= totalLines) {
+				// 剩余整段装得下：切片直达段尾（行边界即真实渲染边界）
+				current.push({ origin: i, from: from, to: len - 1 } as PageSlice[])
+				usedH += gap + (totalLines - k) * lineH
+				k = totalLines
+			} else {
+				// 装不下：按真实行边界切 rows 行，续文留待下页
+				current.push({ origin: i, from: from, to: ends[k + rows - 1] } as PageSlice[])
+				usedH += gap + rows * lineH
+				k += rows
+			}
+			firstSlice = false
+		}
+	}
+	if (current.length > 0) {
+		pages.push(current)
+	}
+	return pages
+}

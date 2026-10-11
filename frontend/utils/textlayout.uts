@@ -1,0 +1,77 @@
+// #ifdef APP-ANDROID
+import { ParaLineLayout } from '@/utils/pagination.uts'
+import StaticBuilder from 'android.text.StaticLayout$Builder'
+import TextPaint from 'android.text.TextPaint'
+import Typeface from 'android.graphics.Typeface'
+
+/**
+ * APP-Android 引擎级精确排版（条件编译，仅 APP-ANDROID 生效）：
+ * 用与正文完全同参的 StaticLayout 逐段离线排版，直接读取文本引擎的断行结果
+ * （行数 + 每行末字符下标），替代 DOM 高度推断与末行二分探测，实现零漂移分页。
+ * 断行是否与 uvue 文本组件真实渲染同源，由宿主的同参校验（行高比例一致性）判定，
+ * 不一致时宿主自动回退 DOM 探测管线。
+ */
+
+/** 字体族 CSS 栈 → Android Typeface（取首选项，通用关键字映射系统字族，其余按名创建，未安装时由系统回退） */
+function resolveTypeface(family : string) : Typeface {
+	// 取字体栈首个选项并剥离引号（避免依赖正则，兼容各端编译）
+	const raw = family.split(',')[0].trim()
+	let first = ''
+	for (let i = 0; i < raw.length; i++) {
+		const ch = raw.charAt(i)
+		if (ch != "'" && ch != '"') {
+			first += ch
+		}
+	}
+	if (first == 'serif') {
+		return Typeface.SERIF
+	}
+	if (first == 'sans-serif' || first == 'sans' || first.length == 0) {
+		return Typeface.SANS_SERIF
+	}
+	if (first == 'monospace') {
+		return Typeface.MONOSPACE
+	}
+	return Typeface.create(first, Typeface.NORMAL)
+}
+
+/**
+ * 逐段构建 StaticLayout 并读取断行结果。
+ * @param texts          段落正文（不含缩进，缩进在函数内按正文口径补两个全角空格）
+ * @param fontSize       字号 px
+ * @param fontFamily     字体族 CSS 栈（与正文渲染同源）
+ * @param letterSpacingPx 字距 px（正文字距 0.4rpx 换算；Paint.letterSpacing 单位为 em，内部换算）
+ * @param widthPx        行宽 px（与正文内容区宽一致）
+ */
+export function buildParaLayout(texts : string[], fontSize : number, fontFamily : string, letterSpacingPx : number, widthPx : number) : ParaLineLayout {
+	const paint = new TextPaint()
+	paint.setTextSize(fontSize)
+	paint.setAntiAlias(true)
+	paint.setTypeface(resolveTypeface(fontFamily))
+	if (letterSpacingPx != 0 && fontSize > 0) {
+		paint.setLetterSpacing(letterSpacingPx / fontSize)
+	}
+	const w = Math.max(1, Math.round(widthPx))
+	// 行距对齐正文 line-height 1.7（仅影响高度校验口径，不影响断行位置）
+	const fm = paint.getFontMetrics()
+	const lineAdd = fontSize * 1.7 - (fm.descent - fm.ascent)
+	const lines : number[] = []
+	const lineEnds : number[][] = []
+	for (let i = 0; i < texts.length; i++) {
+		const full = '　　' + texts[i]
+		const builder = StaticBuilder.obtain(full, 0, full.length, paint, w)
+		builder.setLineSpacing(lineAdd, 1.0)
+		builder.setIncludePad(false)
+		const layout = builder.build()
+		const lc = layout.getLineCount()
+		lines.push(lc)
+		const ends : number[] = []
+		for (let k = 0; k < lc; k++) {
+			// StaticLayout 偏移含 2 字缩进前缀：独占端点 - 前缀 2 字 - 1 = 段内末字符下标
+			ends.push(layout.getLineEnd(k) - 3)
+		}
+		lineEnds.push(ends)
+	}
+	return { lines: lines, lineEnds: lineEnds } as ParaLineLayout
+}
+// #endif

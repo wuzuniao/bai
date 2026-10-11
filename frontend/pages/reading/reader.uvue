@@ -251,6 +251,27 @@
 		<view class="calib-box" :style="'left:-9999px;top:0;width:' + calibWidth + 'px'">
 			<text class="calib-text" :style="'font-size:' + fontSize + 'px;font-family:' + fontFamily">{{ calibText }}</text>
 		</view>
+		<!-- 离屏排版测量区（透明、屏外、即测即卸）：整章段落与被切断段落前缀探针按正文同参渲染，实测行数/末行字符驱动分页 -->
+		<view class="measure-box" :style="'left:-9999px;top:0;width:' + calibWidth + 'px'">
+			<view v-for="mcid in measureParas" :key="'mc' + mcid">
+				<view
+					v-for="(mp, mpi) in paragraphsOf(mcid)"
+					:key="'mp' + mcid + '-' + mpi"
+					:class="'measure-para-' + mcid"
+					:style="'font-size:' + fontSize + 'px;font-family:' + fontFamily"
+				>
+					<text class="measure-text">　　{{ mp.text }}</text>
+				</view>
+			</view>
+			<view
+				v-for="(probe, pri) in layoutProbes"
+				:key="'pr' + pri + '-' + probe.cid + '-' + probe.pi"
+				class="measure-probe"
+				:style="'font-size:' + fontSize + 'px;font-family:' + fontFamily"
+			>
+				<text class="measure-text">　　{{ probePrefixText(probe) }}</text>
+			</view>
+		</view>
 	</view>
 </template>
 
@@ -260,7 +281,10 @@
 	import { LocalBook, BookProgress, findBook, loadBookProgress, saveBookProgress, updateBookReading, addTodayMinutes } from '@/utils/books.uts'
 	import { parseChapters, readTextFile } from '@/utils/bookparse.uts'
 	import { Chapter, Paragraph, Bookmark, Thought, UnderlineEntry, NoteRecord, ShareQuoteCtx, SelSpan, SpanSeg, TextMetrics, ParaRect, ReaderSettings, FONT_OPTIONS, fontOptionOf, loadUnderlines, loadThoughts, findUnderlineEntry, loadBookmarks, loadSettings, normalizeSpan, buildNoteRecords, buildShareQuoteCtx } from '@/utils/readerTypes.uts'
-	import { PageSlice, computePageBreaks } from '@/utils/pagination.uts'
+	import { PageSlice, computePageBreaks, computePageBreaksMeasured, computePageBreaksExact, ParaLineLayout } from '@/utils/pagination.uts'
+	// #ifdef APP-ANDROID
+	import { buildParaLayout } from '@/utils/textlayout.uts'
+	// #endif
 	import { flipCurrentLayerStyle, flipPrevLayerStyle, flipNextLayerStyle, flipCoverNextOpacity, flipCoverCurrentOpacity } from '@/utils/flipstyle.uts'
 	import SelectionPopover from '@/components/selection/SelectionPopover.uvue'
 	import ReaderControl from '@/components/reader/ReaderControl.uvue'
@@ -333,8 +357,9 @@
 	/** 当前页码（章内 0-based，左右滑动翻页切换） */
 	const pageIndex = ref(0)
 
-	/** 正文区底部留白（px）：仅避让常驻信息栏文字行（贴底内边距 24 + 文字行约 13），控制框呼出时为浮层覆盖正文、不占排版空间 */
-	const contentBottomPx = computed(() : number => safeAreaBottomPx.value + 40)
+	/** 正文区底部留白（px）：贴底信息栏文字行（ReaderFooterBar 同式：贴底内边距 max(4, 安全区-10) + 文字行高约 19px）
+	 *  之上保留约 12px 净空，使无控制框时正文尽量接近信息栏且不重叠；控制框呼出时为浮层覆盖正文、不占排版空间 */
+	const contentBottomPx = computed(() : number => Math.max(safeAreaBottomPx.value - 10, 4) + 31)
 
 	/** ===== 每行字数标定（渲染实测）：纯计算折行与真实渲染存在字距/标点禁则偏差，页尾空白据此累积；
 	 *  屏幕外标定节点（约 20 行字数）实测高度反推实际每行字数，标定前回退纯字宽估算 ===== */
@@ -356,15 +381,444 @@
 	})
 	const calibWidth = computed(() : number => pageW.value - uni.upx2px(124))
 
-	/** 分页结果：每页的段落切片数组（流式分页，段落可跨页；perLine 为运行时标定的实际每行字数，
-	 *  与真实渲染折行同口径；排版规则见 utils/pagination.uts，随字号/窗口/正文/标定变化重算） */
+	/** ===== 离屏排版实测（分页数据源）：整章段落行数 + 被切断段落的末行字符数。
+	 *  测量全程在屏外进行，且于页面展示前完成（开书在 loading 遮罩内、切章先测后切、相邻章后台预取），阅读翻页无可见重排；
+	 *  实测未就绪时分页回退字数估算（computePageBreaks）。字号/字体变化使实测数据整体失效并自动重测 ===== */
+	const paraLinesCache = ref<Map<number, number[]>>(new Map())
+	const paraTailCache = ref<Map<number, number[]>>(new Map())
+	/** APP 端引擎级精确排版缓存（章 id → 行数+逐行末字符下标；StaticLayout 条件编译，其余端恒空） */
+	const paraLayoutCache = ref<Map<number, ParaLineLayout>>(new Map())
+	/** StaticLayout 与真实渲染一致性：0=未校验 1=可信（免 DOM 校验）2=禁用（回退 DOM 探测管线） */
+	let staticLayoutMode = 0
+	/** 校准得到的真实行高倍率（×字号；自适应端上行高实现差异） */
+	let staticLayoutAlpha = 1.7
+	/** 待实测整章渲染的章 id（驱动离屏测量节点，测完即卸载） */
+	const measureParas = ref<number[]>([])
+	/** 末行字符探测项：渲染段落前缀 [0, chars)（含全角缩进，与正文首切片同参），按实测行数反推末行 */
+	type LayoutProbe = {
+		cid : number
+		pi : number
+		chars : number
+	}
+	const layoutProbes = ref<LayoutProbe[]>([])
+	/** 末行二分搜索状态（rc ∈ [lo, hi]，rc 为末行字符数候选） */
+	type TailSearch = {
+		lo : number
+		hi : number
+	}
+	/** 排版版本号：排版参数变化即递增，使在途测量结果作废 */
+	let layoutEpoch = 0
+	/** 测量串行链：多章/多次请求排队执行，避免离屏节点交叉渲染 */
+	let measureChain : Promise<void> = Promise.resolve()
+	/** 在测章 id（含末行探测）：门控调用需等待在测章完成，避免提前放行造成可见换算 */
+	let measuringCids : number[] = []
+	let relayoutTimer = -1
+
+	/** 指定章实测行数（长度与段落对齐才有效，未测/失效返回 null） */
+	function measuredLinesOf(cid : number) : number[] | null {
+		const lines = paraLinesCache.value.get(cid)
+		if (lines != null && lines.length == paragraphsOf(cid).length) {
+			return lines
+		}
+		return null
+	}
+
+	/** 指定章末行字符数组（与段落对齐；未探测段落为 0，分页内回退均值估算） */
+	function tailCharsOf(cid : number, paras : Paragraph[]) : number[] {
+		const tails = paraTailCache.value.get(cid)
+		const arr : number[] = []
+		for (let i = 0; i < paras.length; i++) {
+			arr.push(tails != null && tails[i] > 0 ? tails[i] : 0)
+		}
+		return arr
+	}
+
+	/** 探测前缀文本：段落 [0, chars) + 两个全角空格缩进（与正文段首渲染同参） */
+	function probePrefixText(probe : LayoutProbe) : string {
+		const paras = paragraphsOf(probe.cid)
+		if (probe.pi < 0 || probe.pi >= paras.length) {
+			return ''
+		}
+		const full = paras[probe.pi].text
+		return full.substring(0, Math.min(probe.chars, full.length))
+	}
+
+	/** 排版失效（字号/字体变化）：实测缓存即时清除（分页先按估算渲染），随后重标定并重测当前章邻域、钳制页码 */
+	function invalidateLayoutMeasure() : void {
+		layoutEpoch++
+		paraLinesCache.value = new Map()
+		paraTailCache.value = new Map()
+		paraLayoutCache.value = new Map()
+		// 排版参数变化后 StaticLayout 同参一致性需重新校验（字体族映射可能随字体变化）
+		staticLayoutMode = 0
+		if (relayoutTimer >= 0) {
+			clearTimeout(relayoutTimer)
+		}
+		relayoutTimer = setTimeout(() => {
+			relayoutTimer = -1
+			calibratePerLine()
+			const cid = currentChapterId.value
+			ensureChaptersMeasured([cid - 1, cid, cid + 1]).then(() => {
+				clampPageIndex()
+			})
+		}, 150)
+	}
+
+	/** 确保章节实测完成（APP 端引擎断行直读 / 其余端行数+末行探测）；已实测立即返回，在测等待串行链，未测排队执行离屏测量 */
+	function ensureChaptersMeasured(cids : number[]) : Promise<void> {
+		const ids : number[] = []
+		let waitChain = false
+		for (let i = 0; i < cids.length; i++) {
+			const cid = cids[i]
+			if (cid < 0 || cid >= chapters.value.length || paraLinesCache.value.get(cid) != null || paraLayoutCache.value.get(cid) != null) {
+				continue
+			}
+			if (measuringCids.indexOf(cid) >= 0) {
+				// 该章测量在途：等待串行链跑完（含末行探测）
+				waitChain = true
+				continue
+			}
+			if (ids.indexOf(cid) < 0) {
+				ids.push(cid)
+			}
+		}
+		if (ids.length > 0) {
+			const epoch = layoutEpoch
+			measureChain = measureChain.then(() : Promise<void> => {
+				return runMeasureChapters(ids, epoch)
+			})
+		}
+		if (ids.length == 0 && !waitChain) {
+			return Promise.resolve()
+		}
+		return measureChain
+	}
+
+	/** 依序测量多章（运行时再次校验缓存与版本号，避免重复/过期测量；APP-ANDROID 走引擎直读，其余端走 DOM 探测） */
+	function runMeasureChapters(ids : number[], epoch : number) : Promise<void> {
+		let p : Promise<void> = Promise.resolve()
+		for (let i = 0; i < ids.length; i++) {
+			const cid = ids[i]
+			p = p.then(() : Promise<void> => {
+				if (epoch != layoutEpoch || paraLinesCache.value.get(cid) != null || paraLayoutCache.value.get(cid) != null || paragraphsOf(cid).length == 0) {
+					removeMeasuring(cid)
+					return Promise.resolve()
+				}
+				// #ifdef APP-ANDROID
+				return measureChapterAuto(cid, epoch).then(() : void => {
+					removeMeasuring(cid)
+				})
+				// #endif
+				// #ifndef APP-ANDROID
+				return measureChapterLines(cid, epoch).then(() : void => {
+					removeMeasuring(cid)
+				})
+				// #endif
+			})
+		}
+		return p
+	}
+
+	/** 在测标记清理 */
+	function removeMeasuring(cid : number) : void {
+		const idx = measuringCids.indexOf(cid)
+		if (idx >= 0) {
+			measuringCids.splice(idx, 1)
+		}
+	}
+
+	// #ifdef APP-ANDROID
+	/** APP 端测量：StaticLayout 引擎直读断行（引擎级精确，无 DOM 探测）。会话首章做一次同参一致性校验
+	 *  （离屏 DOM 块高 vs 预测行数的行高比例 α 一致性），通过后本会话后续章免 DOM 校验；校验失败回退 DOM 探测管线 */
+	function measureChapterAuto(cid : number, epoch : number) : Promise<void> {
+		return new Promise<void>((resolve) => {
+			const paras = paragraphsOf(cid)
+			if (epoch != layoutEpoch || paras.length == 0) {
+				resolve()
+				return
+			}
+			const texts : string[] = []
+			for (let i = 0; i < paras.length; i++) {
+				texts.push(paras[i].text)
+			}
+			const layout = buildParaLayout(texts, fontSize.value, fontFamily.value, uni.upx2px(0.4), calibWidth.value)
+			if (layout.lines.length != paras.length) {
+				resolve()
+				return
+			}
+			if (staticLayoutMode == 1) {
+				// 已验证可信：免 DOM 校验，直接采用引擎断行
+				storeLayout(cid, layout)
+				resolve()
+				return
+			}
+			// 未校验：挂整章离屏节点做一次同参校验
+			measureParas.value = [cid]
+			setTimeout(() => {
+				if (epoch != layoutEpoch) {
+					measureParas.value = [] as number[]
+					resolve()
+					return
+				}
+				uni.createSelectorQuery().selectAll('.measure-para-' + cid).boundingClientRect((rects : NodeInfo[]) : void => {
+					measureParas.value = [] as number[]
+					if (epoch != layoutEpoch || rects == null || rects.length != paras.length) {
+						// DOM 校验不可用：保守禁用引擎路径，回退 DOM 探测管线
+						staticLayoutMode = 2
+						measureChapterLines(cid, epoch).then(() => {
+							resolve()
+						})
+						return
+					}
+					// 行高比例 α = 真实块高 /（预测行数 × 字号）。断行不同源时 L 失真致 α 离散，
+					// 仅行高实现差异时 α 一致——按离散度判定断行可信性，并自校准真实行高
+					let sum = 0
+					let count = 0
+					for (let i = 0; i < rects.length; i++) {
+						if (layout.lines[i] > 0 && fontSize.value > 0) {
+							sum += rects[i].height / (layout.lines[i] * fontSize.value)
+							count++
+						}
+					}
+					const mean = count > 0 ? sum / count : 0
+					let keep = 0
+					let sum2 = 0
+					for (let i = 0; i < rects.length; i++) {
+						if (layout.lines[i] > 0 && fontSize.value > 0) {
+							const a = rects[i].height / (layout.lines[i] * fontSize.value)
+							if (Math.abs(a - mean) <= 0.2) {
+								keep++
+								sum2 += a
+							}
+						}
+					}
+					const alpha = keep > 0 ? sum2 / keep : 1.7
+					if (count > 0 && keep >= count * 0.8 && alpha > 0.5 && alpha < 4) {
+						staticLayoutMode = 1
+						staticLayoutAlpha = alpha
+						storeLayout(cid, layout)
+						resolve()
+					} else {
+						staticLayoutMode = 2
+						measureChapterLines(cid, epoch).then(() => {
+							resolve()
+						})
+					}
+				}).exec()
+			}, 120)
+		})
+	}
+
+	/** 精确排版数据落缓存（写时复制触发分页重算） */
+	function storeLayout(cid : number, layout : ParaLineLayout) : void {
+		const next : Map<number, ParaLineLayout> = new Map()
+		paraLayoutCache.value.forEach((v : ParaLineLayout, k : number) => {
+			next.set(k, v)
+		})
+		next.set(cid, layout)
+		paraLayoutCache.value = next
+	}
+	// #endif
+
+	/** 单章行数实测：挂载整章离屏渲染 → 批量查询段落块高度反推行数 → 卸载后转入末行探测 */
+	function measureChapterLines(cid : number, epoch : number) : Promise<void> {
+		return new Promise<void>((resolve) => {
+			measuringCids.push(cid)
+			measureParas.value = [cid]
+			measureLinesAttempt(cid, epoch, 0, resolve)
+		})
+	}
+
+	/** 行数测量尝试：离屏渲染就绪时机不定（setData 异步），节点数不符时重试，至多 3 次 */
+	function measureLinesAttempt(cid : number, epoch : number, attempt : number, resolve : () => void) : void {
+		setTimeout(() => {
+			const paras = paragraphsOf(cid)
+			if (epoch != layoutEpoch || paras.length == 0) {
+				measureParas.value = [] as number[]
+				resolve()
+				return
+			}
+			uni.createSelectorQuery().selectAll('.measure-para-' + cid).boundingClientRect((rects : NodeInfo[]) : void => {
+				if (epoch != layoutEpoch) {
+					measureParas.value = [] as number[]
+					resolve()
+					return
+				}
+				if (rects == null || rects.length != paras.length || rects.length == 0) {
+					if (attempt < 2) {
+						measureLinesAttempt(cid, epoch, attempt + 1, resolve)
+					} else {
+						// 测量失败：卸载节点并保持无数据，该章分页回退字数估算
+						measureParas.value = [] as number[]
+						resolve()
+					}
+					return
+				}
+				const lineH = fontSize.value * 1.7
+				const lines : number[] = []
+				for (let i = 0; i < paras.length; i++) {
+					const len = paras[i].text.length
+					lines.push(len > 0 ? Math.max(1, Math.round(rects[i].height / lineH)) : 0)
+				}
+				const nextLines : Map<number, number[]> = new Map()
+				paraLinesCache.value.forEach((v : number[], k : number) => {
+					nextLines.set(k, v)
+				})
+				nextLines.set(cid, lines)
+				paraLinesCache.value = nextLines
+				// 卸载整章节点，转入末行探测（探测节点更轻量）
+				measureParas.value = [] as number[]
+				probeTailChars(cid, epoch, new Map<number, TailSearch>(), new Map<number, number>(), 0, resolve)
+			}).exec()
+		}, 120)
+	}
+
+	/** 末行字符探测驱动：按当前数据打包，收集被切断且末行未知的段落；无则完成，否则生成前缀探针进入本轮实测 */
+	function probeTailChars(cid : number, epoch : number, search : Map<number, TailSearch>, found : Map<number, number>, round : number, resolve : () => void) : void {
+		const paras = paragraphsOf(cid)
+		const lines = measuredLinesOf(cid)
+		if (epoch != layoutEpoch || lines == null || round >= 5) {
+			resolve()
+			return
+		}
+		const texts : string[] = []
+		for (let i = 0; i < paras.length; i++) {
+			texts.push(paras[i].text)
+		}
+		const tailArr = tailCharsOf(cid, paras)
+		const breaks = computePageBreaksMeasured(texts, lines, tailArr, pageH.value, fontSize.value, contentTopPx.value, contentBottomPx.value)
+		// 收集被切断且末行未知的段落（去重）；区间已收敛的直接落定
+		const probes : LayoutProbe[] = []
+		for (let pg = 0; pg < breaks.length; pg++) {
+			const slices = breaks[pg]
+			for (let si = 0; si < slices.length; si++) {
+				const origin = slices[si].origin
+				if (slices[si].to >= paras[origin].text.length - 1 || tailArr[origin] > 0) {
+					continue
+				}
+				const len = paras[origin].text.length
+				const st = search.get(origin)
+				const lo = st != null ? st.lo : 1
+				const hi = st != null ? st.hi : Math.min(len, 48)
+				if (lo >= hi) {
+					found.set(origin, lo)
+					continue
+				}
+				const step = Math.max(1, Math.floor((hi - lo) / 3))
+				const candidates = [lo + step, Math.min(hi, lo + step * 2)]
+				for (let j = 0; j < candidates.length; j++) {
+					const rc = candidates[j]
+					let dup = false
+					for (let k = 0; k < probes.length; k++) {
+						if (probes[k].pi == origin && probes[k].chars == len - rc) {
+							dup = true
+							break
+						}
+					}
+					if (!dup) {
+						probes.push({ cid: cid, pi: origin, chars: len - rc } as LayoutProbe)
+					}
+				}
+			}
+		}
+		if (probes.length == 0) {
+			storeTails(cid, paras, found)
+			resolve()
+			return
+		}
+		layoutProbes.value = probes
+		setTimeout(() => {
+			if (epoch != layoutEpoch) {
+				layoutProbes.value = [] as LayoutProbe[]
+				resolve()
+				return
+			}
+			uni.createSelectorQuery().selectAll('.measure-probe').boundingClientRect((rects : NodeInfo[]) : void => {
+				layoutProbes.value = [] as LayoutProbe[]
+				if (epoch != layoutEpoch || rects == null || rects.length != probes.length) {
+					resolve()
+					return
+				}
+				applyProbeResults(cid, probes, rects, lines, search, found, epoch, round, resolve)
+			}).exec()
+		}, 80)
+	}
+
+	/** 探针结果判定：前缀行数 ≤ 行数-1 ⟺ 候选 rc ≥ 末行字符数，据此收缩各段区间；收敛即落定并进入下一轮 */
+	function applyProbeResults(cid : number, probes : LayoutProbe[], rects : NodeInfo[], lines : number[], search : Map<number, TailSearch>, found : Map<number, number>, epoch : number, round : number, resolve : () => void) : void {
+		const lineH = fontSize.value * 1.7
+		for (let i = 0; i < probes.length; i++) {
+			const probe = probes[i]
+			const paras = paragraphsOf(probe.cid)
+			if (probe.pi < 0 || probe.pi >= paras.length || probe.pi >= lines.length) {
+				continue
+			}
+			const len = paras[probe.pi].text.length
+			const rc = len - probe.chars
+			const m = Math.round(rects[i].height / lineH)
+			const totalLines = Math.max(1, lines[probe.pi])
+			let st = search.get(probe.pi)
+			if (st == null) {
+				st = { lo: 1, hi: Math.min(len, 48) } as TailSearch
+			}
+			if (m <= totalLines - 1) {
+				st.hi = Math.min(st.hi, rc)
+			} else {
+				st.lo = Math.max(st.lo, rc + 1)
+			}
+			search.set(probe.pi, st)
+			if (st.lo >= st.hi) {
+				found.set(probe.pi, st.hi)
+			}
+		}
+		storeTails(cid, paragraphsOf(cid), found)
+		probeTailChars(cid, epoch, search, found, round + 1, resolve)
+	}
+
+	/** 末行实测结果落缓存（未收敛段落保持 0，分页内回退均值估算） */
+	function storeTails(cid : number, paras : Paragraph[], found : Map<number, number>) : void {
+		if (found.size == 0) {
+			return
+		}
+		const nextTails : Map<number, number[]> = new Map()
+		paraTailCache.value.forEach((v : number[], k : number) => {
+			nextTails.set(k, v)
+		})
+		const prev = paraTailCache.value.get(cid)
+		const arr : number[] = []
+		for (let i = 0; i < paras.length; i++) {
+			const f = found.get(i)
+			const p = prev != null && prev[i] > 0 ? prev[i] : 0
+			arr.push(f != null ? f : p)
+		}
+		nextTails.set(cid, arr)
+		paraTailCache.value = nextTails
+	}
+
+	/** 分页结果：每页的段落切片数组（流式分页，段落可跨页）。实测就绪走实测分页（与真实渲染零漂移），
+	 *  未就绪回退字数估算；随字号/字体/窗口/实测进度变化重算（实测在展示前完成，阅读中不发生换算重排） */
 	const pageBreaks = computed(() : PageSlice[][] => {
-		return computePageBreaks(paragraphs.value.map((p : Paragraph) : string => p.text), perLineEffective.value, pageH.value, fontSize.value, contentTopPx.value, contentBottomPx.value)
+		return chapterBreaks(currentChapterId.value)
 	})
 
-	/** 指定章的分页结果（与当前章 pageBreaks 同参；跨章预渲染取相邻章末页/首页用） */
+	/** 指定章的分页结果（跨章预渲染取相邻章末页/首页用）：APP 端引擎断行就绪走逐行断点精确分页，
+	 *  其余实测行数就绪走实测分页（切断段末行未探测时回退段均估算）；均未就绪回退字数估算（perLine 标定口径） */
 	function chapterBreaks(cid : number) : PageSlice[][] {
-		return computePageBreaks(paragraphsOf(cid).map((p : Paragraph) : string => p.text), perLineEffective.value, pageH.value, fontSize.value, contentTopPx.value, contentBottomPx.value)
+		const paras = paragraphsOf(cid)
+		const texts : string[] = []
+		for (let i = 0; i < paras.length; i++) {
+			texts.push(paras[i].text)
+		}
+		const layout = paraLayoutCache.value.get(cid)
+		if (layout != null && layout.lines.length == paras.length) {
+			// APP 端引擎级断行（StaticLayout 条件编译）：切断位置即真实行边界
+			return computePageBreaksExact(texts, layout, pageH.value, fontSize.value, staticLayoutAlpha * fontSize.value, contentTopPx.value, contentBottomPx.value)
+		}
+		const lines = measuredLinesOf(cid)
+		if (lines != null) {
+			return computePageBreaksMeasured(texts, lines, tailCharsOf(cid, paras), pageH.value, fontSize.value, contentTopPx.value, contentBottomPx.value)
+		}
+		return computePageBreaks(texts, perLineEffective.value, pageH.value, fontSize.value, contentTopPx.value, contentBottomPx.value)
 	}
 
 	/** 切片 → 渲染项（在指定章的段落上取文本切片；text 为切片文本） */
@@ -679,13 +1133,6 @@
 		calibratePerLine()
 	})
 
-	watch(fontSize, () => {
-		setTimeout(() => {
-			calibratePerLine()
-			clampPageIndex()
-		}, 120)
-	})
-
 	/** 是否上下滚动模式（语义化别名，正文手势/定位/渲染均按此分支；信息栏显隐随其下行组件） */
 	const scrollMode = computed(() : boolean => pageTurn.value == '滚动')
 
@@ -900,12 +1347,20 @@
 		return fontOptionOf(fontKey.value).family
 	})
 
-	/** 跳转到书签所在章节页并关闭抽屉（ReaderControl 书签卡片点击上行；滚动模式无页码语义，落到目标章顶部） */
+	/** 跳转到书签所在章节页并关闭抽屉（ReaderControl 书签卡片点击上行；翻页模式先实测目标章再一次性按实测布局切换；滚动模式无页码语义，落到目标章顶部） */
 	function goToBookmark(bm : Bookmark) : void {
-		goToChapter(bm.chapterId, false)
-		pageIndex.value = bm.pageIndex
-		saveProgress()
-		drawerOpen.value = false
+		if (pageTurn.value == '滚动') {
+			applyChapterSwitch(bm.chapterId, false)
+			drawerOpen.value = false
+			return
+		}
+		ensureChaptersMeasured([bm.chapterId]).then(() => {
+			applyChapterSwitch(bm.chapterId, false)
+			pageIndex.value = bm.pageIndex
+			clampPageIndex()
+			saveProgress()
+			drawerOpen.value = false
+		})
 	}
 
 	/** 跳转到划线记录位置并关闭抽屉：分页定位到记录章的所在页（跨章先切章），滚动模式定位到记录章的段落锚点（章未加载时先重置加载该章） */
@@ -931,19 +1386,28 @@
 				}, 50)
 			}
 		} else {
-			if (r.cid != currentChapterId.value) {
-				goToChapter(r.cid, false)
-			}
-			// 定位到记录所在段落的分页（切片含该段落 origin 的页）
-			let targetPage = -1
-			for (let pi = 0; pi < pageBreaks.value.length; pi++) {
-				if (pageBreaks.value[pi].indexOf(r.origin) >= 0) {
-					targetPage = pi
-					break
+			// 翻页模式：跨章先实测目标章（切换后一次性按实测布局渲染），再定位记录所在段落的分页
+			const proceed = () : void => {
+				if (r.cid != currentChapterId.value) {
+					applyChapterSwitch(r.cid, false)
+				}
+				let targetPage = -1
+				for (let pi = 0; pi < pageBreaks.value.length; pi++) {
+					if (pageBreaks.value[pi].indexOf(r.origin) >= 0) {
+						targetPage = pi
+						break
+					}
+				}
+				if (targetPage >= 0) {
+					pageIndex.value = targetPage
 				}
 			}
-			if (targetPage >= 0) {
-				pageIndex.value = targetPage
+			if (r.cid == currentChapterId.value) {
+				proceed()
+			} else {
+				ensureChaptersMeasured([r.cid]).then(() => {
+					proceed()
+				})
 			}
 		}
 		clearSelection()
@@ -1321,6 +1785,12 @@
 			})
 			loadBookContent(chs, parsed.map((c) : string[] => c.paragraphs))
 			restoreProgress(book.id)
+			if (pageTurn.value != '滚动') {
+				// 翻页模式：首屏页在 loading 遮罩内完成实测，展示即最终布局（邻章后台预取供跨章预渲染）
+				const cid = currentChapterId.value
+				await ensureChaptersMeasured([cid - 1, cid, cid + 1])
+				clampPageIndex()
+			}
 		} catch (e) {
 			showToast('书籍读取失败，文件可能已被清理')
 		}
@@ -1506,8 +1976,25 @@
 		saveProgress()
 	}
 
-	/** 切换章节并定位页（进入新章默认首页，回退上一章定位末页；流窗口随章切换重算；滚动模式复位章节序列与滚动位置） */
-	function goToChapter(id: number, atLastPage: boolean) : void {
+	/** 切换章节并定位页（实测门控：翻页模式等目标章测量完成后再切换，目标页一次性按实测布局渲染，切章无可见重排；滚动模式直接切换） */
+	function goToChapter(id : number, atLastPage : boolean) : void {
+		// 章界防御：书签/进度等存量索引可能指向未注入数据中不存在的章
+		if (id < 0 || id >= chapters.value.length) {
+			return
+		}
+		if (pageTurn.value == '滚动') {
+			applyChapterSwitch(id, atLastPage)
+			return
+		}
+		ensureChaptersMeasured([id]).then(() => {
+			applyChapterSwitch(id, atLastPage)
+			// 相邻章后台预取：跨章翻页的预渲染层需要邻章实测数据（已测则跳过）
+			ensureChaptersMeasured([id - 1, id + 1])
+		})
+	}
+
+	/** 应用切章（同步）：进入新章默认首页，回退上一章定位末页；滚动模式复位章节序列与滚动位置 */
+	function applyChapterSwitch(id : number, atLastPage : boolean) : void {
 		// 章界防御：书签/进度等存量索引可能指向未注入数据中不存在的章
 		if (id < 0 || id >= chapters.value.length) {
 			return
@@ -1605,6 +2092,12 @@
 
 	/** 测量选区两端锚点与起/终段落的渲染矩形（同一查询批次，坐标系一致），批量回传气泡组件做差分定位 */
 	function measureAnchors() : void {
+		measureAnchorsAttempt(0)
+	}
+
+	/** 锚点测量尝试：选区分段（含零宽锚点）随选区状态变更渲染，查询与渲染存在竞态——
+	 *  起终锚点双双缺失时延迟重试（至多 2 次），避免首测落空后退化为估算定位且不再校正 */
+	function measureAnchorsAttempt(attempt : number) : void {
 		const s = selSpan.value
 		if (s == null) {
 			return
@@ -1616,7 +2109,25 @@
 			.select('#ppara-' + s.toOrigin).boundingClientRect()
 			.exec((res) => {
 				const arr = res as Array<NodeInfo | null>
-				popoverRef.value?.setAnchors(s, arr[0], arr[1], arr[2], arr[3])
+				if (arr[0] == null && arr[1] == null && attempt < 2) {
+					setTimeout(() => {
+						measureAnchorsAttempt(attempt + 1)
+					}, 80)
+					return
+				}
+				// 两端段落的本页切片起始偏移（估算兜底按切片口径换算；滚动模式无切片，items 为空恒 0）
+				let fromSlice = 0
+				let toSlice = 0
+				const items = currentPageItems.value
+				for (let i = 0; i < items.length; i++) {
+					if (items[i].origin == s.fromOrigin) {
+						fromSlice = items[i].from
+					}
+					if (items[i].origin == s.toOrigin) {
+						toSlice = items[i].from
+					}
+				}
+				popoverRef.value?.setAnchors(s, arr[0], arr[1], arr[2], arr[3], fromSlice, toSlice)
 			})
 	}
 
@@ -1655,8 +2166,9 @@
 				if (rects == null) {
 					return
 				}
-				// 连续流整章渲染：rect 顺序与全章段集一致（chapterParagraphItems 同源）
-				const items = chapterParagraphItems(currentChapterId.value)
+				// rect 顺序与当前页切片渲染项一致（切片分页段落可跨页，len/from 必须取本页切片口径，
+				// 不能用整章段集——章内页序错位会使触点映射到错误段落，跨段拖动失效）
+				const items = currentPageItems.value
 				for (let i = 0; i < rects.length && i < items.length; i++) {
 					const it = items[i]
 					dragParaRects.push({
@@ -1833,19 +2345,23 @@
 	/** 控制框设置变更应用（设置真源在组件：调节/持久化/提示内聚；页面同步镜像并应用渲染） */
 	function onControlChange(s : ReaderSettings) : void {
 		const fontChanged = s.fontSize != fontSize.value
+		const familyChanged = s.fontKey != fontKey.value
 		const turnChanged = s.pageTurn != pageTurn.value
 		fontSize.value = s.fontSize
-		if (fontChanged) {
-			// 字号变化触发重分页，页码钳制防空页，并清除随排版失效的选区
+		if (fontChanged || familyChanged) {
+			// 排版参数变化：实测数据整体失效（分页先按估算渲染），随后重标定并重测当前章邻域、钳制页码、清除选区
+			invalidateLayoutMeasure()
 			clampPageIndex()
 			clearSelection()
 		}
 		pageTurn.value = s.pageTurn
 		if (turnChanged) {
-			// 切至滚动模式以当前章初始化章节序列
+			// 切至滚动模式以当前章初始化章节序列；切入翻页模式确保当前章邻域实测（未测先按估算渲染，完成后静默换算）
 			if (s.pageTurn == '滚动') {
 				scrollChapters.value = [currentChapterId.value]
 				scrollModeTop.value = 0
+			} else {
+				ensureChaptersMeasured([currentChapterId.value - 1, currentChapterId.value, currentChapterId.value + 1])
 			}
 			clearSelection()
 		}
@@ -2069,6 +2585,17 @@
 	}
 
 	.calib-text {
+		line-height: 1.7;
+		letter-spacing: 0.4rpx;
+		color: rgba(0, 0, 0, 0);
+	}
+
+	/* 离屏排版测量区：与正文段落同参（宽度/字号/字体/行高/字距/全角缩进一致），透明且屏外，测量完成即卸载 */
+	.measure-box {
+		position: absolute;
+	}
+
+	.measure-text {
 		line-height: 1.7;
 		letter-spacing: 0.4rpx;
 		color: rgba(0, 0, 0, 0);

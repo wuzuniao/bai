@@ -1,7 +1,8 @@
 <template>
 	<view class="sp-root">
-		<!-- 划词手柄（选区两端水滴形大手柄：拖动调节选中范围，触摸热区大于视觉体便于拖动；锚点实测完成后才显示，避免位置跳变） -->
-		<template v-if="bubbleVisible">
+		<!-- 划词手柄（选区两端水滴形大手柄：拖动调节选中范围，触摸热区大于视觉体便于拖动；锚点实测完成后才显示，避免位置跳变。
+		     拖动中必须保持挂载跟随手指——若随气泡一起隐藏，被拖手柄在触摸中途被卸载，微信端触摸序列随之中断，拖动即失效） -->
+		<template v-if="handlesVisible">
 			<view
 				id="sel-handle-start"
 				class="sel-handle sel-handle-start"
@@ -250,9 +251,13 @@
 	let beginParaLen = 0
 	/** 建立选区时缓存的起点段切片在整段中的起始偏移（连续流恒为 0，保留兼容） */
 	let beginSliceFrom = 0
-	/** 气泡显示：有选区且已实测定位、不在拖动手柄中（拖动中隐藏，松手按新选区重定位显示） */
+	/** 手柄显示：有选区且已实测定位（拖动中保持显示并跟随手指，触摸目标不可卸载） */
+	const handlesVisible = computed(() : boolean => {
+		return selSpan.value != null && selectionLaidOut.value
+	})
+	/** 气泡显示：手柄显示且不在拖动手柄中（拖动中隐藏，松手按新选区重定位显示） */
 	const bubbleVisible = computed(() : boolean => {
-		return selSpan.value != null && selectionLaidOut.value && !dragStartActive.value && !dragEndActive.value
+		return handlesVisible.value && !dragStartActive.value && !dragEndActive.value
 	})
 
 	/** 整段字符索引 → 行列（首行缩进占 2 字：首行容量 = perLine-2，续行 = perLine） */
@@ -273,13 +278,23 @@
 	}
 
 	/** 字符边界视口坐标（[x, y]）：isEnd=末字符右缘/其行底，否则首字符左缘/其行顶。
-	 *  charIdx 为整段坐标（连续流整段渲染无切片偏移）；首行 x 加缩进宽，字距按行取值（与宿主行列换算同口径） */
+	 *  charIdx 为整段坐标；段首切片（beginSliceFrom==0）按首行容量 perLine-2+缩进换算，
+	 *  续切片（beginSliceFrom>0，段落跨页）行满容量 perLine 且无缩进，行列先平移到切片内坐标
+	 *  （rect 为本页切片元素，整段行号直接套用会错位整行）；字距按行取值（与宿主行列换算同口径） */
 	function charEdgePos(charIdx : number, isEnd : boolean, len : number) : number[] {
 		const m = props.metrics
-		const rc = rowColOf(Math.max(0, Math.min(charIdx, len - 1)), m.perLine)
-		const row = rc[0]
-		const col = rc[1]
-		const indent = row == 0 ? m.indentPx : 0
+		let row : number
+		let col : number
+		if (beginSliceFrom > 0) {
+			const rel = Math.max(0, Math.min(charIdx - beginSliceFrom, len - 1))
+			row = Math.floor(rel / m.perLine)
+			col = rel - row * m.perLine
+		} else {
+			const rc = rowColOf(Math.max(0, Math.min(charIdx, len - 1)), m.perLine)
+			row = rc[0]
+			col = rc[1]
+		}
+		const indent = (beginSliceFrom == 0 && row == 0) ? m.indentPx : 0
 		const spacing = spacingOfRow(col, m.perLine)
 		const lineTop = selRectTop.value + row * m.lineH
 		const x = selRectLeft.value + indent + (isEnd ? (col + 1) * spacing : col * spacing)
@@ -312,29 +327,77 @@
 		selBottomPx.value = ep[1]
 	}
 
+	/** 锚点矩形可用性校验：与段落矩形同一查询批次（坐标系一致），做相对包含性校验；
+	 *  异常矩形（如未渲染返回的 (0,0) 默认值）判不可用，退回行列估算 */
+	function anchorUsable(a : NodeInfo, para : NodeInfo, m : TextMetrics) : boolean {
+		const cy = a.top + a.height / 2
+		if (cy < para.top - m.lineH || cy > para.bottom + m.lineH) {
+			return false
+		}
+		if (a.left < para.left - m.charW || a.left > para.right + m.charW) {
+			return false
+		}
+		return true
+	}
+
+	/** 锚点中心相对段落原点的行序号（半行取整，兼容行盒高度为行高或字号的平台差异） */
+	function rowOfAnchor(a : NodeInfo, para : NodeInfo, lineH : number) : number {
+		const cy = a.top + a.height / 2
+		return Math.floor((cy - para.top - lineH / 2) / lineH + 0.5)
+	}
+
+	/** 段落实际行数（元素高度/行高反推）的最大行序号，用于钳制异常行号 */
+	function maxRowOf(para : NodeInfo, lineH : number) : number {
+		const rows = Math.round(para.height / lineH)
+		return Math.max(0, rows - 1)
+	}
+
+	/** 选区端点行列估算（切片口径）：续切片（sliceFrom>0，段落跨页）行满容量 perLine 且无缩进，
+	 *  行列先平移到切片内坐标（rect 为本页切片元素，整段行号直接套用会错位整行）；段首切片按首行 -2 容量 */
+	function rowColSliced(charIdx : number, sliceFrom : number, perLine : number) : number[] {
+		if (sliceFrom > 0) {
+			const rel = Math.max(0, charIdx - sliceFrom)
+			const row = Math.floor(rel / perLine)
+			return [row, rel - row * perLine]
+		}
+		return rowColOf(charIdx, perLine)
+	}
+
 	/** 宿主批量回传同一查询批次的矩形（锚点起/终 + 选区起/终段落），执行差分定位：
-	 *  手柄位置 = 段落 rect 原点 + 段内行列×排版常量——同一查询批次内相对量可靠，
-	 *  跨坐标系（transform 祖先内的 rect）系统偏差在差分中相消；跨章或段落矩形缺失时退回锚点绝对坐标 */
-	function setAnchors(span : SelSpan, anchorStart : NodeInfo | null, anchorEnd : NodeInfo | null, fromPara : NodeInfo | null, toPara : NodeInfo | null) : void {
+	 *  锚点零宽字符与段落矩形同批次实测（坐标系一致，transform 祖先的系统偏差在差分中相消），
+	 *  手柄优先取锚点实测坐标（字符边界 X + 锚点中心差分反推行号，与真实渲染零漂移）；
+	 *  锚点缺失（端点不在本页，如跨页句子的页外端点）或矩形异常时退回段内行列×排版常量估算
+	 *  （fromSliceFrom/toSliceFrom 为两端段落在本页的切片起始偏移，估算按切片口径换算）；
+	 *  跨章或段落矩形缺失时退回锚点绝对坐标 */
+	function setAnchors(span : SelSpan, anchorStart : NodeInfo | null, anchorEnd : NodeInfo | null, fromPara : NodeInfo | null, toPara : NodeInfo | null, fromSliceFrom : number, toSliceFrom : number) : void {
 		const m = props.metrics
 		const hotH = uni.upx2px(HANDLE_HOT_RPX)
 		const visH = uni.upx2px(HANDLE_VISUAL_RPX)
 		const sameChapter = span.fromCid == span.toCid
 		if (sameChapter && fromPara != null && (span.fromOrigin == span.toOrigin || toPara != null)) {
 			const endPara = span.fromOrigin == span.toOrigin ? fromPara : toPara!
-			const sc = rowColOf(span.fromStart, m.perLine)
-			const ec = rowColOf(span.toEnd, m.perLine)
-			const startRow = sc[0]
-			const startCol = sc[1]
-			const endRow = ec[0]
-			const endCol = ec[1]
-			const startSpacing = spacingOfRow(startCol, m.perLine)
-			const endSpacing = spacingOfRow(endCol, m.perLine)
-			const startIndent = startRow == 0 ? m.indentPx : 0
-			const endIndent = endRow == 0 ? m.indentPx : 0
-			handleStartLeft.value = fromPara.left + startIndent + startCol * startSpacing - hotH / 2
+			// 估算兜底：段内行列×排版常量（锚点缺失或矩形异常时使用）
+			const sc = rowColSliced(span.fromStart, fromSliceFrom, m.perLine)
+			const ec = rowColSliced(span.toEnd, toSliceFrom, m.perLine)
+			let startRow = sc[0]
+			let endRow = ec[0]
+			let startX = fromPara.left + (fromSliceFrom == 0 && startRow == 0 ? m.indentPx : 0) + sc[1] * spacingOfRow(sc[1], m.perLine)
+			let endX = endPara.left + (toSliceFrom == 0 && endRow == 0 ? m.indentPx : 0) + (ec[1] + 1) * spacingOfRow(ec[1], m.perLine)
+			// 锚点实测优先：字符边界 X 取锚点实测值，行序号由锚点中心差分反推（与真实渲染零漂移）
+			if (anchorStart != null && anchorUsable(anchorStart, fromPara, m)) {
+				startRow = rowOfAnchor(anchorStart, fromPara, m.lineH)
+				startX = anchorStart.left
+			}
+			if (anchorEnd != null && anchorUsable(anchorEnd, endPara, m)) {
+				endRow = rowOfAnchor(anchorEnd, endPara, m.lineH)
+				endX = anchorEnd.left
+			}
+			// 行号钳制进段落实际行数（矩形高度反推），异常值不至飞出段落
+			startRow = Math.max(0, Math.min(startRow, maxRowOf(fromPara, m.lineH)))
+			endRow = Math.max(0, Math.min(endRow, maxRowOf(endPara, m.lineH)))
+			handleStartLeft.value = startX - hotH / 2
 			handleStartTop.value = fromPara.top + startRow * m.lineH - visH
-			handleEndLeft.value = endPara.left + endIndent + (endCol + 1) * endSpacing - hotH / 2
+			handleEndLeft.value = endX - hotH / 2
 			handleEndTop.value = endPara.top + endRow * m.lineH + m.lineH - hotH + visH
 			selTopPx.value = fromPara.top + startRow * m.lineH
 			selBottomPx.value = endPara.top + (endRow + 1) * m.lineH
