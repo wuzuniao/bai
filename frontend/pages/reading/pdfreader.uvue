@@ -46,7 +46,7 @@
 		src: string
 	}
 
-	const bookId = ref('')
+	const bookId = ref(0)
 	const bookTitle = ref('')
 	/** 总页数 */
 	const pageCount = ref(0)
@@ -88,7 +88,7 @@
 	})
 
 	/** 页图缓存目录 */
-	function cacheDirOf(bid : string) : string {
+	function cacheDirOf(bid : number) : string {
 		return uni.env.USER_DATA_PATH + '/pdf_cache/' + bid
 	}
 
@@ -111,14 +111,15 @@
 		}
 		// #endif
 		const bid = options['bookId']
-		if (bid == null || bid.length == 0) {
+		const bidNum = bid != null ? parseInt(bid) : 0
+		if (bidNum <= 0 || isNaN(bidNum)) {
 			uni.showToast({ title: '书籍不存在', icon: 'none' })
 			setTimeout(() => {
 				uni.navigateBack()
 			}, 1200)
 			return
 		}
-		openPdfBook(bid)
+		openPdfBook(bidNum)
 	})
 
 	onShow(() => {
@@ -135,7 +136,7 @@
 	})
 
 	/** 打开 PDF 书：校验 → 恢复布局参数 → 补渲染缺失页 → 构建页列表 → 定位恢复进度 */
-	async function openPdfBook(bid : string) : Promise<void> {
+	async function openPdfBook(bid : number) : Promise<void> {
 		const book = findBook(bid)
 		if (book == null || book.format != 'PDF') {
 			uni.showToast({ title: '书籍不存在或已删除', icon: 'none' })
@@ -283,9 +284,9 @@
 		menuVisible.value = !menuVisible.value
 	}
 
-	/** 结算阅读：进度百分比落库 + 回写书架最近阅读状态 + 累计今日时长（onHide 先于 onUnload，enterAt 置零防双计） */
+	/** 结算阅读：进度百分比落库（书籍记录云端跟随） + 回写最近阅读状态 + 累计今日时长（onHide 先于 onUnload，enterAt 置零防双计） */
 	function persistReading() : void {
-		if (bookId.value.length == 0) {
+		if (bookId.value <= 0) {
 			return
 		}
 		savePdfProgress(bookId.value, { percent: curPercent.value, ratio: pageRatio.value } as PdfProgress)

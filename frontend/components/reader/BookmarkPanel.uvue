@@ -32,16 +32,25 @@
 		theme: ReaderTheme
 		/** 夜间态（图标 -light 白色变体切换） */
 		night: boolean
+		/** 当前书籍云端 id（0→实 id 变化时重载缓存；云端笔记落缓存由页面完成） */
+		bookId: number
 		/** 目录章节列表（书签条目文案按章节标题派生） */
 		chapters: Chapter[]
 	}>()
 	const emit = defineEmits(['goBookmark', 'changed'])
 
-	/** ===== 书签（真源：组件内增删/持久化，列表直接展示） ===== */
+	/** ===== 书签（真源：组件内增删/持久化，列表直接展示；缓存按书籍隔离） ===== */
 	const bookmarks = ref<Bookmark[]>([])
 	{
 		bookmarks.value = loadBookmarks()
 	}
+
+	/** 书籍切换（云端 id 0→实 id）后重载当前书籍缓存 */
+	watch(() : number => props.bookId, (v : number) : void => {
+		if (v > 0) {
+			bookmarks.value = loadBookmarks()
+		}
+	})
 
 	/** 主题图标路径：夜间使用 -light 白色变体 */
 	function themeIcon(name : string) : string {

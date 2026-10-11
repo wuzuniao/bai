@@ -48,6 +48,7 @@
 					ref="bookmarkPanelRef"
 					:theme="theme"
 					:night="night"
+					:book-id="bookId"
 					:chapters="chapters"
 					@go-bookmark="onGoBookmark"
 					@changed="onBookmarksChanged"
@@ -82,6 +83,8 @@
 		theme: ReaderTheme
 		/** 夜间态（书签条目图标变体） */
 		night: boolean
+		/** 当前书籍云端 id（书签面板按其变化重载缓存） */
+		bookId: number
 		/** 目录章节列表（正序全量） */
 		chapters: Chapter[]
 		/** 当前阅读章节 id（目录高亮） */

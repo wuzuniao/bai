@@ -15,6 +15,12 @@ export const AUTH_BASE_URL: string = process.env.NODE_ENV === 'production'
 // OIDC 接入方 client_id（本应用在 auth 服务 oauth_clients 表注册的公共 client）
 export const AUTH_CLIENT_ID: string = 'bai'
 
+// 本项目业务后端基础地址（书架/阅读元数据/偏好直连此域名，需携带登录令牌）。
+// 发行（production）走生产 HTTPS 域名；开发（运行）连本地后端（11001）。
+export const API_BASE_URL: string = process.env.NODE_ENV === 'production'
+	? 'https://bai.wuzuniao.com'
+	: 'http://localhost:11001'
+
 // 微信小程序 appid（与 manifest.json mp-weixin.appid 一致；appid 为公开信息）
 // 微信一键登录 wx.login() 的 code 与本 appid 绑定，请求认证服务时须显式携带，
 // 认证服务按 appid 解析对应应用密钥换取 openid

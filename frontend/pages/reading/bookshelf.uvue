@@ -180,13 +180,11 @@
 <script setup lang="uts">
 	import BottomNavBar from '@/components/common/BottomNavBar.uvue'
 	import { PLACEHOLDER_STYLE } from '@/utils/theme.uts'
-	import { LocalBook, loadBooks, saveBooks, removeBookData, getTodayMinutes } from '@/utils/books.uts'
+	import { LocalBook, loadBooks, saveBooks, syncBookOrder, removeBookData, getTodayMinutes, fetchBooksFromCloud, fetchReadingStatsFromCloud, cleanupLegacyBooks } from '@/utils/books.uts'
+	import { saveBookshelfStyle } from '@/utils/readerTypes.uts'
 	import { importBook } from '@/utils/bookparse.uts'
 
-	/** 书架卡片统一样式：plain 白卡 / photo 深灰卡 */
-	const STORAGE_STYLE = 'bookshelf_style'
-
-	/** 书架书籍（本地导入列表，顺序即手动排序结果；未导入时仅显示添加格） */
+	/** 书架书籍（云端元数据 + 本机正文缓存合并列表，顺序即云端手动排序结果；未导入时仅显示添加格） */
 	const books = ref<LocalBook[]>([])
 	/** 今日已读分钟数（阅读页结算，onShow 刷新） */
 	const todayMinutes = ref(0)
@@ -215,20 +213,34 @@
 		return books.value.length % 3 == 0
 	})
 
-	/** 读取本地书架与样式（onShow 每次刷新：阅读返回后进度/时长/新增书均同步） */
-	function loadShelf() : void {
-		books.value = loadBooks()
-		todayMinutes.value = getTodayMinutes()
-		const storedStyle : any = uni.getStorageSync(STORAGE_STYLE)
+	/** 从缓存读取书架卡片样式（云端偏好由 App 启动/本页刷新时落缓存） */
+	function readStyleFromCache() : void {
+		const storedStyle : any = uni.getStorageSync('bookshelf_style')
 		if (typeof storedStyle == 'string' && ((storedStyle as string) == 'plain' || (storedStyle as string) == 'photo')) {
 			shelfStyle.value = storedStyle as string
 		}
 	}
 
-	/** 书架顺序与样式本地持久化 */
+	/** 同步渲染本地缓存（先展示后刷新，避免网络等待白屏） */
+	function loadShelf() : void {
+		books.value = loadBooks()
+		todayMinutes.value = getTodayMinutes()
+		readStyleFromCache()
+	}
+
+	/** 云端刷新（onShow 每次执行）：清理旧版数据 → 书架/时长以云端覆盖缓存 → 重渲染 */
+	async function refreshShelf() : Promise<void> {
+		cleanupLegacyBooks()
+		loadShelf()
+		books.value = await fetchBooksFromCloud()
+		await fetchReadingStatsFromCloud()
+		todayMinutes.value = getTodayMinutes()
+		readStyleFromCache()
+	}
+
+	/** 书架顺序本地持久化（手动排序云端同步在拖拽落定处单独触发） */
 	function saveShelf() : void {
 		saveBooks(books.value)
-		uni.setStorageSync(STORAGE_STYLE, shelfStyle.value)
 	}
 
 	/** 书架卡片下方的进度文案（txt：未读 / 第 N 章 / 共 M 章；PDF：共 N 页 / 已读 X% · 共 N 页） */
@@ -245,13 +257,13 @@
 		return '第 ' + (book.lastChapter + 1) + ' 章 / 共 ' + book.chapterCount + ' 章'
 	}
 
-	/** 切换书架卡片统一样式并保存 */
+	/** 切换书架卡片统一样式（缓存 + 云端偏好跟随） */
 	function setStyle(style : string) : void {
 		if (shelfStyle.value == style) {
 			return
 		}
 		shelfStyle.value = style
-		saveShelf()
+		saveBookshelfStyle(style)
 	}
 
 	/** 顶部导航行顶部（px）：小程序端与右上角胶囊同行，Web/App 端为状态栏下 14px */
@@ -271,7 +283,7 @@
 	/** 编辑模式：卡片可勾选删除、可拖拽调序 */
 	const editMode = ref(false)
 	/** 编辑模式选中的书籍 id 集合 */
-	const selectedKeys = ref<string[]>([])
+	const selectedKeys = ref<number[]>([])
 
 	function isSelected(book : LocalBook) : boolean {
 		return selectedKeys.value.indexOf(book.id) >= 0
@@ -301,14 +313,14 @@
 		saveShelf()
 	}
 
-	/** 删除选中书籍（正文文件与阅读进度一并清理）并保存 */
+	/** 删除选中书籍（本机正文文件清理 + 云端书籍与笔记级联删除）并保存 */
 	function deleteSelected() : void {
 		if (selectedKeys.value.length == 0) {
 			return
 		}
 		for (let i = 0; i < books.value.length; i++) {
 			const b = books.value[i]
-			if (b.id != 'add' && selectedKeys.value.indexOf(b.id) >= 0) {
+			if (selectedKeys.value.indexOf(b.id) >= 0) {
 				removeBookData(b)
 			}
 		}
@@ -432,6 +444,7 @@
 		dragY.value = 0
 		if (dragMoved) {
 			saveShelf()
+			syncBookOrder(books.value)
 		}
 	}
 
@@ -485,7 +498,7 @@
 	})
 
 	onShow(() => {
-		loadShelf()
+		refreshShelf()
 	})
 
 	/** 关闭全部浮层（点击遮罩或底部导航触发） */
@@ -606,8 +619,12 @@
 		searchFocused.value = false
 	}
 
-	/** 点击书籍进入阅读：txt 进文本阅读器，PDF 进原文件渲染页（携带书籍 id） */
+	/** 点击书籍进入阅读：txt 进文本阅读器，PDF 进原文件渲染页（携带书籍 id）；本设备无正文时提示重导 */
 	function openBook(book: LocalBook) : void {
+		if (book.path.length == 0) {
+			uni.showToast({ title: '本设备没有该书文件，重新导入同名文件即可同步进度', icon: 'none', duration: 2500 })
+			return
+		}
 		if (book.format == 'PDF') {
 			uni.navigateTo({
 				url: '/pages/reading/pdfreader?bookId=' + book.id

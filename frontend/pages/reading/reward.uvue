@@ -94,8 +94,8 @@
 					<view class="reward-head">
 						<text class="reward-title">阅读领铜币</text>
 						<view class="reward-stat">
-							<text class="reward-stat-line">总阅读时间：<text class="reward-stat-num">120</text> 分钟</text>
-							<text class="reward-stat-line">今日已读：<text class="reward-stat-num">11</text> 分钟</text>
+							<text class="reward-stat-line">总阅读时间：<text class="reward-stat-num">{{ totalMinutes }}</text> 分钟</text>
+							<text class="reward-stat-line">今日已读：<text class="reward-stat-num">{{ todayMinutes }}</text> 分钟</text>
 						</view>
 					</view>
 					<view class="progress-track">
@@ -218,11 +218,23 @@
 	import BackButton from '@/components/common/BackButton.uvue'
 	import PageHeader from '@/components/common/PageHeader.uvue'
 	import { mainTopPx } from '@/utils/layout.uts'
+	import { getTodayMinutes, getTotalMinutes, fetchReadingStatsFromCloud } from '@/utils/books.uts'
 
 	type PendingDay = {
 		week: string
 		reward: number
 	}
+
+	/** 阅读时长（云端统计为准：onShow 拉取覆盖本地镜像） */
+	const todayMinutes = ref(0)
+	const totalMinutes = ref(0)
+
+	onShow(() => {
+		fetchReadingStatsFromCloud().then(() : void => {
+			todayMinutes.value = getTodayMinutes()
+			totalMinutes.value = getTotalMinutes()
+		})
+	})
 
 	/** 待签日程（Stitch 示例：周三至周六，周日为大礼单独渲染） */
 	const pendingDays = ref<PendingDay[]>([

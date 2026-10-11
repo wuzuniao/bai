@@ -1,7 +1,12 @@
 // 书籍导入管线：文件编码识别 → 章节解析 → 沙盒落盘入库
 // 端差异收口：文件选择由调用方（书架页）按端条件编译完成，本文件只处理已选中的本地文件
 
-import { LocalBook, loadBooks, saveBooks } from './books'
+import { applyRegisteredBook } from './books'
+import { registerBook } from '../api/reading.uts'
+import { hasAccessToken } from './request.uts'
+// #ifdef MP-WEIXIN
+import { decodeGbkBytes } from './gbk'
+// #endif
 // #ifdef APP
 import { openPdfSession } from './pdfrender'
 // #endif
@@ -30,8 +35,8 @@ type ParsedTitleParts = {
 	contentTitle : string
 }
 
-/** 导入最大文件体积（字节，16MB，对齐官方「避免一次性读取大文件」建议） */
-const MAX_IMPORT_SIZE = 16 * 1024 * 1024
+/** 分块读取块大小（字节）：大文件分块读规避整读的内存峰值（uni-app x 官方建议单次读取不超过 16M） */
+const READ_CHUNK_BYTES = 1024 * 1024
 
 /** 采样检测字符串中是否存在 UTF-8 解码替换符（出现即视为非 UTF-8 编码，大概率 GBK） */
 function looksMisencoded(text : string) : boolean {
@@ -48,8 +53,263 @@ function looksMisencoded(text : string) : boolean {
 	return false
 }
 
-/** 读取文本文件并自动识别编码（utf-8 优先，含替换符时按 GBK 重读） */
+// #ifdef MP-WEIXIN
+/**
+ * latin1 解码的块尾探测串中，被切断多字节字符占用的字节数（0..3）：
+ * latin1 每字节映射为一字符，charCodeAt 即原始字节值；utf-8 续字节为 10xxxxxx，
+ * 从块尾向前找字符首字节并按其高位判定字符总长，总长超过块内实际占用即被切断
+ */
+function incompleteTailBytes(tail : string) : number {
+	for (let i = tail.length - 1; i >= 0; i--) {
+		const b = tail.charCodeAt(i)
+		if ((b & 0xC0) != 0x80) {
+			const charLen = b >= 0xF0 ? 4 : (b >= 0xE0 ? 3 : (b >= 0xC0 ? 2 : 1))
+			const used = tail.length - i
+			return charLen > used ? used : 0
+		}
+	}
+	return tail.length
+}
+
+/** 微信端分块读取 GBK 文本：latin1 逐块读字节（每字符=一字节），GBK 双字节跨块时块尾截 1 字节配对，块内码表解码 */
+function readGbkChunkedMp(path : string) : Promise<string> {
+	return new Promise<string>((resolve, reject) => {
+		const fs = uni.getFileSystemManager()
+		let size = 0
+		try {
+			size = fs.statSync(path).size
+		} catch (e) {
+			reject(new Error('文件读取失败'))
+			return
+		}
+		if (size == 0) {
+			resolve('')
+			return
+		}
+		let pos = 0
+		const parts : string[] = []
+		while (pos < size) {
+			let len = Math.min(READ_CHUNK_BYTES, size - pos)
+			// 非末块：块尾字节是 GBK 双字节首字节（0x81-0xFE）时截 1 字节到下一块配对解码
+			if (pos + len < size) {
+				try {
+					const tail = fs.readFileSync(path, 'latin1', pos + len - 1, 1) as string
+					const b = tail.charCodeAt(0)
+					if (b >= 0x81 && b <= 0xFE) {
+						len -= 1
+					}
+				} catch (e) {
+					// 探测失败按原边界读取
+				}
+			}
+			if (len <= 0) {
+				reject(new Error('文件读取失败'))
+				return
+			}
+			try {
+				const chunk = fs.readFileSync(path, 'latin1', pos, len)
+				if (typeof chunk != 'string') {
+					reject(new Error('文件读取失败'))
+					return
+				}
+				parts.push(decodeGbkBytes(chunk as string))
+			} catch (e) {
+				reject(new Error('文件读取失败'))
+				return
+			}
+			pos += len
+		}
+		resolve(parts.join(''))
+	})
+}
+
+/** 微信端分块读取 utf-8 文本（每块 1MB，块边界做字符对齐；末块后拼接结果，GBK 检测交由调用方） */
+function readTextFileChunkedMp(path : string) : Promise<string> {
+	return new Promise<string>((resolve, reject) => {
+		const fs = uni.getFileSystemManager()
+		let size = 0
+		try {
+			size = fs.statSync(path).size
+		} catch (e) {
+			reject(new Error('文件读取失败'))
+			return
+		}
+		if (size == 0) {
+			resolve('')
+			return
+		}
+		let pos = 0
+		let text = ''
+		while (pos < size) {
+			let len = Math.min(READ_CHUNK_BYTES, size - pos)
+			// 非末块：探测块尾 4 字节（utf-8 字符最长 4 字节，窗口内必含字符首字节），
+			// 截去被切断字符的前缀字节，下一块从该字符首字节重读，保证字符完整解码
+			if (pos + len < size) {
+				try {
+					const tail = fs.readFileSync(path, 'latin1', pos + len - 4, 4) as string
+					len -= incompleteTailBytes(tail)
+					if (len <= 0) {
+						reject(new Error('文件读取失败'))
+						return
+					}
+				} catch (e) {
+					// 探测失败按原边界读取（最多损失块尾一个字符）
+				}
+			}
+			try {
+				const chunk = fs.readFileSync(path, 'utf-8', pos, len)
+				if (typeof chunk != 'string') {
+					reject(new Error('文件读取失败'))
+					return
+				}
+				text = text + (chunk as string)
+			} catch (e) {
+				reject(new Error('文件读取失败'))
+				return
+			}
+			pos += len
+		}
+		resolve(text)
+	})
+}
+// #endif
+
+// #ifdef APP-ANDROID
+/**
+ * 块尾对齐：返回本块可安全解码的字节数（GBK 双字节跨块截 1；utf-8 截去被切断字符的前缀字节）
+ * 仅在非末块调用，u8 为本块实际读取内容的字节视图
+ */
+function alignedTailLen(u8 : Uint8Array, len : number, isGbk : boolean) : number {
+	if (isGbk) {
+		const b = u8[len - 1]
+		return b >= 0x81 && b <= 0xFE ? len - 1 : len
+	}
+	for (let i = len - 1; i >= 0 && i >= len - 4; i--) {
+		const b = u8[i]
+		if ((b & 0xC0) != 0x80) {
+			const charLen = b >= 0xF0 ? 4 : (b >= 0xE0 ? 3 : (b >= 0xC0 ? 2 : 1))
+			const used = len - i
+			return charLen > used ? len - used : len
+		}
+	}
+	return len
+}
+
+/**
+ * Android 端分块读取文本：fd（openSync/readSync/closeSync）分块读 ArrayBuffer，
+ * 逐块用 java.nio Charset 解码（UTF-8 与 GBK 同一函数不同字符集名；块边界字符对齐后无切断）
+ */
+function readChunkedApp(path : string, charsetName : string) : Promise<string> {
+	return new Promise<string>((resolve, reject) => {
+		const fs = uni.getFileSystemManager()
+		let fd = 0
+		let size = 0
+		try {
+			fd = fs.openSync(path, 'r')
+			size = fs.statSync(path).size
+		} catch (e) {
+			if (fd > 0) {
+				try {
+					fs.closeSync(fd)
+				} catch (e2) {
+					// 忽略
+				}
+			}
+			reject(new Error('文件读取失败'))
+			return
+		}
+		const closeQuiet = () : void => {
+			try {
+				fs.closeSync(fd)
+			} catch (e) {
+				// 忽略
+			}
+		}
+		if (size == 0) {
+			closeQuiet()
+			resolve('')
+			return
+		}
+		const charset = Charset.forName(charsetName)
+		const isGbk = charsetName == 'GBK'
+		let pos = 0
+		const sb = new StringBuilder()
+		while (pos < size) {
+			let len = Math.min(READ_CHUNK_BYTES, size - pos)
+			const ab = new ArrayBuffer(len)
+			let readLen = 0
+			try {
+				readLen = fs.readSync(ab, fd, pos, 0, len)
+			} catch (e) {
+				closeQuiet()
+				reject(new Error('文件读取失败'))
+				return
+			}
+			if (readLen <= 0) {
+				break
+			}
+			// 非末块：块边界字符对齐，被切断字符整字节留给下一块
+			let adjusted = readLen
+			if (pos + readLen < size) {
+				adjusted = alignedTailLen(new Uint8Array(ab), readLen, isGbk)
+			}
+			try {
+				const bb = ab.toByteBuffer()
+				bb.rewind()
+				bb.limit(adjusted)
+				sb.append(charset.decode(bb).toString())
+			} catch (e) {
+				closeQuiet()
+				reject(new Error('文件读取失败'))
+				return
+			}
+			pos += adjusted
+		}
+		closeQuiet()
+		resolve(sb.toString())
+	})
+}
+// #endif
+
+/** 读取文本文件并自动识别编码（utf-8 优先，含替换符时按 GBK 重读；微信/Android 分块读规避大文件整读内存峰值） */
 export function readTextFile(path : string) : Promise<string> {
+	// #ifdef MP-WEIXIN
+	return new Promise<string>((resolve, reject) => {
+		readTextFileChunkedMp(path).then((text : string) => {
+			if (!looksMisencoded(text)) {
+				resolve(text)
+				return
+			}
+			// 非 UTF-8（大概率 GBK）：微信端无系统级 GBK 解码，latin1 分块读字节后按码表解码
+			readGbkChunkedMp(path).then((gbkText : string) => {
+				resolve(gbkText)
+			}, (_e : Error | null) => {
+				reject(new Error('文件读取失败'))
+			})
+		}, (e : Error | null) => {
+			reject(e != null ? e : new Error('文件读取失败'))
+		})
+	})
+	// #endif
+	// #ifdef APP-ANDROID
+	return new Promise<string>((resolve, reject) => {
+		readChunkedApp(path, 'UTF-8').then((text : string) => {
+			if (!looksMisencoded(text)) {
+				resolve(text)
+				return
+			}
+			// 非 UTF-8（大概率 GBK）：java.nio GBK 分块解码
+			readChunkedApp(path, 'GBK').then((gbkText : string) => {
+				resolve(gbkText)
+			}, (_e : Error | null) => {
+				reject(new Error('文件读取失败'))
+			})
+		}, (e : Error | null) => {
+			reject(e != null ? e : new Error('文件读取失败'))
+		})
+	})
+	// #endif
+	// #ifdef APP-IOS
 	return new Promise<string>((resolve, reject) => {
 		let text = ''
 		try {
@@ -63,32 +323,14 @@ export function readTextFile(path : string) : Promise<string> {
 			resolve(text)
 			return
 		}
-		// 非 UTF-8（大概率 GBK）：微信端原生 gbk 解码；Android 端经 ByteBuffer 调 java.nio GBK 解码
-		// #ifdef MP-WEIXIN
-		try {
-			const gbk = uni.getFileSystemManager().readFileSync(path, 'gbk')
-			resolve(gbk as string)
-		} catch (e) {
-			reject(new Error('当前微信版本暂不支持该文件编码'))
-		}
-		// #endif
-		// #ifdef APP-ANDROID
-		try {
-			const ab = uni.getFileSystemManager().readFileSync(path) as ArrayBuffer
-			const bb = ab.toByteBuffer()
-			bb.rewind()
-			resolve(Charset.forName('GBK').decode(bb).toString())
-		} catch (e) {
-			reject(new Error('该文件编码暂不支持'))
-		}
-		// #endif
-		// #ifdef APP-IOS
 		reject(new Error('该文件编码暂不支持'))
-		// #endif
-		// #ifndef MP-WEIXIN || APP
-		reject(new Error('该文件编码暂不支持'))
-		// #endif
 	})
+	// #endif
+	// #ifndef MP-WEIXIN || APP
+	return new Promise<string>((_resolve, reject) => {
+		reject(new Error('该文件编码暂不支持'))
+	})
+	// #endif
 }
 
 /** 编号章前缀（第X章/回/节/卷/部/篇/集幕；Chapter n） */
@@ -192,18 +434,18 @@ function collectParagraphs(lines : string[], from : number, to : number) : strin
 	return paras
 }
 
-/** 确保沙盒书籍目录存在（已存在时忽略） */
+/** 确保沙盒书籍目录存在（mkdir 的「已存在」错误码各端不一致不可靠，失败后以 access 复验目录实际可达为准） */
 function ensureBooksDir(dir : string) : Promise<void> {
 	return new Promise<void>((resolve, reject) => {
 		uni.getFileSystemManager().mkdir({
 			dirPath: dir,
 			recursive: true,
 			success: (_res) => { resolve() },
-			fail: (err) => {
-				// 目录已存在属正常（1301005 文件已存在）
-				if (err.errCode == 1301005) {
+			fail: (_err) => {
+				try {
+					uni.getFileSystemManager().accessSync(dir)
 					resolve()
-				} else {
+				} catch (e) {
 					reject(new Error('本地目录创建失败'))
 				}
 			}
@@ -211,9 +453,15 @@ function ensureBooksDir(dir : string) : Promise<void> {
 	})
 }
 
-/** 复制选中的文件到沙盒（临时路径会被系统回收，必须先落盘） */
+/** 复制选中的文件到沙盒（临时路径会被系统回收，必须先落盘；目标已存在时先删除，支持同名书覆盖导入） */
 function copyToSandbox(srcPath : string, destPath : string) : Promise<void> {
 	return new Promise<void>((resolve, reject) => {
+		try {
+			// 同名书重导入时目标正文已存在，部分端 copyFile 对已存在目标直接失败，先删后拷
+			uni.getFileSystemManager().unlinkSync(destPath)
+		} catch (e) {
+			// 目标不存在属正常
+		}
 		uni.getFileSystemManager().copyFile({
 			srcPath: srcPath,
 			destPath: destPath,
@@ -240,69 +488,83 @@ function discardFile(path : string) : void {
 	}
 }
 
-/** 导入一本书：复制落盘 → txt 读文本解析章节 / PDF 取页数（原文件保留）→ 入库 */
+/** 导入一本书：复制落盘解析 → 云端登记（后端分配 id，同名书复用）→ 以 id 命名入库；导入需登录（云端登记为必经步骤） */
 export async function importBook(fileName : string, tempPath : string, size : number) : Promise<void> {
+	if (!hasAccessToken()) {
+		throw new Error('请先登录后再导入书籍')
+	}
 	const dot = fileName.lastIndexOf('.')
 	const ext = dot >= 0 ? fileName.substring(dot + 1).toLowerCase() : ''
 	if (ext != 'txt' && ext != 'pdf') {
 		throw new Error('暂不支持该格式，当前支持 TXT / PDF')
 	}
-	if (size > MAX_IMPORT_SIZE) {
-		throw new Error('文件超过 16MB，暂不支持导入')
-	}
-	const id = 'bk' + Date.now().toString() + (Math.floor(Math.random() * 900) + 100).toString()
 	const dir = uni.env.USER_DATA_PATH + '/books'
 	await ensureBooksDir(dir)
-	const bodyPath = dir + '/' + id + '.' + ext
-	await copyToSandbox(tempPath, bodyPath)
+	// 先以临时名落盘（正文解析需真实文件），云端分配 id 后再改名；随机后缀防批量导入同毫秒自撞
+	const workPath = dir + '/_import_' + Date.now().toString() + '_' + Math.floor(Math.random() * 100000).toString() + '.' + ext
+	await copyToSandbox(tempPath, workPath)
 	let chapterCount = 0
 	let hasPreface = false
 	if (ext == 'txt') {
 		// txt：读文本（含编码识别）解析章节
 		let text = ''
 		try {
-			text = await readTextFile(bodyPath)
+			text = await readTextFile(workPath)
 		} catch (e) {
-			discardFile(bodyPath)
+			discardFile(workPath)
 			throw e
 		}
 		const parsed = parseChapters(text, titleFromFileName(fileName))
 		chapterCount = parsed.length
-		// 序章存在性导入时固化：打开时据此决定保留序章（新书）或剔除（旧书，保证章 id 与存量进度对齐）
+		// 序章存在性导入时固化：打开时据此决定保留序章（新书）或剔除（无序章历史书，保证章 id 与存量进度对齐）
 		hasPreface = parsed.length > 0 && parsed[0].preface
 	} else {
 		// PDF：原文件保留，仅取页数用于书架展示（首次阅读时按页渲染为图片缓存）
 		// #ifdef APP
 		try {
-			const session = await openPdfSession(bodyPath)
+			const session = await openPdfSession(workPath)
 			chapterCount = session.pageCount
 			session.close()
 		} catch (e) {
-			discardFile(bodyPath)
+			discardFile(workPath)
 			// 透传渲染器文案（损坏 / 端不支持）
 			throw e
 		}
 		// #endif
 		// #ifndef APP
-		discardFile(bodyPath)
+		discardFile(workPath)
 		throw new Error('当前端暂不支持 PDF 导入，请使用 APP 端')
 		// #endif
 	}
-	const book = {
-		id: id,
-		title: titleFromFileName(fileName),
-		author: '',
-		format: ext.toUpperCase(),
-		path: bodyPath,
-		size: size,
-		addedAt: Date.now(),
-		lastReadAt: 0,
-		lastChapter: -1,
-		lastPercent: 0,
-		chapterCount: chapterCount,
-		hasPreface: hasPreface
-	} as LocalBook
-	const list = loadBooks()
-	list.push(book)
-	saveBooks(list)
+	// 云端登记（同用户同名书复用已有 id，进度与笔记自动关联；失败即导入失败，云端为准）
+	let registered : UTSJSONObject | null = null
+	try {
+		const res = await registerBook(titleFromFileName(fileName), ext.toUpperCase(), size, chapterCount, hasPreface)
+		if (res.code == 0 && res.data != null) {
+			registered = res.data
+		}
+	} catch (e) {
+		registered = null
+	}
+	if (registered == null) {
+		discardFile(workPath)
+		throw new Error('云端登记失败，请检查网络后重试')
+	}
+	const bookId = registered!.getNumber('id') ?? 0
+	if (bookId <= 0) {
+		discardFile(workPath)
+		throw new Error('云端登记失败，请检查网络后重试')
+	}
+	// 以云端 id 命名正文文件；重导入换格式时清理旧格式残留
+	const bodyPath = dir + '/' + bookId + '.' + ext
+	if (bodyPath != workPath) {
+		await copyToSandbox(workPath, bodyPath)
+		discardFile(workPath)
+	}
+	if (ext == 'txt') {
+		discardFile(dir + '/' + bookId + '.pdf')
+	} else {
+		discardFile(dir + '/' + bookId + '.txt')
+	}
+	applyRegisteredBook(registered!, bodyPath)
 }

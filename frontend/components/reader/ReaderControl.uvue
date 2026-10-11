@@ -31,6 +31,7 @@
 				:drawer-height="drawerPanelHeight"
 				:theme="theme"
 				:night="nightMode"
+				:book-id="bookId"
 				:chapters="chapters"
 				:active-chapter-id="activeChapterId"
 				:notes="notes"
@@ -103,6 +104,8 @@
 		drawerOpen: boolean
 		/** 顶部导航书名 */
 		bookTitle: string
+		/** 当前书籍云端 id（书签面板按其变化重载缓存；0=未锁定） */
+		bookId: number
 		/** 目录章节列表（正序全量；当前章高亮由 activeChapterId 驱动） */
 		chapters: Chapter[]
 		/** 当前阅读章节 id（目录高亮） */

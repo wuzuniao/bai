@@ -1,7 +1,11 @@
 /**
  * 阅读共享类型与常量（reader 页面与阅读组件共用）
  * 跨章说明：同一本书各章段落数不同，凡「按段索引取内容」处必须携带章 id 并按所在章取段落。
+ * 划线/想法/书签云端真源（按书籍隔离，本地仅缓存）：打开书籍时页面调 setActiveBookId
+ * 锁定当前书籍并拉取云端覆盖缓存，写入类工具本地即写 + 云端静默跟随。
  */
+
+import { upsertUnderline, createThought, replaceBookmarks, savePreferences, syncQuiet } from '../api/reading.uts'
 
 /** 目录章节（目录列表与正文页头共用） */
 export type Chapter = {
@@ -149,11 +153,23 @@ export type ShareQuoteCtx = {
 	bookTitle: string
 }
 
-// 划线/想法/书签/设置的本地存储 key（存储真源收口本文件，外部一律经下方读写工具访问）
+// 划线/想法/书签/设置的本地存储 key（缓存真源收口本文件，外部一律经下方读写工具访问；
+// 划线/想法/书签按书籍隔离（key 带云端书籍 id），设置与书架样式为全局键）
+let activeBookId : number = 0
 const UNDERLINE_STORAGE_KEY = 'reader_underlines'
 const THOUGHT_STORAGE_KEY = 'reader_thoughts'
 const BOOKMARK_STORAGE_KEY = 'reader_bookmarks'
 const SETTINGS_STORAGE_KEY = 'reader_settings'
+
+/** 锁定当前阅读书籍（打开书籍时由页面调用；划线/想法/书签读写与云端同步按此 id 定位） */
+export function setActiveBookId(bookId : number) : void {
+	activeBookId = bookId
+}
+
+/** 当前书籍存储 key（未锁书时返回 null，读写工具按空表/忽略处理） */
+function bookScopedKey(prefix : string) : string | null {
+	return activeBookId > 0 ? prefix + activeBookId : null
+}
 
 /** 阅读设置（字号/翻页模式/主题/字体，真源本地存储：ReaderControl 组件读写，页面应用渲染） */
 export type ReaderSettings = {
@@ -183,14 +199,38 @@ export function loadSettings() : ReaderSettings {
 	return s
 }
 
-/** 持久化阅读设置 */
+/** 持久化阅读设置（本地缓存即写 + 云端偏好整包静默跟随） */
 export function saveSettings(s : ReaderSettings) : void {
 	uni.setStorageSync(SETTINGS_STORAGE_KEY, JSON.stringify(s))
+	pushPreferencesQuiet()
 }
 
-/** 读取本地书签列表（空/损坏容错返回空表） */
+/** 书架卡片样式持久化（书架页调用；随偏好整包云端跟随） */
+export function saveBookshelfStyle(style : string) : void {
+	uni.setStorageSync('bookshelf_style', style)
+	pushPreferencesQuiet()
+}
+
+/** 偏好整包云端跟随（阅读设置四项 + 书架样式；静默同步） */
+function pushPreferencesQuiet() : void {
+	const s = loadSettings()
+	const prefs = {} as UTSJSONObject
+	prefs['fontSize'] = s.fontSize
+	prefs['pageTurn'] = s.pageTurn
+	prefs['theme'] = s.theme
+	prefs['fontKey'] = s.fontKey
+	const style : any = uni.getStorageSync('bookshelf_style')
+	prefs['bookshelfStyle'] = typeof style == 'string' ? style as string : 'plain'
+	syncQuiet(savePreferences(prefs))
+}
+
+/** 读取本地书签列表（当前书籍缓存；空/未锁书/损坏容错返回空表） */
 export function loadBookmarks() : Bookmark[] {
-	const stored : any = uni.getStorageSync(BOOKMARK_STORAGE_KEY)
+	const key = bookScopedKey(BOOKMARK_STORAGE_KEY)
+	if (key == null) {
+		return [] as Bookmark[]
+	}
+	const stored : any = uni.getStorageSync(key)
 	if (typeof stored == 'string' && (stored as string).length > 0) {
 		const list = JSON.parse<Array<Bookmark>>(stored as string)
 		if (list != null) {
@@ -200,9 +240,23 @@ export function loadBookmarks() : Bookmark[] {
 	return [] as Bookmark[]
 }
 
-/** 持久化书签列表 */
+/** 持久化书签列表（当前书籍缓存即写 + 云端整表替换静默跟随） */
 export function saveBookmarksToStorage(list : Bookmark[]) : void {
-	uni.setStorageSync(BOOKMARK_STORAGE_KEY, JSON.stringify(list))
+	const key = bookScopedKey(BOOKMARK_STORAGE_KEY)
+	if (key == null) {
+		return
+	}
+	uni.setStorageSync(key, JSON.stringify(list))
+	if (activeBookId > 0) {
+		const items : UTSJSONObject[] = []
+		for (let i = 0; i < list.length; i++) {
+			const item = {} as UTSJSONObject
+			item['chapter_id'] = list[i].chapterId
+			item['page_index'] = list[i].pageIndex
+			items.push(item)
+		}
+		syncQuiet(replaceBookmarks(activeBookId, items))
+	}
 }
 
 /** 排版度量（正文分页/划词换算共用的行参数） */
@@ -237,9 +291,94 @@ export type ParaRect = {
 	from : number
 }
 
-/** 读取本地划线记录（空/损坏容错返回空表） */
+// ==================== 云端拉取结果落缓存（打开书籍时调用，云端为准覆盖本地） ====================
+
+/** 云端划线对象 → UnderlineEntry（ranges 为扁平数组 [s1,e1,...]） */
+export function underlineFromCloud(obj : UTSJSONObject) : UnderlineEntry | null {
+	const cid = obj.getNumber('cid')
+	const origin = obj.getNumber('origin')
+	if (cid == null || origin == null) {
+		return null
+	}
+	const ranges : number[][] = []
+	const flat = obj.getArray<number>('ranges')
+	if (flat != null) {
+		let i = 0
+		while (i + 1 < flat.length) {
+			ranges.push([flat[i], flat[i + 1]])
+			i += 2
+		}
+	}
+	return { cid: cid, origin: origin, ranges: ranges } as UnderlineEntry
+}
+
+/** 云端想法对象 → Thought */
+export function thoughtFromCloud(obj : UTSJSONObject) : Thought | null {
+	const fromCid = obj.getNumber('from_cid')
+	const fromOrigin = obj.getNumber('from_origin')
+	const fromStart = obj.getNumber('from_start')
+	const toCid = obj.getNumber('to_cid')
+	const toOrigin = obj.getNumber('to_origin')
+	const toEnd = obj.getNumber('to_end')
+	if (fromCid == null || fromOrigin == null || fromStart == null || toCid == null || toOrigin == null || toEnd == null) {
+		return null
+	}
+	return {
+		fromCid: fromCid,
+		fromOrigin: fromOrigin,
+		fromStart: fromStart,
+		toCid: toCid,
+		toOrigin: toOrigin,
+		toEnd: toEnd,
+		quote: obj.getString('quote') ?? '',
+		content: obj.getString('content') ?? ''
+	} as Thought
+}
+
+/** 云端书签对象 → Bookmark */
+export function bookmarkFromCloud(obj : UTSJSONObject) : Bookmark | null {
+	const chapterId = obj.getNumber('chapter_id')
+	const pageIndex = obj.getNumber('page_index')
+	if (chapterId == null || pageIndex == null) {
+		return null
+	}
+	return { chapterId: chapterId, pageIndex: pageIndex } as Bookmark
+}
+
+/** 云端划线列表落当前书籍缓存（打开书籍拉取后调用） */
+export function storeUnderlines(entries : UnderlineEntry[]) : void {
+	const key = bookScopedKey(UNDERLINE_STORAGE_KEY)
+	if (key == null) {
+		return
+	}
+	uni.setStorageSync(key, JSON.stringify(entries))
+}
+
+/** 云端想法列表落当前书籍缓存 */
+export function storeThoughts(list : Thought[]) : void {
+	const key = bookScopedKey(THOUGHT_STORAGE_KEY)
+	if (key == null) {
+		return
+	}
+	uni.setStorageSync(key, JSON.stringify(list))
+}
+
+/** 云端书签列表落当前书籍缓存 */
+export function storeBookmarks(list : Bookmark[]) : void {
+	const key = bookScopedKey(BOOKMARK_STORAGE_KEY)
+	if (key == null) {
+		return
+	}
+	uni.setStorageSync(key, JSON.stringify(list))
+}
+
+/** 读取本地划线记录（当前书籍缓存；空/未锁书/损坏容错返回空表） */
 export function loadUnderlines() : UnderlineEntry[] {
-	const stored : any = uni.getStorageSync(UNDERLINE_STORAGE_KEY)
+	const key = bookScopedKey(UNDERLINE_STORAGE_KEY)
+	if (key == null) {
+		return [] as UnderlineEntry[]
+	}
+	const stored : any = uni.getStorageSync(key)
 	if (typeof stored == 'string' && (stored as string).length > 0) {
 		const list = JSON.parse<Array<UnderlineEntry>>(stored as string)
 		if (list != null) {
@@ -249,9 +388,13 @@ export function loadUnderlines() : UnderlineEntry[] {
 	return [] as UnderlineEntry[]
 }
 
-/** 读取本地想法记录（空/损坏容错返回空表） */
+/** 读取本地想法记录（当前书籍缓存；空/未锁书/损坏容错返回空表） */
 export function loadThoughts() : Thought[] {
-	const stored : any = uni.getStorageSync(THOUGHT_STORAGE_KEY)
+	const key = bookScopedKey(THOUGHT_STORAGE_KEY)
+	if (key == null) {
+		return [] as Thought[]
+	}
+	const stored : any = uni.getStorageSync(key)
 	if (typeof stored == 'string' && (stored as string).length > 0) {
 		const list = JSON.parse<Array<Thought>>(stored as string)
 		if (list != null) {
@@ -317,23 +460,57 @@ function applySegUnderline(list : UnderlineEntry[], cid : number, origin : numbe
 	}
 }
 
-/** 选区跨段划线应用：按段序列逐段写入并持久化（划线/写想法共用收口） */
+/** 选区跨段划线应用：按段序列逐段写入当前书籍缓存，被改动段逐段云端 upsert（划线/写想法共用收口） */
 export function applySpanUnderlineToStorage(segs : SpanSeg[], add : boolean) : void {
+	const key = bookScopedKey(UNDERLINE_STORAGE_KEY)
+	if (key == null) {
+		return
+	}
 	const list = loadUnderlines()
+	// 被改动段去重登记（同段可被多个切片命中），结束后按最终区间云端同步
+	const touched : string[] = []
 	for (const seg of segs) {
 		if (seg.end < seg.start) {
 			continue
 		}
 		applySegUnderline(list, seg.cid, seg.origin, seg.start, seg.end, add)
+		const k = seg.cid.toString() + ':' + seg.origin.toString()
+		if (touched.indexOf(k) < 0) {
+			touched.push(k)
+		}
 	}
-	uni.setStorageSync(UNDERLINE_STORAGE_KEY, JSON.stringify(list))
+	uni.setStorageSync(key, JSON.stringify(list))
+	if (activeBookId > 0) {
+		for (const k of touched) {
+			const sep = k.indexOf(':')
+			const cid = parseInt(k.substring(0, sep))
+			const origin = parseInt(k.substring(sep + 1))
+			// 云端传输为扁平区间（[s1,e1,s2,e2]），本地存储保持区间对结构不变
+			const entry = findUnderlineEntry(list, cid, origin)
+			const flat : number[] = []
+			if (entry != null) {
+				for (const u of entry.ranges) {
+					flat.push(u[0])
+					flat.push(u[1])
+				}
+			}
+			syncQuiet(upsertUnderline(activeBookId, cid, origin, flat))
+		}
+	}
 }
 
-/** 想法记录写入（持久化到本地存储） */
+/** 想法记录写入（当前书籍缓存即写 + 云端静默跟随） */
 export function saveThought(t : Thought) : void {
+	const key = bookScopedKey(THOUGHT_STORAGE_KEY)
+	if (key == null) {
+		return
+	}
 	const list = loadThoughts()
 	list.push(t)
-	uni.setStorageSync(THOUGHT_STORAGE_KEY, JSON.stringify(list))
+	uni.setStorageSync(key, JSON.stringify(list))
+	if (activeBookId > 0) {
+		syncQuiet(createThought(activeBookId, t.fromCid, t.fromOrigin, t.fromStart, t.toCid, t.toOrigin, t.toEnd, t.quote, t.content))
+	}
 }
 
 /**

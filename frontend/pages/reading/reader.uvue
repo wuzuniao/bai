@@ -217,6 +217,7 @@
 			:settings-open="settingsOpen"
 			:drawer-open="drawerOpen"
 			:book-title="bookTitle"
+			:book-id="bookId"
 			:chapters="chapters"
 			:active-chapter-id="currentChapterId"
 			:notes="noteRecords"
@@ -294,7 +295,9 @@
 	import { useUserStore, avatarPathOf } from '@/stores/user.uts'
 	import { LocalBook, BookProgress, findBook, loadBookProgress, saveBookProgress, updateBookReading, addTodayMinutes } from '@/utils/books.uts'
 	import { parseChapters, readTextFile, ParsedChapter } from '@/utils/bookparse.uts'
-	import { Chapter, Paragraph, Bookmark, Thought, UnderlineEntry, NoteRecord, ShareQuoteCtx, SelSpan, SpanSeg, TextMetrics, ParaRect, ReaderSettings, FONT_OPTIONS, fontOptionOf, loadUnderlines, loadThoughts, findUnderlineEntry, loadBookmarks, loadSettings, normalizeSpan, buildNoteRecords, buildShareQuoteCtx } from '@/utils/readerTypes.uts'
+	import { fetchBookNotes, fetchBookBookmarks } from '@/api/reading.uts'
+	import { hasAccessToken } from '@/utils/request.uts'
+	import { Chapter, Paragraph, Bookmark, Thought, UnderlineEntry, NoteRecord, ShareQuoteCtx, SelSpan, SpanSeg, TextMetrics, ParaRect, ReaderSettings, FONT_OPTIONS, fontOptionOf, setActiveBookId, underlineFromCloud, thoughtFromCloud, bookmarkFromCloud, storeUnderlines, storeThoughts, storeBookmarks, loadUnderlines, loadThoughts, findUnderlineEntry, loadBookmarks, loadSettings, normalizeSpan, buildNoteRecords, buildShareQuoteCtx } from '@/utils/readerTypes.uts'
 	import { PageSlice, computePageBreaks, computePageBreaksMeasured, computePageBreaksExact, ParaLineLayout } from '@/utils/pagination.uts'
 	// #ifdef APP-ANDROID
 	import { buildParaLayout } from '@/utils/textlayout.uts'
@@ -975,8 +978,8 @@
 	const scrollIntoView = ref('')
 
 	/** ===== 书籍内容接入点 ===== */
-	/** 当前书籍（id 用于进度/阅读状态回写；title 用于顶栏与分享展示） */
-	const bookId = ref('')
+	/** 当前书籍（云端 id 用于进度/阅读状态回写与笔记拉取；title 用于顶栏与分享展示） */
+	const bookId = ref(0)
 	const bookTitle = ref('')
 
 	/** 段落文本数组 → 段落对象数组（本地 txt 解析结果注入前的统一转换） */
@@ -1004,7 +1007,7 @@
 	/** ===== 阅读进度（章节/页码/滚动位置，按 bookId 隔离持久化） ===== */
 
 	function saveProgress() : void {
-		if (bookId.value.length == 0) {
+		if (bookId.value <= 0) {
 			return
 		}
 		const p = { chapterId: currentChapterId.value, pageIndex: pageIndex.value, scrollTop: scrollModePos.value } as BookProgress
@@ -1035,7 +1038,7 @@
 
 	/** 结算本次阅读：累计今日分钟数 + 回写书架最近阅读状态（onHide 先于 onUnload 触发，enterAt 置零防双计） */
 	function recordReadingSession() : void {
-		if (bookId.value.length == 0) {
+		if (bookId.value <= 0) {
 			return
 		}
 		if (enterAt > 0) {
@@ -1319,8 +1322,8 @@
 	/** ===== 书签（真源在 ReaderControl 组件：增删/持久化内聚；页面维护内存镜像供当前页旗帜渲染） ===== */
 	const bookmarks = ref<Bookmark[]>([])
 
-	/** 读取本地书签镜像 */
-	{
+	/** 读取书签镜像（打开书籍云端落缓存后经 reloadNotesMirror 刷新） */
+	function reloadBookmarkMirror() : void {
 		bookmarks.value = loadBookmarks()
 	}
 
@@ -1379,6 +1382,10 @@
 		// 段长按渲染章取：跨章预渲染层（上/下一页层）与滚动模式多章下 origin 属于 renderCid 章
 		const full : number[] = [0, paragraphsOf(renderCid)[origin].text.length - 1]
 		if (fromCid == toCid && fromOrigin == toOrigin) {
+			// 同章同段：必须先校验渲染章（否则每章同序号段落都会命中，跨章串染划线）
+			if (renderCid != fromCid) {
+				return [] as number[]
+			}
 			return origin == fromOrigin ? [fromStart, toEnd] : ([] as number[])
 		}
 		if (renderCid == fromCid && renderCid == toCid) {
@@ -1409,16 +1416,21 @@
 		return [] as number[]
 	}
 
-	/** 恢复本地划线与想法（页面内存副本；气泡组件写入后经 onPopoverSync 重读刷新） */
-	{
+	/** 恢复划线与想法镜像（打开书籍云端落缓存后经 reloadNotesMirror 刷新；气泡组件写入后经 onPopoverSync 重读刷新） */
+	function reloadUnderlineThoughtMirror() : void {
 		underlineStore.value = loadUnderlines()
 		thoughts.value = loadThoughts()
 	}
 
+	/** 云端笔记落缓存后的统一镜像刷新（划线/想法/书签；书签面板经 bookId prop 变化自行重载） */
+	function reloadNotesMirror() : void {
+		reloadUnderlineThoughtMirror()
+		reloadBookmarkMirror()
+	}
+
 	/** 气泡组件划线/想法写入通知：重读本地存储刷新正文划线渲染与目录抽屉卡片 */
 	function onPopoverSync() : void {
-		underlineStore.value = loadUnderlines()
-		thoughts.value = loadThoughts()
+		reloadUnderlineThoughtMirror()
 	}
 
 	/** 当前页是否已有书签 */
@@ -1905,8 +1917,8 @@
 		}
 	}
 
-	/** 恢复上次阅读进度（进度按 bookId 隔离存储，无书名串用问题；章节/页码/滚动位置）。在 loadBookContent 注入数据后调用：窗口页序依赖流高实测（未实测前按估算钳制） */
-	function restoreProgress(bid : string) : void {
+	/** 恢复上次阅读进度（进度随书籍记录存储，云端为准经缓存读取；章节/页码/滚动位置）。在 loadBookContent 注入数据后调用：窗口页序依赖流高实测（未实测前按估算钳制） */
+	function restoreProgress(bid : number) : void {
 		const p = loadBookProgress(bid)
 		if (p == null) {
 			return
@@ -1926,15 +1938,74 @@
 	/** ===== 打开本地书籍（书架点击传入 bookId） ===== */
 	onLoad((options : OnLoadOptions) : void => {
 		const bid = options['bookId']
-		if (bid == null || bid.length == 0) {
+		const bidNum = bid != null ? parseInt(bid) : 0
+		if (bidNum <= 0 || isNaN(bidNum)) {
 			showToast('书籍不存在')
 			return
 		}
-		openLocalBook(bid)
+		openLocalBook(bidNum)
 	})
 
-	/** 读取本地书籍文件并解析注入；失败（书被删/文件被清理）提示后返回书架 */
-	async function openLocalBook(bid : string) : Promise<void> {
+	/**
+	 * 云端笔记拉取并落当前书籍缓存（划线/想法/书签；云端为准覆盖本地缓存）。
+	 * 失败静默保留本地缓存（离线容错），镜像刷新仍执行保证视图一致
+	 */
+	async function syncNotesFromCloud(bid : number) : Promise<void> {
+		// 未登录：不发请求，划线/想法/书签走本地缓存（书架已拦截无正文书，此处防御）
+		if (!hasAccessToken()) {
+			return
+		}
+		try {
+			const notesRes = await fetchBookNotes(bid)
+			if (notesRes.code == 0 && notesRes.data != null) {
+				const underlines : UnderlineEntry[] = []
+				const rawU = notesRes.data!.getArray('underlines')
+				if (rawU != null) {
+					rawU.forEach((el) => {
+						const e = underlineFromCloud(el as UTSJSONObject)
+						if (e != null) {
+							underlines.push(e)
+						}
+					})
+				}
+				const thoughtsList : Thought[] = []
+				const rawT = notesRes.data!.getArray('thoughts')
+				if (rawT != null) {
+					rawT.forEach((el) => {
+						const t = thoughtFromCloud(el as UTSJSONObject)
+						if (t != null) {
+							thoughtsList.push(t)
+						}
+					})
+				}
+				storeUnderlines(underlines)
+				storeThoughts(thoughtsList)
+			}
+		} catch (e) {
+			console.warn('云端笔记拉取失败，使用本地缓存', e)
+		}
+		try {
+			const bmRes = await fetchBookBookmarks(bid)
+			if (bmRes.code == 0 && bmRes.data != null) {
+				const bms : Bookmark[] = []
+				const rawB = bmRes.data!.getArray('list')
+				if (rawB != null) {
+					rawB.forEach((el) => {
+						const b = bookmarkFromCloud(el as UTSJSONObject)
+						if (b != null) {
+							bms.push(b)
+						}
+					})
+				}
+				storeBookmarks(bms)
+			}
+		} catch (e) {
+			console.warn('云端书签拉取失败，使用本地缓存', e)
+		}
+	}
+
+	/** 读取本地书籍文件并解析注入（云端笔记先行落缓存）；失败（书被删/文件被清理）提示后返回书架 */
+	async function openLocalBook(bid : number) : Promise<void> {
 		const book : LocalBook | null = findBook(bid)
 		if (book == null) {
 			showToast('书籍不存在或已删除')
@@ -1943,9 +2014,21 @@
 			}, 1200)
 			return
 		}
-		bookId.value = book.id
+		if (book.path.length == 0) {
+			showToast('本设备没有该书文件，请到书架重新导入')
+			setTimeout(() => {
+				uni.navigateBack()
+			}, 1200)
+			return
+		}
 		bookTitle.value = book.title
 		uni.showLoading({ title: '正在打开', mask: true })
+		// 锁定当前书籍后拉取云端笔记（划线/想法/书签云端为准），落缓存后刷新镜像；
+		// bookId 赋值置于落缓存之后：书签面板 watch 该 prop 重载，避免先重载读到旧缓存
+		setActiveBookId(book.id)
+		await syncNotesFromCloud(book.id)
+		reloadNotesMirror()
+		bookId.value = book.id
 		// 先让 loading 完成渲染，再进入同步的文件读取与章节解析（大文件解析耗时，主线程会短暂阻塞）
 		await new Promise<void>((resolve) => {
 			setTimeout(resolve, 60)

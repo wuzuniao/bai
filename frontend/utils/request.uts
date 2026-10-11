@@ -7,7 +7,7 @@
  * - 401 静默刷新重试：本地存在 refreshToken 时先直连认证服务续期并重试一次，
  *   仍失败才清态跳登录（并发 401 共享同一次刷新请求）
  */
-import { AUTH_BASE_URL, AUTH_CLIENT_ID } from './config'
+import { AUTH_BASE_URL, AUTH_CLIENT_ID, API_BASE_URL } from './config'
 import { syncAuthCookie, clearAuthCookie, SyncAuthCookieOptions } from './authCookie'
 
 /** 统一响应结构（code 非 0 表示业务错误，msg 面向用户） */
@@ -29,6 +29,10 @@ export type RequestOptions = {
 	auth: boolean
 	/** 超时毫秒数 */
 	timeout: number
+	/** 基础地址（缺省=auth 认证服务；业务后端传 API_BASE_URL） */
+	baseUrl?: string
+	/** 静默模式：401 时不跳转登录页（未登录属常态的业务接口用，由调用方容错） */
+	silent?: boolean
 	/** 收到 401 时不再触发静默刷新（防递归，重试请求置 true） */
 	skipAuthRefresh?: boolean
 }
@@ -146,6 +150,11 @@ function getAccessToken() : string {
 	return v == null ? '' : v as string
 }
 
+/** 本地是否存在登录令牌（未登录判断收口：云端调用点据此跳过请求，走本地默认/缓存） */
+export function hasAccessToken() : boolean {
+	return getAccessToken().length > 0
+}
+
 /** 读取本地 refresh_token（认证服务签发，轮换制） */
 function getRefreshToken() : string {
 	const v = uni.getStorageSync('refreshToken')
@@ -154,19 +163,25 @@ function getRefreshToken() : string {
 
 /**
  * 从错误响应中提取面向用户的文案
- * 兼容 auth 服务（FastAPI）的 { detail: string } 结构与业务 { msg: string } 结构
+ * 兼容 auth 服务（FastAPI）的 { detail: string } 结构与业务 { msg: string } 结构；
+ * 网关/服务异常可能返回纯文本（如 "Internal Server Error"），res.data 非 JSON
+ * 对象时 getString 会抛错，统一 try/catch 回退默认文案
  */
 function parseErrMsg(raw: UTSJSONObject | null, fallback: string) : string {
 	if (raw == null) {
 		return fallback
 	}
-	const detail = raw.getString('detail')
-	if (detail != null) {
-		return detail
-	}
-	const msg = raw.getString('msg')
-	if (msg != null) {
-		return msg
+	try {
+		const detail = raw.getString('detail')
+		if (detail != null) {
+			return detail
+		}
+		const msg = raw.getString('msg')
+		if (msg != null) {
+			return msg
+		}
+	} catch (e) {
+		// 非 JSON 响应体（纯文本/二进制）：回退默认文案
 	}
 	return fallback
 }
@@ -179,12 +194,19 @@ export function request(options: RequestOptions) : Promise<ApiResponse> {
 		header['Content-Type'] = 'application/json'
 		if (options.auth) {
 			const token = getAccessToken()
+			if (token.length == 0 && options.silent == true) {
+				// 未登录 + 静默请求（书架业务接口）：本地直接拒绝，不发无效网络请求、
+				// 不触发 401 跳登录，由调用方容错走本地缓存/默认样式
+				reject(new Error('未登录'))
+				return
+			}
+			// 用户模块既有行为维持不变：无令牌照常发请求，服务端 401 → 统一跳登录
 			if (token.length > 0) {
 				header['Authorization'] = 'Bearer ' + token
 			}
 		}
 		uni.request<UTSJSONObject>({
-			url: AUTH_BASE_URL + options.url,
+			url: (options.baseUrl != null && (options.baseUrl as string).length > 0 ? options.baseUrl as string : AUTH_BASE_URL) + options.url,
 			method: options.method,
 			data: options.data,
 			header: header,
@@ -201,6 +223,8 @@ export function request(options: RequestOptions) : Promise<ApiResponse> {
 								data: options.data,
 								auth: options.auth,
 								timeout: options.timeout,
+								baseUrl: options.baseUrl,
+								silent: options.silent,
 								skipAuthRefresh: true
 							}
 							request(retryOptions).then((retryRes: ApiResponse) => {
@@ -209,13 +233,17 @@ export function request(options: RequestOptions) : Promise<ApiResponse> {
 								reject(retryErr)
 							})
 						}, (_e: Error) => {
-							// 刷新失败（refresh_token 已失效/被撤销）：清态跳登录
-							handleUnauthorized()
+							// 刷新失败（refresh_token 已失效/被撤销）：非静默请求清态跳登录
+							if (options.silent != true) {
+								handleUnauthorized()
+							}
 							reject(new Error('登录已过期，请重新登录'))
 						})
 						return
 					}
-					handleUnauthorized()
+					if (options.silent != true) {
+						handleUnauthorized()
+					}
 					reject(new Error('登录已过期，请重新登录'))
 					return
 				}
