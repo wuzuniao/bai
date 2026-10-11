@@ -19,6 +19,8 @@ export type ParsedChapter = {
 	contentTitle: string
 	/** 章内段落（非空行） */
 	paragraphs: string[]
+	/** 序章标记（第一章前的前置内容生成；打开时仅对导入时标记 hasPreface 的书保留，保证旧书章 id 与存量进度对齐） */
+	preface: boolean
 }
 
 /** 标题行拆分结果（raw=原始行，label=编号前缀，contentTitle=编号后标题） */
@@ -144,7 +146,7 @@ export function parseChapters(text : string, bookTitle : string) : ParsedChapter
 	const result : ParsedChapter[] = []
 	if (startIdx.length == 0) {
 		// 无章节标题：全书单章
-		result.push({ title: bookTitle, label: '', contentTitle: bookTitle, paragraphs: collectParagraphs(lines, 0, lines.length) } as ParsedChapter)
+		result.push({ title: bookTitle, label: '', contentTitle: bookTitle, preface: false, paragraphs: collectParagraphs(lines, 0, lines.length) } as ParsedChapter)
 		return result
 	}
 	for (let k = 0; k < startIdx.length; k++) {
@@ -161,11 +163,19 @@ export function parseChapters(text : string, bookTitle : string) : ParsedChapter
 		if (!hasBody) {
 			continue
 		}
-		result.push({ title: starts[k].raw, label: starts[k].label, contentTitle: starts[k].contentTitle, paragraphs: collectParagraphs(lines, from, to) } as ParsedChapter)
+		result.push({ title: starts[k].raw, label: starts[k].label, contentTitle: starts[k].contentTitle, preface: false, paragraphs: collectParagraphs(lines, from, to) } as ParsedChapter)
 	}
 	if (result.length == 0) {
 		// 全部候选均为目录块：按单章兜底
-		result.push({ title: bookTitle, label: '', contentTitle: bookTitle, paragraphs: collectParagraphs(lines, 0, lines.length) } as ParsedChapter)
+		result.push({ title: bookTitle, label: '', contentTitle: bookTitle, preface: false, paragraphs: collectParagraphs(lines, 0, lines.length) } as ParsedChapter)
+		return result
+	}
+	// 第一章前的前置内容（书名/作者/简介等）：生成「序」章置于第一章前，进入书籍默认从文件最开始阅读
+	if (startIdx[0] > 0) {
+		const prefaceParas = collectParagraphs(lines, 0, startIdx[0])
+		if (prefaceParas.length > 0) {
+			result.unshift({ title: '序', label: '序', contentTitle: '序', preface: true, paragraphs: prefaceParas } as ParsedChapter)
+		}
 	}
 	return result
 }
@@ -246,6 +256,7 @@ export async function importBook(fileName : string, tempPath : string, size : nu
 	const bodyPath = dir + '/' + id + '.' + ext
 	await copyToSandbox(tempPath, bodyPath)
 	let chapterCount = 0
+	let hasPreface = false
 	if (ext == 'txt') {
 		// txt：读文本（含编码识别）解析章节
 		let text = ''
@@ -255,7 +266,10 @@ export async function importBook(fileName : string, tempPath : string, size : nu
 			discardFile(bodyPath)
 			throw e
 		}
-		chapterCount = parseChapters(text, titleFromFileName(fileName)).length
+		const parsed = parseChapters(text, titleFromFileName(fileName))
+		chapterCount = parsed.length
+		// 序章存在性导入时固化：打开时据此决定保留序章（新书）或剔除（旧书，保证章 id 与存量进度对齐）
+		hasPreface = parsed.length > 0 && parsed[0].preface
 	} else {
 		// PDF：原文件保留，仅取页数用于书架展示（首次阅读时按页渲染为图片缓存）
 		// #ifdef APP
@@ -285,7 +299,8 @@ export async function importBook(fileName : string, tempPath : string, size : nu
 		lastReadAt: 0,
 		lastChapter: -1,
 		lastPercent: 0,
-		chapterCount: chapterCount
+		chapterCount: chapterCount,
+		hasPreface: hasPreface
 	} as LocalBook
 	const list = loadBooks()
 	list.push(book)

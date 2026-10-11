@@ -247,12 +247,26 @@
 		<!-- 全局信息提示（组件化：文案/显隐/自动消失计时内聚 ReaderToast） -->
 		<ReaderToast ref="toastRef" :night="nightMode" />
 
+		<!-- 模式切换定位遮罩（翻页 → 滚动：阅读底色全屏盖住「章首渲染 → 锚点定位」中间跳变，定位确认或超时后收起；低于控制面板层级不挡设置操作） -->
+		<view v-if="switchMask" class="switch-mask" :style="'background-color:' + readerBg"></view>
+
 		<!-- 每行字数标定节点（屏幕外不可见：与正文同款式渲染约 20 行文字，实测高度反推实际每行字数） -->
 		<view class="calib-box" :style="'left:-9999px;top:0;width:' + calibWidth + 'px'">
 			<text class="calib-text" :style="'font-size:' + fontSize + 'px;font-family:' + fontFamily">{{ calibText }}</text>
 		</view>
 		<!-- 离屏排版测量区（透明、屏外、即测即卸）：整章段落与被切断段落前缀探针按正文同参渲染，实测行数/末行字符驱动分页 -->
 		<view class="measure-box" :style="'left:-9999px;top:0;width:' + calibWidth + 'px'">
+			<!-- 章头探针：与页内章节头同 class 同宽渲染（下边距在实测值中按常量补，见 measureChapterHeader），实测块高驱动章首页预算 -->
+			<view v-for="hcid in measureHeaders" :key="'mh' + hcid" :class="'measure-header-' + hcid">
+				<view class="chapter-header" style="margin-bottom:0">
+					<view class="chapter-label-row">
+						<view class="chapter-label-dot"></view>
+						<text class="chapter-label">{{ chapterAt(hcid).label }}</text>
+					</view>
+					<text class="chapter-title">{{ chapterAt(hcid).contentTitle }}</text>
+					<view class="chapter-divider"></view>
+				</view>
+			</view>
 			<view v-for="mcid in measureParas" :key="'mc' + mcid">
 				<view
 					v-for="(mp, mpi) in paragraphsOf(mcid)"
@@ -279,7 +293,7 @@
 	import { READER_THEME_LIGHT, READER_THEME_NIGHT, READER_THEME_PAPER } from '@/utils/theme.uts'
 	import { useUserStore, avatarPathOf } from '@/stores/user.uts'
 	import { LocalBook, BookProgress, findBook, loadBookProgress, saveBookProgress, updateBookReading, addTodayMinutes } from '@/utils/books.uts'
-	import { parseChapters, readTextFile } from '@/utils/bookparse.uts'
+	import { parseChapters, readTextFile, ParsedChapter } from '@/utils/bookparse.uts'
 	import { Chapter, Paragraph, Bookmark, Thought, UnderlineEntry, NoteRecord, ShareQuoteCtx, SelSpan, SpanSeg, TextMetrics, ParaRect, ReaderSettings, FONT_OPTIONS, fontOptionOf, loadUnderlines, loadThoughts, findUnderlineEntry, loadBookmarks, loadSettings, normalizeSpan, buildNoteRecords, buildShareQuoteCtx } from '@/utils/readerTypes.uts'
 	import { PageSlice, computePageBreaks, computePageBreaksMeasured, computePageBreaksExact, ParaLineLayout } from '@/utils/pagination.uts'
 	// #ifdef APP-ANDROID
@@ -394,6 +408,10 @@
 	let staticLayoutAlpha = 1.7
 	/** 待实测整章渲染的章 id（驱动离屏测量节点，测完即卸载） */
 	const measureParas = ref<number[]>([])
+	/** 待实测章头渲染的章 id（驱动离屏章头探针，测完即卸载） */
+	const measureHeaders = ref<number[]>([])
+	/** 章头占位高缓存（章 id → px：实测块高+固定下边距；标题样式固定不随读者字号/字体变化，全会话有效） */
+	const chapterHeadHCache = ref<Map<number, number>>(new Map())
 	/** 末行字符探测项：渲染段落前缀 [0, chars)（含全角缩进，与正文首切片同参），按实测行数反推末行 */
 	type LayoutProbe = {
 		cid : number
@@ -494,7 +512,8 @@
 		return measureChain
 	}
 
-	/** 依序测量多章（运行时再次校验缓存与版本号，避免重复/过期测量；APP-ANDROID 走引擎直读，其余端走 DOM 探测） */
+	/** 依序测量多章（运行时再次校验缓存与版本号，避免重复/过期测量；APP-ANDROID 走引擎直读，其余端走 DOM 探测。
+	 *  章头占位测量在各路径内部并行：DOM 路径并入整章挂载批次（见 measureChapterLines），APP 引擎路径直读后 resolve 前补测（见 measureChapterAuto） */
 	function runMeasureChapters(ids : number[], epoch : number) : Promise<void> {
 		let p : Promise<void> = Promise.resolve()
 		for (let i = 0; i < ids.length; i++) {
@@ -527,6 +546,57 @@
 		}
 	}
 
+	/** 章头占位高实测：离屏渲染与页内同参章头（label 行+大标题+分隔条，同 class 同宽），实测块高+固定下边距（108rpx）。
+	 *  长章节名折行使章头高度随标题行数增长，固定 294rpx 估算会致章首页预算超支、正文末行溢出内容区；
+	 *  标题样式固定（不随读者字号/字体变化），实测值全会话有效。测量失败保持无数据，回退常量估算 */
+	function measureChapterHeader(cid : number, epoch : number) : Promise<void> {
+		return new Promise<void>((resolve) => {
+			if (epoch != layoutEpoch || chapterHeadHCache.value.get(cid) != null) {
+				resolve()
+				return
+			}
+			measureHeaders.value = [cid]
+			measureHeaderAttempt(cid, epoch, 0, resolve)
+		})
+	}
+
+	/** 章头测量尝试：离屏渲染就绪时机不定（setData 异步），节点缺失时 30ms 轮询重查至多 9 次（总预算约 270ms，快设备首次即中） */
+	function measureHeaderAttempt(cid : number, epoch : number, attempt : number, resolve : () => void) : void {
+		setTimeout(() => {
+			if (epoch != layoutEpoch) {
+				measureHeaders.value = [] as number[]
+				resolve()
+				return
+			}
+			uni.createSelectorQuery().selectAll('.measure-header-' + cid).boundingClientRect((rects : NodeInfo[]) : void => {
+				if (epoch != layoutEpoch) {
+					measureHeaders.value = [] as number[]
+					resolve()
+					return
+				}
+				if (rects != null && rects.length == 1 && rects[0].height > 0) {
+					// 写时复制落缓存（触发分页重算），卸载探针节点
+					const next : Map<number, number> = new Map()
+					chapterHeadHCache.value.forEach((v : number, k : number) => {
+						next.set(k, v)
+					})
+					next.set(cid, rects[0].height + uni.upx2px(108))
+					chapterHeadHCache.value = next
+					measureHeaders.value = [] as number[]
+					resolve()
+					return
+				}
+				if (attempt < 8) {
+					measureHeaderAttempt(cid, epoch, attempt + 1, resolve)
+					return
+				}
+				// 测量失败：卸载节点并保持无数据，该章章头回退常量估算
+				measureHeaders.value = [] as number[]
+				resolve()
+			}).exec()
+		}, 30)
+	}
+
 	// #ifdef APP-ANDROID
 	/** APP 端测量：StaticLayout 引擎直读断行（引擎级精确，无 DOM 探测）。会话首章做一次同参一致性校验
 	 *  （离屏 DOM 块高 vs 预测行数的行高比例 α 一致性），通过后本会话后续章免 DOM 校验；校验失败回退 DOM 探测管线 */
@@ -547,9 +617,11 @@
 				return
 			}
 			if (staticLayoutMode == 1) {
-				// 已验证可信：免 DOM 校验，直接采用引擎断行
+				// 已验证可信：免 DOM 校验，直接采用引擎断行；章头占位独立实测（resolve 前落定，保证切换前章首页预算就绪）
 				storeLayout(cid, layout)
-				resolve()
+				measureChapterHeader(cid, epoch).then(() : void => {
+					resolve()
+				})
 				return
 			}
 			// 未校验：挂整章离屏节点做一次同参校验
@@ -597,7 +669,10 @@
 						staticLayoutMode = 1
 						staticLayoutAlpha = alpha
 						storeLayout(cid, layout)
-						resolve()
+						// 章头占位独立实测（resolve 前落定）
+						measureChapterHeader(cid, epoch).then(() : void => {
+							resolve()
+						})
 					} else {
 						staticLayoutMode = 2
 						measureChapterLines(cid, epoch).then(() => {
@@ -620,16 +695,30 @@
 	}
 	// #endif
 
-	/** 单章行数实测：挂载整章离屏渲染 → 批量查询段落块高度反推行数 → 卸载后转入末行探测 */
+	/** 单章行数实测：挂载整章离屏渲染（章头探针同批挂载、并行实测——共享一次 setData 与挂载等待，
+	 *  章头 30ms 轮询查询先于段落完成，末行探测打包前已落缓存）→ 批量查询段落块高度反推行数 → 卸载后转入末行探测；
+	 *  resolve 前等待章头落定（成功或放弃），保证切换前章首页预算就绪、无二次重排 */
 	function measureChapterLines(cid : number, epoch : number) : Promise<void> {
 		return new Promise<void>((resolve) => {
 			measuringCids.push(cid)
 			measureParas.value = [cid]
-			measureLinesAttempt(cid, epoch, 0, resolve)
+			let headerP : Promise<void> = Promise.resolve()
+			if (chapterHeadHCache.value.get(cid) == null) {
+				measureHeaders.value = [cid]
+				headerP = new Promise<void>((hr) => {
+					measureHeaderAttempt(cid, epoch, 0, hr)
+				})
+			}
+			measureLinesAttempt(cid, epoch, 0, () : void => {
+				headerP.then(() : void => {
+					resolve()
+				})
+			})
 		})
 	}
 
-	/** 行数测量尝试：离屏渲染就绪时机不定（setData 异步），节点数不符时重试，至多 3 次 */
+	/** 行数测量尝试：离屏渲染就绪时机不定（setData 异步），节点数不符时 40ms 轮询重查至多 9 次
+	 *  （总预算 360ms 与原 3×120ms 一致；快设备就绪即查询，不再空等整段固定延时） */
 	function measureLinesAttempt(cid : number, epoch : number, attempt : number, resolve : () => void) : void {
 		setTimeout(() => {
 			const paras = paragraphsOf(cid)
@@ -645,7 +734,7 @@
 					return
 				}
 				if (rects == null || rects.length != paras.length || rects.length == 0) {
-					if (attempt < 2) {
+					if (attempt < 8) {
 						measureLinesAttempt(cid, epoch, attempt + 1, resolve)
 					} else {
 						// 测量失败：卸载节点并保持无数据，该章分页回退字数估算
@@ -669,9 +758,9 @@
 				// 卸载整章节点，转入末行探测（探测节点更轻量）
 				measureParas.value = [] as number[]
 				probeTailChars(cid, epoch, new Map<number, TailSearch>(), new Map<number, number>(), 0, resolve)
-			}).exec()
-		}, 120)
-	}
+				}).exec()
+				}, 40)
+				}
 
 	/** 末行字符探测驱动：按当前数据打包，收集被切断且末行未知的段落；无则完成，否则生成前缀探针进入本轮实测 */
 	function probeTailChars(cid : number, epoch : number, search : Map<number, TailSearch>, found : Map<number, number>, round : number, resolve : () => void) : void {
@@ -686,7 +775,7 @@
 			texts.push(paras[i].text)
 		}
 		const tailArr = tailCharsOf(cid, paras)
-		const breaks = computePageBreaksMeasured(texts, lines, tailArr, pageH.value, fontSize.value, contentTopPx.value, contentBottomPx.value)
+		const breaks = computePageBreaksMeasured(texts, lines, tailArr, pageH.value, fontSize.value, contentTopPx.value, contentBottomPx.value, headerHeightOf(cid))
 		// 收集被切断且末行未知的段落（去重）；区间已收敛的直接落定
 		const probes : LayoutProbe[] = []
 		for (let pg = 0; pg < breaks.length; pg++) {
@@ -727,6 +816,13 @@
 			return
 		}
 		layoutProbes.value = probes
+		probeTailQuery(cid, probes, lines, search, found, epoch, round, resolve, 0)
+	}
+
+	/** 末行探测查询尝试：探针渲染就绪时机不定（setData 异步），节点数不符时 30ms 轮询重查至多 8 次。
+	 *  原固定 80ms 单查——慢渲染即整章放弃末行探测（全部回退均值估算）；
+	 *  轮询后快设备就绪即中（轮询间隔成本即查询耗时）、慢设备 240ms 预算耗尽才静默降级 */
+	function probeTailQuery(cid : number, probes : LayoutProbe[], lines : number[], search : Map<number, TailSearch>, found : Map<number, number>, epoch : number, round : number, resolve : () => void, attempt : number) : void {
 		setTimeout(() => {
 			if (epoch != layoutEpoch) {
 				layoutProbes.value = [] as LayoutProbe[]
@@ -734,14 +830,26 @@
 				return
 			}
 			uni.createSelectorQuery().selectAll('.measure-probe').boundingClientRect((rects : NodeInfo[]) : void => {
-				layoutProbes.value = [] as LayoutProbe[]
-				if (epoch != layoutEpoch || rects == null || rects.length != probes.length) {
+				if (epoch != layoutEpoch) {
+					layoutProbes.value = [] as LayoutProbe[]
 					resolve()
 					return
 				}
+				if (rects == null || rects.length != probes.length) {
+					if (attempt < 7) {
+						// 探针未就绪：保持挂载轮询重查
+						probeTailQuery(cid, probes, lines, search, found, epoch, round, resolve, attempt + 1)
+						return
+					}
+					// 查询耗尽：卸载探针放弃本轮（未收敛段落末行保持 0，分页内回退均值估算）
+					layoutProbes.value = [] as LayoutProbe[]
+					resolve()
+					return
+				}
+				layoutProbes.value = [] as LayoutProbe[]
 				applyProbeResults(cid, probes, rects, lines, search, found, epoch, round, resolve)
 			}).exec()
-		}, 80)
+		}, 30)
 	}
 
 	/** 探针结果判定：前缀行数 ≤ 行数-1 ⟺ 候选 rc ≥ 末行字符数，据此收缩各段区间；收敛即落定并进入下一轮 */
@@ -801,6 +909,12 @@
 		return chapterBreaks(currentChapterId.value)
 	})
 
+	/** 指定章章头占位高（px）：实测优先（探针块高+108rpx 下边距），未实测回退单行标题常量估算（294rpx） */
+	function headerHeightOf(cid : number) : number {
+		const h = chapterHeadHCache.value.get(cid)
+		return h != null && h > 0 ? h : uni.upx2px(294)
+	}
+
 	/** 指定章的分页结果（跨章预渲染取相邻章末页/首页用）：APP 端引擎断行就绪走逐行断点精确分页，
 	 *  其余实测行数就绪走实测分页（切断段末行未探测时回退段均估算）；均未就绪回退字数估算（perLine 标定口径） */
 	function chapterBreaks(cid : number) : PageSlice[][] {
@@ -812,13 +926,13 @@
 		const layout = paraLayoutCache.value.get(cid)
 		if (layout != null && layout.lines.length == paras.length) {
 			// APP 端引擎级断行（StaticLayout 条件编译）：切断位置即真实行边界
-			return computePageBreaksExact(texts, layout, pageH.value, fontSize.value, staticLayoutAlpha * fontSize.value, contentTopPx.value, contentBottomPx.value)
+			return computePageBreaksExact(texts, layout, pageH.value, fontSize.value, staticLayoutAlpha * fontSize.value, contentTopPx.value, contentBottomPx.value, headerHeightOf(cid))
 		}
 		const lines = measuredLinesOf(cid)
 		if (lines != null) {
-			return computePageBreaksMeasured(texts, lines, tailCharsOf(cid, paras), pageH.value, fontSize.value, contentTopPx.value, contentBottomPx.value)
+			return computePageBreaksMeasured(texts, lines, tailCharsOf(cid, paras), pageH.value, fontSize.value, contentTopPx.value, contentBottomPx.value, headerHeightOf(cid))
 		}
-		return computePageBreaks(texts, perLineEffective.value, pageH.value, fontSize.value, contentTopPx.value, contentBottomPx.value)
+		return computePageBreaks(texts, perLineEffective.value, pageH.value, fontSize.value, contentTopPx.value, contentBottomPx.value, headerHeightOf(cid))
 	}
 
 	/** 切片 → 渲染项（在指定章的段落上取文本切片；text 为切片文本） */
@@ -904,7 +1018,9 @@
 		if (selSpan.value != null) {
 			clearSelection()
 		}
-		if (menuVisible.value) {
+		// 设置面板展开期间不收控制项：字号/字体调整引起内容重排会触发程序性 @scroll（内容高度变化致滚动位置漂移），
+		// 属面板内操作而非用户滚动——收起会把设置面板连同控制面板一起带走，打断调节
+		if (menuVisible.value && !settingsOpen.value) {
 			menuVisible.value = false
 		}
 		footerRef.value?.notifyScroll()
@@ -987,8 +1103,27 @@
 	const flipOffset = ref(0)
 	const flipSettling = ref(false)
 
+	/** 切章瞬间侧层错峰：当前层优先渲染（三层同帧大文本 setData 拖慢首屏），侧层 50ms 后放行填充（空窗远小于翻页手势反应时间，预渲染不受影响） */
+	const sideLayersHeld = ref(false)
+	let sideLayersTimer = -1
+
+	/** 置起侧层延迟放行（切章时调用；侧层预渲染内容暂空，50ms 后恢复填充） */
+	function holdSideLayers() : void {
+		if (sideLayersTimer >= 0) {
+			clearTimeout(sideLayersTimer)
+		}
+		sideLayersHeld.value = true
+		sideLayersTimer = setTimeout(() : void => {
+			sideLayersTimer = -1
+			sideLayersHeld.value = false
+		}, 50)
+	}
+
 	/** 上一页渲染项（常驻预渲染：章内相邻页；章首跨上一章末页——按上一章分页取末页；第一章无上一页为空数组）——目标层视图常驻，跟手时零创建延迟，首次翻到新页无渲染空白 */
 	const prevPageItems = computed(() : PageItem[] => {
+		if (sideLayersHeld.value) {
+			return [] as PageItem[]
+		}
 		if (pageIndex.value > 0) {
 			return pageItemsAt(pageIndex.value - 1)
 		}
@@ -1021,6 +1156,9 @@
 
 	/** 下一页渲染项（常驻预渲染：章内相邻页；章尾跨下一章首页——按下一章分页取首页；末章无下一页为空数组） */
 	const nextPageItems = computed(() : PageItem[] => {
+		if (sideLayersHeld.value) {
+			return [] as PageItem[]
+		}
 		if (pageIndex.value < pageBreaks.value.length - 1) {
 			return pageItemsAt(pageIndex.value + 1)
 		}
@@ -1143,6 +1281,9 @@
 	const menuVisible = ref(false)
 	const settingsOpen = ref(false)
 	const drawerOpen = ref(false)
+
+	/** 模式切换定位遮罩（翻页 → 滚动：盖住「章首渲染 → 锚点定位」的中间跳变，定位确认或超时后收起） */
+	const switchMask = ref(false)
 
 	/** 顶部导航内容行（px）：与小程序胶囊同行对齐（同子页 BackButton 口径：状态栏高度起、行高 40px） */
 	const navTop = ref(44)
@@ -1391,11 +1532,34 @@
 				if (r.cid != currentChapterId.value) {
 					applyChapterSwitch(r.cid, false)
 				}
+				// 页=段落切片数组（{origin,from,to}）：定位覆盖记录字符位的切片所在页（跨页段落可精确到划线所在页）；
+				// 字符位未命中（分页回退估算漂移）时回退到记录段落所在首页
 				let targetPage = -1
 				for (let pi = 0; pi < pageBreaks.value.length; pi++) {
-					if (pageBreaks.value[pi].indexOf(r.origin) >= 0) {
-						targetPage = pi
+					const slices = pageBreaks.value[pi]
+					for (let si = 0; si < slices.length; si++) {
+						const s = slices[si]
+						if (s.origin == r.origin && s.from <= r.qStart && s.to >= r.qStart) {
+							targetPage = pi
+							break
+						}
+					}
+					if (targetPage >= 0) {
 						break
+					}
+				}
+				if (targetPage < 0) {
+					for (let pi = 0; pi < pageBreaks.value.length; pi++) {
+						const slices = pageBreaks.value[pi]
+						for (let si = 0; si < slices.length; si++) {
+							if (slices[si].origin == r.origin) {
+								targetPage = pi
+								break
+							}
+						}
+						if (targetPage >= 0) {
+							break
+						}
 					}
 				}
 				if (targetPage >= 0) {
@@ -1780,10 +1944,12 @@
 		try {
 			const text = await readTextFile(book.path)
 			const parsed = parseChapters(text, book.title)
-			const chs = parsed.map((c, i) : Chapter => {
+			// 旧书（导入时未标记序章）：剔除新解析生成的序章，章 id 与存量进度/划线/书签保持对齐
+			const chaptersParsed = book.hasPreface == true ? parsed : parsed.filter((c : ParsedChapter) : boolean => !c.preface)
+			const chs = chaptersParsed.map((c, i) : Chapter => {
 				return { id: i, title: c.title, label: c.label, contentTitle: c.contentTitle, active: false } as Chapter
 			})
-			loadBookContent(chs, parsed.map((c) : string[] => c.paragraphs))
+			loadBookContent(chs, chaptersParsed.map((c) : string[] => c.paragraphs))
 			restoreProgress(book.id)
 			if (pageTurn.value != '滚动') {
 				// 翻页模式：首屏页在 loading 遮罩内完成实测，展示即最终布局（邻章后台预取供跨章预渲染）
@@ -1993,7 +2159,13 @@
 		})
 	}
 
-	/** 应用切章（同步）：进入新章默认首页，回退上一章定位末页；滚动模式复位章节序列与滚动位置 */
+	/** 目录点击的抽屉延迟收起标志与目标章：抽屉收起对齐切章完成（selectChapterById 置位，此处消费；
+	 *  目标章匹配防止连点场景下前一章切换提前收起抽屉） */
+	let drawerClosePending = false
+	let drawerCloseTarget = -1
+
+	/** 应用切章（同步）：进入新章默认首页，回退上一章定位末页；滚动模式复位章节序列与滚动位置。
+	 *  侧层错峰填充 + 首帧渲染落地后收抽屉：切章首帧渲染过程被抽屉收起动画掩盖（见 holdSideLayers） */
 	function applyChapterSwitch(id : number, atLastPage : boolean) : void {
 		// 章界防御：书签/进度等存量索引可能指向未注入数据中不存在的章
 		if (id < 0 || id >= chapters.value.length) {
@@ -2008,6 +2180,14 @@
 		scrollIntoView.value = ''
 		clearSelection()
 		saveProgress()
+		holdSideLayers()
+		if (drawerClosePending && id == drawerCloseTarget) {
+			drawerClosePending = false
+			// 等首帧渲染落地后收起抽屉：抽屉与 0.32s 收起动画掩盖测量等待后的切换与渲染过程
+			setTimeout(() : void => {
+				drawerOpen.value = false
+			}, 50)
+		}
 	}
 
 	/** 点击正文空白（Stitch: 划线段点击已处理→跳过；想法查看卡片由其全屏遮罩自行拦截点击关闭；抽屉打开→收起；划词激活→清除；设置展开→收起；否则切换菜单显隐） */
@@ -2347,6 +2527,10 @@
 		const fontChanged = s.fontSize != fontSize.value
 		const familyChanged = s.fontKey != fontKey.value
 		const turnChanged = s.pageTurn != pageTurn.value
+		// 滚动 → 翻页：趁滚动 DOM 卸载前查询视口所在段落，换算目标章与页（结果异步应用，见 locatePageFromScrollPos）
+		if (turnChanged && s.pageTurn != '滚动') {
+			locatePageFromScrollPos()
+		}
 		fontSize.value = s.fontSize
 		if (fontChanged || familyChanged) {
 			// 排版参数变化：实测数据整体失效（分页先按估算渲染），随后重标定并重测当前章邻域、钳制页码、清除选区
@@ -2356,10 +2540,18 @@
 		}
 		pageTurn.value = s.pageTurn
 		if (turnChanged) {
-			// 切至滚动模式以当前章初始化章节序列；切入翻页模式确保当前章邻域实测（未测先按估算渲染，完成后静默换算）
+			// 翻页 → 滚动：以当前页首切片所在段落锚定定位（跨页续切片回退到段首，段落级精度），不回章首；
+			// 定位全程遮罩盖住「章首渲染 → 锚点跳位」中间态（见 settleScrollAnchor）；
+			// 切入翻页模式确保当前章邻域实测（未测先按估算渲染，完成后静默换算）
 			if (s.pageTurn == '滚动') {
 				scrollChapters.value = [currentChapterId.value]
 				scrollModeTop.value = 0
+				scrollIntoView.value = ''
+				const items = currentPageItems.value
+				if (items.length > 0) {
+					switchMask.value = true
+					settleScrollAnchor(currentChapterId.value, items[0].origin)
+				}
 			} else {
 				ensureChaptersMeasured([currentChapterId.value - 1, currentChapterId.value, currentChapterId.value + 1])
 			}
@@ -2369,6 +2561,169 @@
 		if (s.theme != themeKey.value) {
 			applyReaderTheme(s.theme)
 		}
+	}
+
+	/** 翻页 → 滚动的锚定落位：scroll-into-view 需在锚点 DOM 就绪后由空值变更才可靠触发，
+	 *  全程以纯色遮罩盖住「章首渲染 → 锚点跳位」的中间态；轮询锚点矩形确认滚至视口顶（滚动停滞则清空重设触发），
+	 *  超时兜底收遮罩（落章首，退化为原行为不循环遮罩） */
+	function settleScrollAnchor(cid : number, origin : number) : void {
+		const anchor = 'scroll-para-' + cid + '-' + origin
+		let settled = false
+		let attempts = 0
+		let lastTop = -999
+		const finish = () : void => {
+			if (settled) {
+				return
+			}
+			settled = true
+			switchMask.value = false
+		}
+		const verify = () : void => {
+			if (settled) {
+				return
+			}
+			attempts++
+			if (attempts > 26) {
+				finish()
+				return
+			}
+			uni.createSelectorQuery().select('#' + anchor).boundingClientRect((r : NodeInfo | null) : void => {
+				if (settled) {
+					return
+				}
+				if (r != null && Math.abs(r.top) <= 4) {
+					// 锚点已滚至视口顶：定位完成
+					finish()
+					return
+				}
+				const top = r != null ? r.top : -999
+				if (r == null || Math.abs(top - lastTop) < 1) {
+					// 锚点未就绪或滚动停滞：清空 → 重设（属性需真变化才触发定位）
+					scrollIntoView.value = ''
+					setTimeout(() : void => {
+						if (settled) {
+							return
+						}
+						scrollIntoView.value = anchor
+						lastTop = -999
+						verify()
+					}, 30)
+					return
+				}
+				// 滚动进行中：跟踪至落定
+				lastTop = top
+				setTimeout(verify, 30)
+			}).exec()
+		}
+		setTimeout(() : void => {
+			if (settled) {
+				return
+			}
+			scrollIntoView.value = anchor
+			verify()
+		}, 300)
+	}
+
+	/** 滚动 → 翻页的位置映射：趁滚动 DOM 卸载前批量查询段落锚点矩形，按 scrollChapters 渲染顺序拉平 (cid, origin) 与 rects 对齐，
+	 *  以正文区逻辑顶（contentTopPx，对齐翻页页首）所在段落及段内偏移行换算目标字符，再到目标章分页定位所在页；
+	 *  查询失败（渲染未就绪/空章）保持原状态。定位精度段落级：章未实测时按估算分页换算，实测完成后页边界轻微漂移可接受 */
+	function locatePageFromScrollPos() : void {
+		const cids = scrollChapters.value
+		if (cids.length == 0) {
+			return
+		}
+		let expected = 0
+		for (let i = 0; i < cids.length; i++) {
+			expected += paragraphsOf(cids[i]).length
+		}
+		if (expected == 0) {
+			return
+		}
+		uni.createSelectorQuery().selectAll('.para-scroll').boundingClientRect((rects : NodeInfo[]) : void => {
+			if (rects == null || rects.length != expected) {
+				return
+			}
+			const viewTop = contentTopPx.value
+			let hit = -1
+			for (let i = 0; i < rects.length; i++) {
+				if (rects[i].top <= viewTop && rects[i].bottom > viewTop) {
+					hit = i
+					break
+				}
+			}
+			if (hit < 0) {
+				// 视口参照点落在段间距/章头：取其上方最后一个段落
+				for (let i = rects.length - 1; i >= 0; i--) {
+					if (rects[i].bottom <= viewTop) {
+						hit = i
+						break
+					}
+				}
+			}
+			if (hit < 0) {
+				return
+			}
+			let cid = -1
+			let origin = -1
+			let acc = 0
+			for (let ci = 0; ci < cids.length; ci++) {
+				const len = paragraphsOf(cids[ci]).length
+				if (hit < acc + len) {
+					cid = cids[ci]
+					origin = hit - acc
+					break
+				}
+				acc += len
+			}
+			if (cid < 0) {
+				return
+			}
+			// 段内偏移行 → 段内目标字符（行容量近似，缩进 2 字误差可接受）
+			const lineH = fontSize.value * 1.7
+			const offsetRows = Math.max(0, Math.round((viewTop - rects[hit].top) / lineH))
+			applyScrollToPage(cid, origin, offsetRows * perLineEffective.value)
+		}).exec()
+	}
+
+	/** 位置映射应用：切换到视口所在章并定位包含目标字符的页（字符位未命中——估算漂移——回退记录段落所在首页） */
+	function applyScrollToPage(cid : number, origin : number, charTarget : number) : void {
+		if (cid < 0 || cid >= chapters.value.length) {
+			return
+		}
+		currentChapterId.value = cid
+		paragraphs.value = paragraphsOf(cid)
+		const breaks = chapterBreaks(cid)
+		let pi = -1
+		for (let p = 0; p < breaks.length; p++) {
+			const slices = breaks[p]
+			for (let si = 0; si < slices.length; si++) {
+				if (slices[si].origin == origin && slices[si].from <= charTarget && slices[si].to >= charTarget) {
+					pi = p
+					break
+				}
+			}
+			if (pi >= 0) {
+				break
+			}
+		}
+		if (pi < 0) {
+			for (let p = 0; p < breaks.length; p++) {
+				const slices = breaks[p]
+				for (let si = 0; si < slices.length; si++) {
+					if (slices[si].origin == origin) {
+						pi = p
+						break
+					}
+				}
+				if (pi >= 0) {
+					break
+				}
+			}
+		}
+		if (pi >= 0) {
+			pageIndex.value = pi
+		}
+		saveProgress()
 	}
 
 	/** 目录抽屉（Stitch: 遮罩渐显 + 抽屉顶部下滑 0.32s） */
@@ -2389,18 +2744,21 @@
 		drawerOpen.value = false
 	}
 
-	/** 章节点击（ReaderControl 目录卡片点击上行；高亮切换 + toast + 260ms 后收起抽屉） */
+	/** 章节点击（ReaderControl 目录卡片点击上行；不弹提示，抽屉收起对齐切章完成）。
+	 *  抽屉收起对齐切章完成而非固定延时：已测章立即切换、未测章等测量完成后（applyChapterSwitch）50ms 收起，
+	 *  测量等待与首帧渲染被抽屉及其 0.32s 收起动画掩盖，无裸露渲染过程 */
 	function selectChapterById(id: number) : void {
 		const isCurrent = id == currentChapterId.value
-		goToChapter(id, false)
 		if (isCurrent) {
-			showToast('当前正在阅读此章节')
-		} else {
-			showToast('已跳转至 ' + chapterAt(id).title)
+			setTimeout(() => {
+				drawerOpen.value = false
+			}, 260)
+			return
 		}
-		setTimeout(() => {
-			drawerOpen.value = false
-		}, 260)
+		// 先置位再切章：滚动模式 applyChapterSwitch 同步执行，后置位会错过消费（抽屉与控制面板不收）
+		drawerClosePending = true
+		drawerCloseTarget = id
+		goToChapter(id, false)
 	}
 
 	/** 听书悬浮球点击（ReaderControl 上行，功能占位） */
@@ -2629,6 +2987,17 @@
 		overflow: hidden;
 		background-color: rgba($bai-ink, 0.65);
 		z-index: 50;
+	}
+
+	/* 模式切换定位遮罩（翻页 → 滚动：阅读底色全屏，盖住章首渲染→锚点定位的中间跳变；
+	 * fixed 相对视口——uvue 框架注入 relative 使 absolute 相对 0×0 父级不可见；z-index 低于控制面板(30/40)不挡设置操作） */
+	.switch-mask {
+		position: fixed;
+		left: 0;
+		right: 0;
+		top: 0;
+		bottom: 0;
+		z-index: 25;
 	}
 
 	.bookmark-mask-row {

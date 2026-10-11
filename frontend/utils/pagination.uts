@@ -15,7 +15,7 @@ export type PageSlice = {
 }
 
 /** 分页结果：每页的段落切片数组 */
-export function computePageBreaks(paraTexts : string[], perLine : number, pageH : number, fontSize : number, topPx : number, bottomPx : number) : PageSlice[][] {
+export function computePageBreaks(paraTexts : string[], perLine : number, pageH : number, fontSize : number, topPx : number, bottomPx : number, headerH : number) : PageSlice[][] {
 	const pages : PageSlice[][] = []
 	let current : PageSlice[] = []
 	let usedH = 0
@@ -27,10 +27,9 @@ export function computePageBreaks(paraTexts : string[], perLine : number, pageH 
 	}
 	const lineH = fontSize * 1.7
 	const paraGap = uni.upx2px(40)
-	const headerH = uni.upx2px(294)
 	// 页面高度预算 = 可用高度（屏高-顶部起点-底部留白）；行数 ceil 取整已天然偏保守
 	const budget = Math.max(lineH, pageH - topPx - bottomPx)
-	// 章节头（标签行+大标题+分隔条+下边距，约 294rpx）仅占用章首页
+	// 章节头（标签行+大标题+分隔条+下边距，高度由调用方实测传入）仅占用章首页
 	let curBudget = Math.max(lineH, budget - headerH)
 	for (let i = 0; i < paraTexts.length; i++) {
 		const len = paraTexts[i].length
@@ -96,7 +95,7 @@ export function computePageBreaks(paraTexts : string[], perLine : number, pageH 
  * 容量由末行实测值精确反推（(len-末行+2)/(行数-1)，+2 为首行缩进占位），断页行渲染即满行；
  * 未探测段落回退整体均值估算。其余预算口径（行高/段距/章头）与 computePageBreaks 一致。
  */
-export function computePageBreaksMeasured(paraTexts : string[], paraLines : number[], paraTailChars : number[], pageH : number, fontSize : number, topPx : number, bottomPx : number) : PageSlice[][] {
+export function computePageBreaksMeasured(paraTexts : string[], paraLines : number[], paraTailChars : number[], pageH : number, fontSize : number, topPx : number, bottomPx : number, headerH : number) : PageSlice[][] {
 	const pages : PageSlice[][] = []
 	let current : PageSlice[] = []
 	let usedH = 0
@@ -108,7 +107,6 @@ export function computePageBreaksMeasured(paraTexts : string[], paraLines : numb
 	}
 	const lineH = fontSize * 1.7
 	const paraGap = uni.upx2px(40)
-	const headerH = uni.upx2px(294)
 	const budget = Math.max(lineH, pageH - topPx - bottomPx)
 	let curBudget = Math.max(lineH, budget - headerH)
 	for (let i = 0; i < paraTexts.length; i++) {
@@ -187,7 +185,7 @@ export type ParaLineLayout = {
  * lineHeight 为真实行盒高度（APP 端由同参校准得到；≤0 时回退 fontSize×1.7）。
  * 其余预算口径（行高/段距/章头）与 computePageBreaks 一致。
  */
-export function computePageBreaksExact(paraTexts : string[], layout : ParaLineLayout, pageH : number, fontSize : number, lineHeight : number, topPx : number, bottomPx : number) : PageSlice[][] {
+export function computePageBreaksExact(paraTexts : string[], layout : ParaLineLayout, pageH : number, fontSize : number, lineHeight : number, topPx : number, bottomPx : number, headerH : number) : PageSlice[][] {
 	const pages : PageSlice[][] = []
 	let current : PageSlice[] = []
 	let usedH = 0
@@ -199,7 +197,6 @@ export function computePageBreaksExact(paraTexts : string[], layout : ParaLineLa
 	}
 	const lineH = lineHeight > 0 ? lineHeight : fontSize * 1.7
 	const paraGap = uni.upx2px(40)
-	const headerH = uni.upx2px(294)
 	const budget = Math.max(lineH, pageH - topPx - bottomPx)
 	let curBudget = Math.max(lineH, budget - headerH)
 	for (let i = 0; i < paraTexts.length; i++) {

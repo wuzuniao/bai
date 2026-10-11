@@ -24,8 +24,10 @@ export type LocalBook = {
 	lastChapter: number
 	/** 最近阅读百分比（0-100，仅 PDF 书使用；txt 书恒为 0） */
 	lastPercent: number
-	/** 章节总数（txt=解析章节数；PDF=页数） */
+	/** 章节总数（txt=解析章节数，含序章；PDF=页数） */
 	chapterCount: number
+	/** 第一章前有前置内容并生成序章（导入时固化；旧书记录缺失视为无，打开时剔除序章保证章 id 与存量进度对齐） */
+	hasPreface: boolean
 }
 
 /** 阅读进度（按 bookId 隔离存储，避免多本书串用） */
@@ -75,7 +77,8 @@ function bookFromObject(obj : UTSJSONObject) : LocalBook | null {
 		lastReadAt: lastReadAt == null ? 0 : lastReadAt,
 		lastChapter: lastChapter == null ? -1 : lastChapter,
 		lastPercent: lastPercent == null ? 0 : lastPercent,
-		chapterCount: chapterCount == null ? 0 : chapterCount
+		chapterCount: chapterCount == null ? 0 : chapterCount,
+		hasPreface: obj.getBoolean('hasPreface') == true
 	} as LocalBook
 }
 
