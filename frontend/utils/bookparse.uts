@@ -1,7 +1,7 @@
 // 书籍导入管线：文件编码识别 → 章节解析 → 沙盒落盘入库
 // 端差异收口：文件选择由调用方（书架页）按端条件编译完成，本文件只处理已选中的本地文件
 
-import { applyRegisteredBook } from './books'
+import { applyRegisteredBook, nextPendingBookId, applyPendingImport } from './books'
 import { registerBook } from '../api/reading.uts'
 import { hasAccessToken } from './request.uts'
 // #ifdef MP-WEIXIN
@@ -488,19 +488,21 @@ function discardFile(path : string) : void {
 	}
 }
 
-/** 导入一本书：复制落盘解析 → 云端登记（后端分配 id，同名书复用）→ 以 id 命名入库；导入需登录（云端登记为必经步骤） */
+/** 导入一本书：复制落盘解析 → 登录态云端登记（后端分配 id，同名书复用）/ 未登录本地负数 id 落地（登录后同步云端）→ 以 id 命名入库 */
 export async function importBook(fileName : string, tempPath : string, size : number) : Promise<void> {
-	if (!hasAccessToken()) {
-		throw new Error('请先登录后再导入书籍')
-	}
 	const dot = fileName.lastIndexOf('.')
 	const ext = dot >= 0 ? fileName.substring(dot + 1).toLowerCase() : ''
 	if (ext != 'txt' && ext != 'pdf') {
 		throw new Error('暂不支持该格式，当前支持 TXT / PDF')
 	}
+	const bookTitle = titleFromFileName(fileName)
+	if (bookTitle.length > 200) {
+		// 与后端登记校验对齐：离线导入无服务端校验，超限会导致登录后同步永久失败
+		throw new Error('书名过长（超 200 字），请重命名文件后重试')
+	}
 	const dir = uni.env.USER_DATA_PATH + '/books'
 	await ensureBooksDir(dir)
-	// 先以临时名落盘（正文解析需真实文件），云端分配 id 后再改名；随机后缀防批量导入同毫秒自撞
+	// 先以临时名落盘（正文解析需真实文件），id 分配后再改名；随机后缀防批量导入同毫秒自撞
 	const workPath = dir + '/_import_' + Date.now().toString() + '_' + Math.floor(Math.random() * 100000).toString() + '.' + ext
 	await copyToSandbox(tempPath, workPath)
 	let chapterCount = 0
@@ -536,35 +538,53 @@ export async function importBook(fileName : string, tempPath : string, size : nu
 		throw new Error('当前端暂不支持 PDF 导入，请使用 APP 端')
 		// #endif
 	}
-	// 云端登记（同用户同名书复用已有 id，进度与笔记自动关联；失败即导入失败，云端为准）
-	let registered : UTSJSONObject | null = null
-	try {
-		const res = await registerBook(titleFromFileName(fileName), ext.toUpperCase(), size, chapterCount, hasPreface)
-		if (res.code == 0 && res.data != null) {
-			registered = res.data
+	// 章节数与后端登记校验对齐：离线导入无服务端校验，超限会导致登录后同步永久失败
+	if (chapterCount > 100000) {
+		discardFile(workPath)
+		throw new Error('章节过多，无法导入')
+	}
+	if (hasAccessToken()) {
+		// 云端登记（同用户同名书复用已有 id，进度与笔记自动关联；失败即导入失败，云端为准）
+		let registered : UTSJSONObject | null = null
+		try {
+			const res = await registerBook(bookTitle, ext.toUpperCase(), size, chapterCount, hasPreface)
+			if (res.code == 0 && res.data != null) {
+				registered = res.data
+			}
+		} catch (e) {
+			registered = null
 		}
-	} catch (e) {
-		registered = null
-	}
-	if (registered == null) {
-		discardFile(workPath)
-		throw new Error('云端登记失败，请检查网络后重试')
-	}
-	const bookId = registered!.getNumber('id') ?? 0
-	if (bookId <= 0) {
-		discardFile(workPath)
-		throw new Error('云端登记失败，请检查网络后重试')
-	}
-	// 以云端 id 命名正文文件；重导入换格式时清理旧格式残留
-	const bodyPath = dir + '/' + bookId + '.' + ext
-	if (bodyPath != workPath) {
+		let bookId = 0
+		if (registered != null) {
+			bookId = registered!.getNumber('id') ?? 0
+		}
+		if (bookId <= 0) {
+			discardFile(workPath)
+			throw new Error('云端登记失败，请检查网络后重试')
+		}
+		// 以云端 id 命名正文文件；重导入换格式时清理旧格式残留
+		const bodyPath = dir + '/' + bookId + '.' + ext
+		if (bodyPath != workPath) {
+			await copyToSandbox(workPath, bodyPath)
+			discardFile(workPath)
+		}
+		if (ext == 'txt') {
+			discardFile(dir + '/' + bookId + '.pdf')
+		} else {
+			discardFile(dir + '/' + bookId + '.txt')
+		}
+		applyRegisteredBook(registered!, bodyPath)
+	} else {
+		// 未登录离线导入：本地负数 id 命名正文，元数据仅存本地缓存（登录后书架进入时同步云端）
+		const pendingId = nextPendingBookId(bookTitle)
+		const bodyPath = dir + '/' + pendingId + '.' + ext
 		await copyToSandbox(workPath, bodyPath)
 		discardFile(workPath)
+		if (ext == 'txt') {
+			discardFile(dir + '/' + pendingId + '.pdf')
+		} else {
+			discardFile(dir + '/' + pendingId + '.txt')
+		}
+		applyPendingImport(bookTitle, ext.toUpperCase(), size, chapterCount, hasPreface, bodyPath)
 	}
-	if (ext == 'txt') {
-		discardFile(dir + '/' + bookId + '.pdf')
-	} else {
-		discardFile(dir + '/' + bookId + '.txt')
-	}
-	applyRegisteredBook(registered!, bodyPath)
 }

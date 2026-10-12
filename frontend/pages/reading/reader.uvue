@@ -179,8 +179,8 @@
 				ref="footerRef"
 				:scroll-mode="scrollMode"
 				:chapter-label="currentChapter.label"
-				:chapter-count="chapters.length"
-				:chapter-index="currentChapterId"
+				:chapter-count="footerChapterCount"
+				:chapter-index="footerChapterIndex"
 				:safe-bottom="safeAreaBottomPx"
 			/>
 			</view>
@@ -293,7 +293,7 @@
 <script setup lang="uts">
 	import { READER_THEME_LIGHT, READER_THEME_NIGHT, READER_THEME_PAPER } from '@/utils/theme.uts'
 	import { useUserStore, avatarPathOf } from '@/stores/user.uts'
-	import { LocalBook, BookProgress, findBook, loadBookProgress, saveBookProgress, updateBookReading, addTodayMinutes } from '@/utils/books.uts'
+	import { LocalBook, BookProgress, findBook, isBookDirty, loadBookProgress, saveBookProgress, updateBookReading, addTodayMinutes } from '@/utils/books.uts'
 	import { parseChapters, readTextFile, ParsedChapter } from '@/utils/bookparse.uts'
 	import { fetchBookNotes, fetchBookBookmarks } from '@/api/reading.uts'
 	import { hasAccessToken } from '@/utils/request.uts'
@@ -361,6 +361,15 @@
 	/** 当前章节信息（标签/标题/底部进度均由此派生） */
 	const currentChapter = computed(() : Chapter => {
 		return chapterAt(currentChapterId.value)
+	})
+
+	/** 底栏章数/章序换算：序章不计入总数与章序（有序书总数减一、正文章序=cid-1；序章 cid=0 计 0） */
+	const footerChapterCount = computed(() : number => {
+		return chapters.value.length - (bookHasPreface.value ? 1 : 0)
+	})
+
+	const footerChapterIndex = computed(() : number => {
+		return Math.max(0, currentChapterId.value - (bookHasPreface.value ? 1 : 0))
 	})
 
 	const chapterLabel = computed(() : string => {
@@ -981,6 +990,8 @@
 	/** 当前书籍（云端 id 用于进度/阅读状态回写与笔记拉取；title 用于顶栏与分享展示） */
 	const bookId = ref(0)
 	const bookTitle = ref('')
+	/** 序章存在性（导入时固化）：底栏章数/章序换算依据（序章不计入总数与章序） */
+	const bookHasPreface = ref(false)
 
 	/** 段落文本数组 → 段落对象数组（本地 txt 解析结果注入前的统一转换） */
 	function toParagraphs(texts : string[]) : Paragraph[] {
@@ -999,6 +1010,9 @@
 		scrollChapters.value = [0]
 		scrollModeTop.value = 0
 		scrollModePos.value = 0
+		// 进度锚点内存重置（restoreProgress 有旧进度时再覆盖）
+		anchorCid = 0
+		anchorOffset = 0
 		clampPageIndex()
 		// 不在此处 saveProgress：openLocalBook 随后调 restoreProgress 恢复旧进度，
 		// 先写会把重置值 {0,0} 覆盖存储中的真实进度，导致每次打开都回到第一章
@@ -1006,8 +1020,53 @@
 
 	/** ===== 阅读进度（章节/页码/滚动位置，按 bookId 隔离持久化） ===== */
 
+	/** 滚动模式进度锚点（视口顶所在章 id + 距该章顶偏移 px）：滚动停稳后防抖实测，保存进度用 */
+	let anchorCid = 0
+	let anchorOffset = 0
+	let anchorTimer = -1
+
+	/**
+	 * 滚动模式锚点实测（停止滚动 300ms 后防抖执行）：滚动位置的绝对 scrollTop 含已拼接前置章的累计高，
+	 * 而恢复时只渲染当前章（单章高度远小于绝对值，scroll-top 会被 clamp 到章尾），直接保存会导致恢复定位错乱；
+	 * 故实测「视口顶落在哪一章 + 距该章顶的偏移」，恢复时单章渲染按偏移定位即可精确回到原位（跨设备亦稳定）
+	 */
+	function scheduleAnchorCalc() : void {
+		if (!scrollMode.value || bookId.value == 0) {
+			return
+		}
+		if (anchorTimer >= 0) {
+			clearTimeout(anchorTimer)
+		}
+		anchorTimer = setTimeout(() : void => {
+			anchorTimer = -1
+			uni.createSelectorQuery().selectAll('.scroll-chapter').boundingClientRect((rects : NodeInfo[]) : void => {
+				if (rects == null || rects.length != scrollChapters.value.length) {
+					return
+				}
+				const viewTop = contentTopPx.value
+				let cid = scrollChapters.value[0]
+				let offset = 0
+				// 视口顶落在哪章 rect 内（含章头/章间 gap 时取上一章），偏移=视口顶-章顶
+				for (let i = rects.length - 1; i >= 0; i--) {
+					if (rects[i].top <= viewTop) {
+						cid = scrollChapters.value[i]
+						offset = Math.max(0, Math.round(viewTop - rects[i].top))
+						break
+					}
+				}
+				anchorCid = cid
+				anchorOffset = offset
+			}).exec()
+		}, 300)
+	}
+
 	function saveProgress() : void {
-		if (bookId.value <= 0) {
+		if (bookId.value == 0) {
+			return
+		}
+		// 滚动模式：存「视口顶所在章 + 章内偏移」锚点，恢复时单章渲染按偏移精确定位
+		if (scrollMode.value) {
+			saveBookProgress(bookId.value, { chapterId: anchorCid, pageIndex: 0, scrollTop: anchorOffset } as BookProgress)
 			return
 		}
 		const p = { chapterId: currentChapterId.value, pageIndex: pageIndex.value, scrollTop: scrollModePos.value } as BookProgress
@@ -1027,6 +1086,8 @@
 			menuVisible.value = false
 		}
 		footerRef.value?.notifyScroll()
+		// 滚动停稳后重算进度锚点（视口顶所在章 + 章内偏移）
+		scheduleAnchorCalc()
 	}
 
 	/** ===== 阅读时长结算（onShow 起算，onHide/onUnload 落库；书架统计卡展示） ===== */
@@ -1038,7 +1099,7 @@
 
 	/** 结算本次阅读：累计今日分钟数 + 回写书架最近阅读状态（onHide 先于 onUnload 触发，enterAt 置零防双计） */
 	function recordReadingSession() : void {
-		if (bookId.value <= 0) {
+		if (bookId.value == 0) {
 			return
 		}
 		if (enterAt > 0) {
@@ -1048,7 +1109,8 @@
 			}
 		}
 		enterAt = 0
-		updateBookReading(bookId.value, currentChapterId.value)
+		// 滚动模式按锚点章回写（currentChapterId 是滚动加载推进的「到达章」，非视口顶所在章）
+		updateBookReading(bookId.value, scrollMode.value ? anchorCid : currentChapterId.value)
 	}
 
 	onUnload(() => {
@@ -1088,6 +1150,51 @@
 		} else {
 			showToast('已经是第一章')
 		}
+	}
+
+	/** 滚动视口填充进行中标记（防重入：多处滚动序列重置后并发调用） */
+	let fillScrollRunning = false
+
+	/**
+	 * 滚动模式视口填充：已加载内容不足一屏时 scroll-view 无法滚动，scrolltolower 永不触发
+	 * （首章/短章进入场景，如仅一行的序），静默预拼接下一章直至撑满视口或全书到底。
+	 * 预拼接不改当前章、不写进度（非阅读行为，滚到底事件仍是推进当前章的唯一入口）
+	 */
+	function fillScrollViewport() : void {
+		if (!scrollMode.value || fillScrollRunning) {
+			return
+		}
+		fillScrollRunning = true
+		// 等首帧渲染落地后再测量（滚动序列刚重置时 DOM 尚未更新）
+		setTimeout(() => {
+			fillScrollStep()
+		}, 80)
+	}
+
+	/** 视口填充单步：测量内容高与视口高，不足一屏且有下一章则追加后重测 */
+	function fillScrollStep() : void {
+		const last = scrollChapters.value[scrollChapters.value.length - 1]
+		if (last >= chapters.value.length - 1) {
+			fillScrollRunning = false
+			return
+		}
+		uni.createSelectorQuery().select('.scroll-mode-inner').boundingClientRect((inner : NodeInfo | null) : void => {
+			if (inner == null) {
+				fillScrollRunning = false
+				return
+			}
+			uni.createSelectorQuery().select('.scroll-mode').boundingClientRect((view : NodeInfo | null) : void => {
+				if (view == null || inner.height > view.height + 4) {
+					// 节点未就绪或内容已撑满一屏：结束填充
+					fillScrollRunning = false
+					return
+				}
+				scrollChapters.value.push(last + 1)
+				setTimeout(() => {
+					fillScrollStep()
+				}, 50)
+			}).exec()
+		}).exec()
 	}
 
 	/** 指定章的段落渲染项（key 带章 id 防止多章同段落索引冲突；滚动模式整段渲染不切片，from=0/to=段尾） */
@@ -1500,11 +1607,27 @@
 		return fontOptionOf(fontKey.value).family
 	})
 
-	/** 跳转到书签所在章节页并关闭抽屉（ReaderControl 书签卡片点击上行；翻页模式先实测目标章再一次性按实测布局切换；滚动模式无页码语义，落到目标章顶部） */
+	/** 跳转到书签所在章节页并关闭抽屉（ReaderControl 书签卡片点击上行；翻页模式先实测目标章再一次性按实测布局切换；滚动模式把书签页码换算为段落锚点定位视区） */
 	function goToBookmark(bm : Bookmark) : void {
 		if (pageTurn.value == '滚动') {
 			applyChapterSwitch(bm.chapterId, false)
 			drawerOpen.value = false
+			// 书签页码是分页模式语义：换算为该书页首切片所在段落，按段落锚点定位滚动视区（换算失败保持章顶）
+			ensureChaptersMeasured([bm.chapterId]).then(() => {
+				const pages = chapterBreaks(bm.chapterId)
+				if (pages.length == 0) {
+					return
+				}
+				const pi = Math.min(Math.max(bm.pageIndex, 0), pages.length - 1)
+				if (pages[pi].length == 0) {
+					return
+				}
+				const origin = pages[pi][0].origin
+				// applyChapterSwitch 已重置滚动序列并清空锚点，延迟至重置渲染落地后设锚（同 goToUnderline 口径）
+				setTimeout(() => {
+					scrollIntoView.value = 'scroll-para-' + bm.chapterId + '-' + origin
+				}, 300)
+			})
 			return
 		}
 		ensureChaptersMeasured([bm.chapterId]).then(() => {
@@ -1526,6 +1649,10 @@
 				scrollModeTop.value = 0
 				scrollModePos.value = 0
 				currentChapterId.value = r.cid
+				anchorCid = r.cid
+				anchorOffset = 0
+				// 目标章内容不足一屏时预拼接下一章（否则 scrolltolower 永不触发）
+				fillScrollViewport()
 				const targetLate = 'scroll-para-' + r.cid + '-' + r.origin
 				setTimeout(() => {
 					scrollIntoView.value = targetLate
@@ -1932,6 +2059,9 @@
 			scrollChapters.value = [p.chapterId]
 			scrollModeTop.value = p.scrollTop > 0 ? p.scrollTop : 0
 			scrollModePos.value = scrollModeTop.value
+			// 进度锚点内存同步（未滚动前退出按恢复位置保存）
+			anchorCid = p.chapterId
+			anchorOffset = scrollModeTop.value
 		}
 	}
 
@@ -1939,7 +2069,8 @@
 	onLoad((options : OnLoadOptions) : void => {
 		const bid = options['bookId']
 		const bidNum = bid != null ? parseInt(bid) : 0
-		if (bidNum <= 0 || isNaN(bidNum)) {
+		// 0/非法为异常入参；负数 id 为离线导入待同步书籍，正常打开
+		if (bidNum == 0 || isNaN(bidNum)) {
 			showToast('书籍不存在')
 			return
 		}
@@ -1953,6 +2084,10 @@
 	async function syncNotesFromCloud(bid : number) : Promise<void> {
 		// 未登录：不发请求，划线/想法/书签走本地缓存（书架已拦截无正文书，此处防御）
 		if (!hasAccessToken()) {
+			return
+		}
+		// 复用云端行的离线书（dirty）：本地笔记尚未回补云端，先拉取会覆盖掉离线新增，跳过待书架回补完成后恢复
+		if (isBookDirty(bid)) {
 			return
 		}
 		try {
@@ -2022,6 +2157,7 @@
 			return
 		}
 		bookTitle.value = book.title
+		bookHasPreface.value = book.hasPreface
 		uni.showLoading({ title: '正在打开', mask: true })
 		// 锁定当前书籍后拉取云端笔记（划线/想法/书签云端为准），落缓存后刷新镜像；
 		// bookId 赋值置于落缓存之后：书签面板 watch 该 prop 重载，避免先重载读到旧缓存
@@ -2048,6 +2184,9 @@
 				const cid = currentChapterId.value
 				await ensureChaptersMeasured([cid - 1, cid, cid + 1])
 				clampPageIndex()
+			} else {
+				// 滚动模式：首章/恢复章内容不足一屏时预拼接下一章（否则 scrolltolower 永不触发）
+				fillScrollViewport()
 			}
 		} catch (e) {
 			showToast('书籍读取失败，文件可能已被清理')
@@ -2270,8 +2409,13 @@
 		scrollModeTop.value = atLastPage ? 999999 : 0
 		scrollModePos.value = scrollModeTop.value
 		scrollIntoView.value = ''
+		// 进度锚点内存同步（末页跳转用超大偏移，恢复时 clamp 到章尾）
+		anchorCid = id
+		anchorOffset = scrollModeTop.value
 		clearSelection()
 		saveProgress()
+		// 滚动模式：目标章内容不足一屏时预拼接下一章（否则 scrolltolower 永不触发）
+		fillScrollViewport()
 		holdSideLayers()
 		if (drawerClosePending && id == drawerCloseTarget) {
 			drawerClosePending = false
@@ -2648,11 +2792,15 @@
 				scrollChapters.value = [currentChapterId.value]
 				scrollModeTop.value = 0
 				scrollIntoView.value = ''
+				anchorCid = currentChapterId.value
+				anchorOffset = 0
 				const items = currentPageItems.value
 				if (items.length > 0) {
 					switchMask.value = true
 					settleScrollAnchor(currentChapterId.value, items[0].origin)
 				}
+				// 当前章内容不足一屏时预拼接下一章（否则 scrolltolower 永不触发）
+				fillScrollViewport()
 			} else {
 				ensureChaptersMeasured([currentChapterId.value - 1, currentChapterId.value, currentChapterId.value + 1])
 			}

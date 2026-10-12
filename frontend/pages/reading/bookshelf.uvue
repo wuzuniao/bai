@@ -104,6 +104,10 @@
 										<text class="cover-author">{{ book.author }}</text>
 									</view>
 								</view>
+								<!-- 云端角标（本设备无正文文件时展示：水印式低对比小字；plain 右下与格式水印对位（编辑模式避让勾选点隐藏）、photo 左上避让右上水印） -->
+								<view v-if="book.path.length == 0 && (shelfStyle !== 'plain' || !editMode)" class="cloud-badge" :class="shelfStyle === 'plain' ? 'cloud-badge-plain' : 'cloud-badge-photo'">
+									<text class="cloud-badge-text" :class="shelfStyle === 'plain' ? 'cloud-badge-text-plain' : 'cloud-badge-text-photo'">云端</text>
+								</view>
 								<!-- 编辑勾选点（封面右下角） -->
 								<view
 									v-if="editMode"
@@ -173,6 +177,28 @@
 			</view>
 		</view>
 
+		<!-- 删除确认弹窗（ex-modal-card：白卡 圆角 xl 提升阴影；勾选「同时删除云端数据」才一并删云端，仅所选含云端书籍且已登录时显示勾选行） -->
+		<view v-if="deleteConfirmOpen" class="delete-mask" @click="closeDeleteConfirm">
+			<view class="delete-card" @click.stop>
+				<text class="delete-title">删除 {{ selectedKeys.length }} 本书籍？</text>
+				<text class="delete-desc" :class="hasCloudSelected && deleteCloudToo ? 'delete-desc-warn' : ''">{{ deleteDescText }}</text>
+				<view v-if="hasCloudSelected" class="delete-cloud" @click="toggleDeleteCloud">
+					<view class="delete-checkbox" :class="deleteCloudToo ? 'delete-checkbox-on' : ''">
+						<text v-if="deleteCloudToo" class="delete-checkbox-icon">✓</text>
+					</view>
+					<text class="delete-cloud-text">同时删除云端数据</text>
+				</view>
+				<view class="delete-actions">
+					<view class="delete-cancel" @click="closeDeleteConfirm">
+						<text class="delete-cancel-text">取消</text>
+					</view>
+					<view class="delete-confirm" @click="confirmDelete">
+						<text class="delete-confirm-text">删除</text>
+					</view>
+				</view>
+			</view>
+		</view>
+
 		<BottomNavBar active="bookshelf" @change="closeMenus" />
 	</view>
 </template>
@@ -183,18 +209,34 @@
 	import { LocalBook, loadBooks, saveBooks, syncBookOrder, removeBookData, getTodayMinutes, fetchBooksFromCloud, fetchReadingStatsFromCloud, cleanupLegacyBooks } from '@/utils/books.uts'
 	import { saveBookshelfStyle } from '@/utils/readerTypes.uts'
 	import { importBook } from '@/utils/bookparse.uts'
+	import { hasAccessToken } from '@/utils/request.uts'
 
 	/** 书架书籍（云端元数据 + 本机正文缓存合并列表，顺序即云端手动排序结果；未导入时仅显示添加格） */
 	const books = ref<LocalBook[]>([])
+	/** 排序下拉选项与当前模式（置于 books 之后：排序视图 computed 依赖此声明） */
+	const sortOptions = ref<string[]>(['手动顺序', '最近阅读', '添加时间'])
+	const currentSort = ref('手动顺序')
 	/** 今日已读分钟数（阅读页结算，onShow 刷新） */
 	const todayMinutes = ref(0)
 	/** 书架卡片统一样式：plain 白卡 / photo 深灰卡 */
 	const shelfStyle = ref('plain')
 
+	/** 排序视图：手动顺序=云端拖拽排序原序；最近阅读/添加时间为倒序视图（最后添加/最近阅读的排第一行第一个；次序键相同保持原相对次序） */
+	const sortedBooks = computed<LocalBook[]>(() : LocalBook[] => {
+		const list = books.value
+		if (currentSort.value == '最近阅读') {
+			return list.slice().sort((a : LocalBook, b : LocalBook) : number => b.lastReadAt - a.lastReadAt)
+		}
+		if (currentSort.value == '添加时间') {
+			return list.slice().sort((a : LocalBook, b : LocalBook) : number => b.addedAt - a.addedAt)
+		}
+		return list
+	})
+
 	/** 网格分行（每行 3 本，仅真实书籍；添加格在模板中独立于数据渲染） */
 	const shelfRows = computed<LocalBook[][]>(() : LocalBook[][] => {
 		const rows : LocalBook[][] = []
-		const list = books.value
+		const list = sortedBooks.value
 		const n = list.length
 		for (let r = 0; r < Math.ceil(n / 3); r++) {
 			rows.push(list.slice(r * 3, Math.min(n, r * 3 + 3)))
@@ -243,7 +285,7 @@
 		saveBooks(books.value)
 	}
 
-	/** 书架卡片下方的进度文案（txt：未读 / 第 N 章 / 共 M 章；PDF：共 N 页 / 已读 X% · 共 N 页） */
+	/** 书架卡片下方的进度文案（txt：未读 / 第 N 章 / 序 / 共 M 章——序章不计入章号与总数；PDF：共 N 页 / 已读 X% · 共 N 页） */
 	function metaOf(book : LocalBook) : string {
 		if (book.format == 'PDF') {
 			if (book.lastReadAt > 0 && book.lastPercent > 0) {
@@ -251,10 +293,18 @@
 			}
 			return '共 ' + book.chapterCount + ' 页'
 		}
+		// 序章不计入章号与总数：有序书 cid=0 为序（展示「序」），正文号=cid、总数减一；无序书正文号=cid+1。
+		// chapterCount 存储含序（存量数据一致），仅展示层按 hasPreface 换算，向后兼容
+		const hasPref = book.hasPreface
+		const total = book.chapterCount - (hasPref ? 1 : 0)
 		if (book.lastReadAt <= 0 || book.lastChapter < 0) {
 			return '未读'
 		}
-		return '第 ' + (book.lastChapter + 1) + ' 章 / 共 ' + book.chapterCount + ' 章'
+		if (hasPref && book.lastChapter == 0) {
+			return '序 / 共 ' + total + ' 章'
+		}
+		const num = hasPref ? book.lastChapter : book.lastChapter + 1
+		return '第 ' + num + ' 章 / 共 ' + total + ' 章'
 	}
 
 	/** 切换书架卡片统一样式（缓存 + 云端偏好跟随） */
@@ -313,18 +363,68 @@
 		saveShelf()
 	}
 
-	/** 删除选中书籍（本机正文文件清理 + 云端书籍与笔记级联删除）并保存 */
+	/** 删除确认弹窗显隐与「同时删除云端数据」勾选（默认不勾选，仅删本地） */
+	const deleteConfirmOpen = ref(false)
+	const deleteCloudToo = ref(false)
+
+	/** 所选中是否含云端书籍（已登录且含 id>0）：确认框据此显示云端删除勾选行（离线导入负数 id 书无云端数据） */
+	const hasCloudSelected = computed(() : boolean => {
+		if (!hasAccessToken()) {
+			return false
+		}
+		for (let i = 0; i < books.value.length; i++) {
+			const b = books.value[i]
+			if (b.id > 0 && selectedKeys.value.indexOf(b.id) >= 0) {
+				return true
+			}
+		}
+		return false
+	})
+
+	/** 删除提示文案随「同时删除云端数据」勾选切换（所选无云端书籍时仅本设备口径） */
+	const deleteDescText = computed(() : string => {
+		if (hasCloudSelected.value && deleteCloudToo.value) {
+			return '将删除本设备的书籍文件与阅读数据，并同步删除云端书籍及其划线、想法与书签'
+		}
+		if (hasCloudSelected.value) {
+			return '仅删除本设备的书籍文件与阅读数据，云端数据不受影响'
+		}
+		return '仅删除本设备的书籍文件与阅读数据'
+	})
+
+	/** 删除按钮：弹出确认框（勾选「同时删除云端数据」才一并删云端） */
 	function deleteSelected() : void {
 		if (selectedKeys.value.length == 0) {
 			return
 		}
+		deleteCloudToo.value = false
+		deleteConfirmOpen.value = true
+	}
+
+	/** 关闭删除确认弹窗（遮罩/取消按钮共用） */
+	function closeDeleteConfirm() : void {
+		deleteConfirmOpen.value = false
+	}
+
+	/** 勾选切换「同时删除云端数据」 */
+	function toggleDeleteCloud() : void {
+		deleteCloudToo.value = !deleteCloudToo.value
+	}
+
+	/** 确认删除：本地清理必做；勾选且为云端书籍时一并删云端（笔记/书签后端级联）；不勾选仅删本地（云端保留，下次拉取回显） */
+	function confirmDelete() : void {
+		const ids = selectedKeys.value
+		deleteConfirmOpen.value = false
+		if (ids.length == 0) {
+			return
+		}
 		for (let i = 0; i < books.value.length; i++) {
 			const b = books.value[i]
-			if (selectedKeys.value.indexOf(b.id) >= 0) {
-				removeBookData(b)
+			if (ids.indexOf(b.id) >= 0) {
+				removeBookData(b, deleteCloudToo.value)
 			}
 		}
-		books.value = books.value.filter((b : LocalBook) : boolean => selectedKeys.value.indexOf(b.id) < 0)
+		books.value = books.value.filter((b : LocalBook) : boolean => ids.indexOf(b.id) < 0)
 		selectedKeys.value = []
 		saveShelf()
 	}
@@ -374,7 +474,8 @@
 	}
 
 	function onCardTouchStart(e : UniTouchEvent, gi : number) : void {
-		if (!editMode.value || dragIndex.value != -1 || e.touches.length == 0) {
+		// 仅手动顺序模式可拖拽调序（最近阅读/添加时间为视图排序，拖拽不改变其语义）
+		if (!editMode.value || currentSort.value != '手动顺序' || dragIndex.value != -1 || e.touches.length == 0) {
 			return
 		}
 		if (gi >= books.value.length) {
@@ -468,9 +569,7 @@
 		}
 	}
 
-	/** 排序下拉菜单（Stitch: 手动顺序/最近阅读/添加时间，默认手动顺序） */
-	const sortOptions = ref<string[]>(['手动顺序', '最近阅读', '添加时间'])
-	const currentSort = ref('手动顺序')
+	/** 排序/加号浮层菜单开关 */
 	const menuOpen = ref(false)
 	const plusMenuOpen = ref(false)
 
@@ -1043,6 +1142,37 @@
 		height: 48rpx;
 	}
 
+	/* 云端角标（本设备无正文：水印式低对比小字，与格式水印同族装饰语言；plain 右下与格式水印对位（编辑模式避让勾选点隐藏）、photo 左上避让右上水印） */
+	.cloud-badge {
+		position: absolute;
+		z-index: 3;
+	}
+
+	.cloud-badge-plain {
+		right: 27rpx;
+		bottom: 24rpx;
+	}
+
+	.cloud-badge-photo {
+		left: 27rpx;
+		top: 21rpx;
+	}
+
+	.cloud-badge-text {
+		font-size: 21rpx;
+		line-height: 27rpx;
+		font-weight: 600;
+		letter-spacing: 1rpx;
+	}
+
+	.cloud-badge-text-plain {
+		color: $bai-neutral;
+	}
+
+	.cloud-badge-text-photo {
+		color: rgba($bai-on-primary, 0.4);
+	}
+
 	/* 书名与阅读进度（Stitch: 书名 12px/700 与封面间距 8px；进度 10px/500 灰） */
 	.book-text {
 		margin-top: 15rpx;
@@ -1192,6 +1322,115 @@
 		font-size: 24rpx;
 		line-height: 38rpx;
 		font-weight: 900;
+		color: $bai-on-primary;
+	}
+
+	/* ===== 删除确认弹窗（ex-modal-card：白底 圆角 xl 提升阴影；遮罩半透明墨色） ===== */
+	.delete-mask {
+		position: fixed;
+		left: 0;
+		right: 0;
+		top: 0;
+		bottom: 0;
+		background-color: rgba($bai-ink, 0.4);
+		align-items: center;
+		justify-content: center;
+		z-index: 60;
+	}
+
+	.delete-card {
+		width: 560rpx;
+		box-sizing: border-box;
+		padding: 40rpx;
+		background-color: $bai-canvas;
+		border-radius: $bai-rounded-xl;
+		box-shadow: $bai-shadow-dropdown;
+	}
+
+	.delete-title {
+		font-size: 31rpx;
+		line-height: 44rpx;
+		font-weight: 900;
+		color: $bai-ink;
+	}
+
+	.delete-desc {
+		margin-top: 12rpx;
+		font-size: 23rpx;
+		line-height: 33rpx;
+		color: $bai-mute;
+	}
+
+	.delete-desc-warn {
+		color: $bai-negative;
+	}
+
+	.delete-cloud {
+		margin-top: 24rpx;
+		flex-direction: row;
+		align-items: center;
+	}
+
+	.delete-checkbox {
+		width: 35rpx;
+		height: 35rpx;
+		border-radius: $bai-rounded-sm;
+		border: 1px solid $bai-neutral;
+		background-color: $bai-canvas;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.delete-checkbox-on {
+		background-color: $bai-ink;
+		border-color: $bai-ink;
+	}
+
+	.delete-checkbox-icon {
+		font-size: 24rpx;
+		line-height: 38rpx;
+		font-weight: 900;
+		color: $bai-on-primary;
+	}
+
+	.delete-cloud-text {
+		margin-left: 15rpx;
+		font-size: 25rpx;
+		line-height: 35rpx;
+		font-weight: 500;
+		color: $bai-ink;
+	}
+
+	.delete-actions {
+		margin-top: 34rpx;
+		flex-direction: row;
+		justify-content: flex-end;
+	}
+
+	.delete-cancel {
+		padding: 12rpx 31rpx;
+		border-radius: $bai-rounded-pill;
+		border: 1px solid $bai-pale;
+	}
+
+	.delete-cancel-text {
+		font-size: 23rpx;
+		line-height: 23rpx;
+		font-weight: 600;
+		color: $bai-body;
+	}
+
+	.delete-confirm {
+		margin-left: 15rpx;
+		padding: 12rpx 31rpx;
+		border-radius: $bai-rounded-pill;
+		background-color: $bai-negative;
+	}
+
+	.delete-confirm-text {
+		font-size: 23rpx;
+		line-height: 23rpx;
+		font-weight: 600;
 		color: $bai-on-primary;
 	}
 </style>

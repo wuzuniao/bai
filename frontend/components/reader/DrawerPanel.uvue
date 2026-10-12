@@ -15,13 +15,14 @@
 				<text :class="drawerTab === 'bookmark' ? 'drawer-tab-title' : 'drawer-tab-plain'">书签</text>
 			</view>
 		</view>
-		<scroll-view class="drawer-list" direction="vertical" :show-scrollbar="false">
+		<scroll-view class="drawer-list" direction="vertical" :show-scrollbar="false" :scroll-into-view="catalogAnchor">
 			<!-- 目录页（当前阅读章节蓝色高亮由 activeChapterId 驱动；懒渲染：抽屉关闭时卸载，长篇数百章不常驻 DOM，打开时按 activeChapterId 重建） -->
 			<view v-if="open && drawerTab === 'catalog'">
 				<view
 					v-for="(ch, ci) in displayChapters"
 					:key="ch.id"
 					class="chapter-item"
+					:id="'catalog-ch-' + ch.id"
 					@click="onSelectChapter(ch)"
 				>
 					<text class="chapter-item-text" :class="ch.active ? 'chapter-item-text-active' : ''" :style="'color:' + (ch.active ? theme.activeBlue : theme.chapterTextColor)">{{ ch.title }}</text>
@@ -101,6 +102,17 @@
 	const drawerTab = ref('catalog')
 	const orderDesc = ref(false)
 
+	/** 目录定位锚点（scroll-into-view）：打开/切回目录页签时定位到当前阅读章 */
+	const catalogAnchor = ref('')
+
+	/** 定位到当前阅读章：先清空再延迟设值，确保懒渲染 DOM 就绪后 scroll-into-view 才可靠触发 */
+	function locateCatalogAnchor() : void {
+		catalogAnchor.value = ''
+		setTimeout(() : void => {
+			catalogAnchor.value = 'catalog-ch-' + props.activeChapterId
+		}, 300)
+	}
+
 	/** 目录正/倒序展示（Stitch: ⇅/↓↑ 切换；当前阅读章节蓝色高亮由 activeChapterId 驱动） */
 	const displayChapters = computed<Chapter[]>(() : Chapter[] => {
 		const marked = props.chapters.map((c : Chapter) : Chapter => {
@@ -112,23 +124,28 @@
 		return marked.slice().reverse()
 	})
 
-	/** 抽屉页签切换 */
+	/** 抽屉页签切换（切回目录页签时重新定位到当前阅读章） */
 	function switchDrawerTab(tab : string) : void {
 		drawerTab.value = tab
+		if (tab == 'catalog') {
+			locateCatalogAnchor()
+		}
 	}
 
-	/** 目录页签排序箭头：阻止冒泡（防触发父级页签切换）后切换正/倒序 */
+	/** 目录页签排序箭头：阻止冒泡（防触发父级页签切换）后切换正/倒序（重排后重新定位当前章） */
 	function onSortTap(e : UniPointerEvent) : void {
 		e.stopPropagation()
 		orderDesc.value = !orderDesc.value
 		emit('toast', orderDesc.value ? '已切换至倒序排列' : '已切换至正序排列')
+		locateCatalogAnchor()
 	}
 
-	/** 抽屉由隐藏转可见时重置页签与排序（对齐原 v-if 卸载重挂的交互节奏） */
+	/** 抽屉由隐藏转可见时重置页签与排序（对齐原 v-if 卸载重挂的交互节奏），并定位到当前阅读章 */
 	watch(() : boolean => props.open, (v : boolean) : void => {
 		if (v) {
 			drawerTab.value = 'catalog'
 			orderDesc.value = false
+			locateCatalogAnchor()
 		}
 	})
 

@@ -166,9 +166,9 @@ export function setActiveBookId(bookId : number) : void {
 	activeBookId = bookId
 }
 
-/** 当前书籍存储 key（未锁书时返回 null，读写工具按空表/忽略处理） */
+/** 当前书籍存储 key（未锁书时返回 null，读写工具按空表/忽略处理；负数 id 为离线导入待同步书籍，同样本地可读写） */
 function bookScopedKey(prefix : string) : string | null {
-	return activeBookId > 0 ? prefix + activeBookId : null
+	return activeBookId != 0 ? prefix + activeBookId : null
 }
 
 /** 阅读设置（字号/翻页模式/主题/字体，真源本地存储：ReaderControl 组件读写，页面应用渲染） */
@@ -513,6 +513,154 @@ export function saveThought(t : Thought) : void {
 	}
 }
 
+// ==================== 离线导入书籍登录同步（本地负数 id → 云端 id 迁移） ====================
+
+/** 读取指定书籍 id 的笔记缓存原文（迁移用，绕过 activeBookId 锁定；非字符串返回空串） */
+function readNoteStorageRaw(key : string) : string {
+	const stored : any = uni.getStorageSync(key)
+	return typeof stored == 'string' ? stored as string : ''
+}
+
+/** 划线缓存迁移：本地数据先逐段回补云端（upsert 幂等），全部成功后才迁移缓存 key */
+async function migrateUnderlinesStorage(oldId : number, newId : number) : Promise<void> {
+	const raw = readNoteStorageRaw(UNDERLINE_STORAGE_KEY + oldId)
+	if (raw.length == 0) {
+		return
+	}
+	const list = JSON.parse<Array<UnderlineEntry>>(raw)
+	if (list == null) {
+		// 缓存损坏不可用：丢弃旧 key 不阻塞迁移（与读取方容错口径一致）
+		uni.removeStorageSync(UNDERLINE_STORAGE_KEY + oldId)
+		return
+	}
+	for (let i = 0; i < list.length; i++) {
+		const entry = list[i]
+		// 云端传输为扁平区间（[s1,e1,s2,e2]），空数组=整段取消
+		const flat : number[] = []
+		for (let j = 0; j < entry.ranges.length; j++) {
+			flat.push(entry.ranges[j][0])
+			flat.push(entry.ranges[j][1])
+		}
+		await upsertUnderline(newId, entry.cid, entry.origin, flat)
+	}
+	uni.setStorageSync(UNDERLINE_STORAGE_KEY + newId, raw)
+	uni.removeStorageSync(UNDERLINE_STORAGE_KEY + oldId)
+}
+
+/** 想法缓存迁移：逐条云端写入（云端无去重键，仅该类迁移中途失败重试才可能重复） */
+async function migrateThoughtsStorage(oldId : number, newId : number) : Promise<void> {
+	const raw = readNoteStorageRaw(THOUGHT_STORAGE_KEY + oldId)
+	if (raw.length == 0) {
+		return
+	}
+	const list = JSON.parse<Array<Thought>>(raw)
+	if (list == null) {
+		uni.removeStorageSync(THOUGHT_STORAGE_KEY + oldId)
+		return
+	}
+	for (let i = 0; i < list.length; i++) {
+		const t = list[i]
+		await createThought(newId, t.fromCid, t.fromOrigin, t.fromStart, t.toCid, t.toOrigin, t.toEnd, t.quote, t.content)
+	}
+	uni.setStorageSync(THOUGHT_STORAGE_KEY + newId, raw)
+	uni.removeStorageSync(THOUGHT_STORAGE_KEY + oldId)
+}
+
+/** 书签缓存迁移：本地整表先云端替换（幂等），成功后迁移缓存 key */
+async function migrateBookmarksStorage(oldId : number, newId : number) : Promise<void> {
+	const raw = readNoteStorageRaw(BOOKMARK_STORAGE_KEY + oldId)
+	if (raw.length == 0) {
+		return
+	}
+	const list = JSON.parse<Array<Bookmark>>(raw)
+	if (list == null) {
+		uni.removeStorageSync(BOOKMARK_STORAGE_KEY + oldId)
+		return
+	}
+	const items : UTSJSONObject[] = []
+	for (let i = 0; i < list.length; i++) {
+		const item = {} as UTSJSONObject
+		item['chapter_id'] = list[i].chapterId
+		item['page_index'] = list[i].pageIndex
+		items.push(item)
+	}
+	await replaceBookmarks(newId, items)
+	uni.setStorageSync(BOOKMARK_STORAGE_KEY + newId, raw)
+	uni.removeStorageSync(BOOKMARK_STORAGE_KEY + oldId)
+}
+
+/** 笔记迁移收口：划线→想法→书签逐类先回补云端、成功后迁移缓存 key；任一类失败抛错中断
+ * （该类 key 不迁移，books.uts 据此整本保留待同步态，重试只补失败类，不重复上传已成功类）
+ */
+export async function relocateBookNotes(oldId : number, newId : number) : Promise<void> {
+	await migrateUnderlinesStorage(oldId, newId)
+	await migrateThoughtsStorage(oldId, newId)
+	await migrateBookmarksStorage(oldId, newId)
+	if (activeBookId == oldId) {
+		activeBookId = newId
+	}
+}
+
+/** 想法去重比对：选区端点与内容完全一致视为同一条（云端想法无去重键，回补仅推差集防重复） */
+function containsThought(list : Thought[], t : Thought) : boolean {
+	for (let i = 0; i < list.length; i++) {
+		const c = list[i]
+		if (c.fromCid == t.fromCid && c.fromOrigin == t.fromOrigin && c.fromStart == t.fromStart && c.toCid == t.toCid && c.toOrigin == t.toOrigin && c.toEnd == t.toEnd && c.content == t.content) {
+			return true
+		}
+	}
+	return false
+}
+
+/**
+ * 登录回补（复用云端行的离线书）：把本地缓存笔记推回云端。
+ * 划线逐段 upsert、书签整表替换均幂等可全量重推；想法云端无去重键，
+ * 与传入的云端已有列表按去重键比对，仅推本地有而云端无的差集。
+ * 任一推送失败即抛错（调用方保持 dirty 待下次回补，已成功类型幂等不产生重复）
+ */
+export async function repushBookNotes(bookId : number, cloudThoughts : Thought[]) : Promise<void> {
+	const uRaw = readNoteStorageRaw(UNDERLINE_STORAGE_KEY + bookId)
+	if (uRaw.length > 0) {
+		const ulist = JSON.parse<Array<UnderlineEntry>>(uRaw)
+		if (ulist != null) {
+			for (let i = 0; i < ulist.length; i++) {
+				const e = ulist[i]
+				const flat : number[] = []
+				for (let j = 0; j < e.ranges.length; j++) {
+					flat.push(e.ranges[j][0])
+					flat.push(e.ranges[j][1])
+				}
+				await upsertUnderline(bookId, e.cid, e.origin, flat)
+			}
+		}
+	}
+	const bRaw = readNoteStorageRaw(BOOKMARK_STORAGE_KEY + bookId)
+	if (bRaw.length > 0) {
+		const blist = JSON.parse<Array<Bookmark>>(bRaw)
+		if (blist != null) {
+			const items : UTSJSONObject[] = []
+			for (let i = 0; i < blist.length; i++) {
+				const item = {} as UTSJSONObject
+				item['chapter_id'] = blist[i].chapterId
+				item['page_index'] = blist[i].pageIndex
+				items.push(item)
+			}
+			await replaceBookmarks(bookId, items)
+		}
+	}
+	const tRaw = readNoteStorageRaw(THOUGHT_STORAGE_KEY + bookId)
+	if (tRaw.length > 0) {
+		const tlist = JSON.parse<Array<Thought>>(tRaw)
+		if (tlist != null) {
+			for (let i = 0; i < tlist.length; i++) {
+				const t = tlist[i]
+				if (!containsThought(cloudThoughts, t)) {
+					await createThought(bookId, t.fromCid, t.fromOrigin, t.fromStart, t.toCid, t.toOrigin, t.toEnd, t.quote, t.content)
+				}
+			}
+		}
+	}
+}
 /**
  * 划线/想法卡片列表组装（目录抽屉数据源）：
  * 划线区间派生卡片并关联想法（想法覆盖的划线区间不再单出划线卡），无匹配区间的想法独立成卡；

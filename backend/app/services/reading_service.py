@@ -103,11 +103,10 @@ async def register_book(db: AsyncSession, user_id: int, data: BookCreate) -> tup
         book.has_preface = data.has_preface
         await db.commit()
         return book, False
-    # 追加书排到书架末尾（当前最大序 +1）
-    max_order = await db.execute(
-        select(func.max(UserBook.sort_order)).where(UserBook.user_id == user_id)
+    # 新增书置顶到书架最前（当前最小序 -1）：最后添加的显示在第一行第一个
+    min_order = await db.execute(
+        select(func.min(UserBook.sort_order)).where(UserBook.user_id == user_id)
     )
-    next_order = (max_order.scalar_one() or 0) + 1
     book = UserBook(
         user_id=user_id,
         title=data.title,
@@ -116,7 +115,7 @@ async def register_book(db: AsyncSession, user_id: int, data: BookCreate) -> tup
         size=data.size,
         chapter_count=data.chapter_count,
         has_preface=data.has_preface,
-        sort_order=next_order,
+        sort_order=(min_order.scalar_one() or 0) - 1,
     )
     db.add(book)
     try:

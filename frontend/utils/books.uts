@@ -4,6 +4,7 @@
 // 进度/时长均为「本地即时写缓存 + 云端静默跟随」，页面进入时以云端数据覆盖本地缓存
 
 import {
+	fetchBookNotes,
 	fetchBooks,
 	registerBook,
 	updateBookProgress,
@@ -14,6 +15,7 @@ import {
 	syncQuiet
 } from '../api/reading.uts'
 import { hasAccessToken } from './request.uts'
+import { relocateBookNotes, repushBookNotes, thoughtFromCloud, Thought } from './readerTypes.uts'
 
 /** 书架书籍（书架页展示与排序的唯一数据源；云端字段 + 本机 path 合并结果） */
 export type LocalBook = {
@@ -47,6 +49,8 @@ export type LocalBook = {
 	chapterCount: number
 	/** 第一章前有前置内容并生成序章（导入时固化） */
 	hasPreface: boolean
+	/** 离线改动待回补（未登录复用云端行导入/阅读后置位；登录回补成功清除） */
+	dirty: boolean
 }
 
 /** 阅读进度（txt：章节/页码/滚动位置） */
@@ -98,7 +102,8 @@ function bookFromObject(obj : UTSJSONObject) : LocalBook | null {
 		lastPercent: obj.getNumber('lastPercent') ?? 0,
 		pdfRatio: obj.getNumber('pdfRatio') ?? 0,
 		chapterCount: obj.getNumber('chapterCount') ?? 0,
-		hasPreface: obj.getBoolean('hasPreface') == true
+		hasPreface: obj.getBoolean('hasPreface') == true,
+		dirty: obj.getBoolean('dirty') == true
 	} as LocalBook
 }
 
@@ -199,7 +204,8 @@ function bookFromCloud(obj : UTSJSONObject) : LocalBook | null {
 		lastPercent: obj.getNumber('last_percent') ?? 0,
 		pdfRatio: obj.getNumber('pdf_ratio') ?? 0,
 		chapterCount: obj.getNumber('chapter_count') ?? 0,
-		hasPreface: obj.getBoolean('has_preface') == true
+		hasPreface: obj.getBoolean('has_preface') == true,
+		dirty: false
 	} as LocalBook
 }
 
@@ -212,6 +218,8 @@ export async function fetchBooksFromCloud() : Promise<LocalBook[]> {
 	if (!hasAccessToken()) {
 		return loadBooks()
 	}
+	// 先同步离线导入书籍（注册云端并迁移 id），避免下方云端覆盖清掉未同步数据
+	await syncPendingBooks()
 	try {
 		const res = await fetchBooks()
 		if (res.code == 0 && res.data != null) {
@@ -225,7 +233,7 @@ export async function fetchBooksFromCloud() : Promise<LocalBook[]> {
 					}
 				}
 			}
-			// 本机正文文件路径回填（云端无 path 概念）
+			// 本机正文文件路径回填（云端无 path 概念）；复用云端行的离线书（dirty）回补离线进度与笔记
 			const local = loadBooks()
 			const merged : LocalBook[] = []
 			for (let i = 0; i < cloud.length; i++) {
@@ -233,16 +241,86 @@ export async function fetchBooksFromCloud() : Promise<LocalBook[]> {
 				const li = findCached(book.id, local)
 				if (li >= 0) {
 					book.path = local[li].path
+					book.dirty = local[li].dirty
+					if (local[li].dirty && await reconcileDirtyBook(book, local[li])) {
+						book.dirty = false
+					}
 				}
 				merged.push(book)
 			}
-			saveBooks(merged)
+			// 仍未同步成功的离线导入书籍保留在书架最前（对齐新增置顶语义；注册失败容错，下次书架进入再试）
+			const pendings : LocalBook[] = []
+			for (let i = 0; i < local.length; i++) {
+				if (local[i].id < 0) {
+					pendings.push(local[i])
+				}
+			}
+			const mergedAll : LocalBook[] = []
+			for (let i = 0; i < pendings.length; i++) {
+				mergedAll.push(pendings[i])
+			}
+			for (let i = 0; i < merged.length; i++) {
+				mergedAll.push(merged[i])
+			}
+			saveBooks(mergedAll)
 		}
 	} catch (e) {
 		// 网络失败：保留本地缓存（云端为准的补偿由下次成功拉取完成）
 		console.warn('云端书架拉取失败，使用本地缓存', e)
 	}
 	return loadBooks()
+}
+
+/**
+ * 复用云端行的离线书回补：进度本地较新时覆盖合并结果并回写云端（与迁移同款比较口径）；
+ * 笔记经 repushBookNotes 差集回补。返回是否全部成功（失败保持 dirty 下次再试，本地数据不丢）
+ */
+async function reconcileDirtyBook(book : LocalBook, localBook : LocalBook) : Promise<boolean> {
+	try {
+		if (localBook.lastReadAt > book.lastReadAt && (localBook.lastChapter >= 0 || localBook.lastPercent > 0)) {
+			const fields = {} as UTSJSONObject
+			if (localBook.lastChapter >= 0) {
+				fields['last_chapter'] = localBook.lastChapter
+				fields['last_page_index'] = localBook.lastPageIndex
+				fields['last_scroll_top'] = localBook.lastScrollTop
+			}
+			if (localBook.lastPercent > 0) {
+				fields['last_percent'] = Math.round(localBook.lastPercent)
+				fields['pdf_ratio'] = localBook.pdfRatio
+			}
+			await updateBookProgress(book.id, fields)
+			book.lastChapter = localBook.lastChapter
+			book.lastPageIndex = localBook.lastPageIndex
+			book.lastScrollTop = localBook.lastScrollTop
+			book.lastPercent = localBook.lastPercent
+			book.pdfRatio = localBook.pdfRatio
+			book.lastReadAt = localBook.lastReadAt
+		}
+		const notesRes = await fetchBookNotes(book.id)
+		const cloudThoughts : Thought[] = []
+		if (notesRes.code == 0 && notesRes.data != null) {
+			const rawT = notesRes.data!.getArray('thoughts')
+			if (rawT != null) {
+				rawT.forEach((el) => {
+					const t = thoughtFromCloud(el as UTSJSONObject)
+					if (t != null) {
+						cloudThoughts.push(t)
+					}
+				})
+			}
+		}
+		await repushBookNotes(book.id, cloudThoughts)
+		return true
+	} catch (e) {
+		console.warn('离线改动回补失败，保留待同步标记：' + book.title, e)
+		return false
+	}
+}
+
+/** 本设备离线改动是否待回补（复用云端行的离线书；reader 据此跳过云端笔记拉取覆盖） */
+export function isBookDirty(bookId : number) : boolean {
+	const book = findBook(bookId)
+	return book != null && book.dirty
 }
 
 // ==================== 阅读进度 ====================
@@ -320,8 +398,8 @@ export function updateBookReading(bookId : number, chapterId : number, percent :
 	syncQuiet(updateBookProgress(bookId, fields))
 }
 
-/** 删除书籍：本地正文与页图缓存清理 + 云端删除（笔记/书签后端级联）；缓存列表由调用方过滤后 saveBooks */
-export function removeBookData(book : LocalBook) : void {
+/** 删除书籍：本地正文与页图缓存清理；deleteCloud 且为云端书籍（id>0）时一并删云端（笔记/书签后端级联）；缓存列表由调用方过滤后 saveBooks */
+export function removeBookData(book : LocalBook, deleteCloud : boolean) : void {
 	if (book.path.length > 0) {
 		try {
 			uni.getFileSystemManager().unlinkSync(book.path)
@@ -334,7 +412,9 @@ export function removeBookData(book : LocalBook) : void {
 	} catch (e) {
 		// 缓存目录不存在（txt 书）忽略
 	}
-	syncQuiet(deleteBook(book.id))
+	if (deleteCloud && book.id > 0) {
+		syncQuiet(deleteBook(book.id))
+	}
 }
 
 /** 本机新增/覆盖一本书的缓存记录（按 id 去重，追加到末尾） */
@@ -360,6 +440,224 @@ export function applyRegisteredBook(data : UTSJSONObject, path : string) : Local
 	book.path = path
 	upsertLocalBook(book)
 	return book
+}
+
+// ==================== 离线导入（未登录先存本地，登录后同步云端） ====================
+
+/**
+ * 离线导入分配本地书籍 id：同书名复用已有离线行（对齐云端「同用户书名唯一」语义），
+ * 否则取现有最小 id 再减一（负数与云端正数 id 天然隔离）。仅计算不落库，正文文件据此命名
+ */
+export function nextPendingBookId(title : string) : number {
+	const list = loadBooks()
+	for (let i = 0; i < list.length; i++) {
+		if (list[i].id < 0 && list[i].title == title) {
+			return list[i].id
+		}
+	}
+	// 同书名已有云端行（本设备无离线行）：复用其 id 合并为一本（置 dirty，登录后回补离线进度与笔记）
+	for (let i = 0; i < list.length; i++) {
+		if (list[i].id > 0 && list[i].title == title) {
+			return list[i].id
+		}
+	}
+	let minId = 0
+	for (let i = 0; i < list.length; i++) {
+		if (list[i].id < minId) {
+			minId = list[i].id
+		}
+	}
+	return minId - 1
+}
+
+/** 离线导入落地：元数据仅存本地缓存（登录后由 syncPendingBooks 注册云端），按书名复用离线行 */
+export function applyPendingImport(title : string, format : string, size : number, chapterCount : number, hasPreface : boolean, path : string) : void {
+	const list = loadBooks()
+	for (let i = 0; i < list.length; i++) {
+		const book = list[i]
+		if (book.id < 0 && book.title == title) {
+			book.format = format
+			book.size = size
+			book.chapterCount = chapterCount
+			book.hasPreface = hasPreface
+			book.path = path
+			saveBooks(list)
+			return
+		}
+		// 同书名云端行（进度为云端/本机缓存现值）：合并为一本——正文指向新导入文件，
+		// 置 dirty 待登录回补离线改动（进度保留现值，离线阅读从既有进度继续）
+		if (book.id > 0 && book.title == title) {
+			book.format = format
+			book.size = size
+			book.chapterCount = chapterCount
+			book.hasPreface = hasPreface
+			book.path = path
+			book.dirty = true
+			saveBooks(list)
+			return
+		}
+	}
+	// 新增离线书插到书架最前（对齐云端「新增书置顶」语义：最后添加的第一行第一个）
+	list.unshift({
+		id: nextPendingBookId(title),
+		title: title,
+		author: '',
+		format: format,
+		path: path,
+		size: size,
+		addedAt: Date.now(),
+		lastReadAt: 0,
+		lastChapter: -1,
+		lastPageIndex: 0,
+		lastScrollTop: 0,
+		lastPercent: 0,
+		pdfRatio: 0,
+		chapterCount: chapterCount,
+		hasPreface: hasPreface,
+		dirty: false
+	} as LocalBook)
+	saveBooks(list)
+}
+
+/** 沙盒文件删除（容错忽略） */
+function discardSandboxFile(path : string) : void {
+	try {
+		uni.getFileSystemManager().unlinkSync(path)
+	} catch (e) {
+		// 忽略
+	}
+}
+
+/**
+ * 沙盒文件按新 id 改名（先拷贝后删源；拷贝失败时源仍有效可整体重试）。
+ * 幂等：源存在性前置检查——源已不存在且目标已就位视为上次迁移已完成直接成功，
+ * 目标也不存在才报错；检查先于删目标，防止残留记录重跑迁移时误删已改名的正文
+ */
+async function renameSandboxFile(from : string, to : string) : Promise<void> {
+	if (from == to) {
+		return
+	}
+	const fs = uni.getFileSystemManager()
+	try {
+		fs.accessSync(from)
+	} catch (e) {
+		try {
+			fs.accessSync(to)
+			return
+		} catch (e2) {
+			throw new Error('正文文件迁移失败')
+		}
+	}
+	try {
+		try {
+			fs.unlinkSync(to)
+		} catch (e) {
+			// 目标不存在属正常
+		}
+		await new Promise<void>((resolve, reject) => {
+			fs.copyFile({
+				srcPath: from,
+				destPath: to,
+				success: (_res) => { resolve() },
+				fail: (_err) => { reject(new Error('文件迁移失败')) }
+			})
+		})
+		discardSandboxFile(from)
+	} catch (e) {
+		throw new Error('正文文件迁移失败')
+	}
+}
+
+/** 单本离线书籍迁移：登记响应落地为云端记录（id 迁移 + 离线数据回补）；失败抛出保留待同步态 */
+async function migratePendingBook(book : LocalBook, data : UTSJSONObject) : Promise<void> {
+	const newId = data.getNumber('id') ?? 0
+	if (newId <= 0) {
+		throw new Error('云端书籍 id 无效')
+	}
+	// 离线期间的划线/想法/书签先回补云端（失败抛出，重试只补失败类）
+	await relocateBookNotes(book.id, newId)
+	// 进度合并：本地最近阅读晚于云端才回写（同名书跨设备已有更新进度时以云端为准）
+	const cloudReadMs = cnDatetimeToMs(data.getString('last_read_at') ?? '')
+	if (book.lastReadAt > cloudReadMs && (book.lastChapter >= 0 || book.lastPercent > 0)) {
+		const fields = {} as UTSJSONObject
+		if (book.lastChapter >= 0) {
+			fields['last_chapter'] = book.lastChapter
+			fields['last_page_index'] = book.lastPageIndex
+			fields['last_scroll_top'] = book.lastScrollTop
+		}
+		if (book.lastPercent > 0) {
+			fields['last_percent'] = Math.round(book.lastPercent)
+			fields['pdf_ratio'] = book.pdfRatio
+		}
+		await updateBookProgress(newId, fields)
+	}
+	// 正文文件按云端 id 改名（对侧格式残留一并清理，PDF 页图缓存目录随旧 id 废弃重渲染）
+	let newPath = book.path
+	if (book.path.length > 0) {
+		const slash = book.path.lastIndexOf('/')
+		const dirPrefix = slash >= 0 ? book.path.substring(0, slash + 1) : ''
+		const dot = book.path.lastIndexOf('.')
+		const ext = dot > slash ? book.path.substring(dot + 1) : 'txt'
+		newPath = dirPrefix + newId + '.' + ext
+		await renameSandboxFile(book.path, newPath)
+		discardSandboxFile(dirPrefix + newId + '.' + (ext == 'txt' ? 'pdf' : 'txt'))
+		try {
+			uni.getFileSystemManager().rmdirSync(uni.env.USER_DATA_PATH + '/pdf_cache/' + book.id, true)
+		} catch (e) {
+			// txt 书或目录不存在忽略
+		}
+	}
+	// 本地记录替换为云端记录（本地进度较新时保留本地值）
+	const cloudBook = bookFromCloud(data)
+	if (cloudBook == null) {
+		throw new Error('云端书籍记录解析失败')
+	}
+	cloudBook.path = newPath
+	if (book.lastReadAt > cloudReadMs) {
+		cloudBook.lastChapter = book.lastChapter
+		cloudBook.lastPageIndex = book.lastPageIndex
+		cloudBook.lastScrollTop = book.lastScrollTop
+		cloudBook.lastPercent = book.lastPercent
+		cloudBook.pdfRatio = book.pdfRatio
+		cloudBook.lastReadAt = book.lastReadAt
+	}
+	upsertLocalBook(cloudBook)
+	// 移除旧离线记录：upsertLocalBook 按新 id 去重，不清旧负数行；残留会使书架出现双同名书，
+	// 且下次同步重跑迁移时把已改名的正文当作源，误删新正文文件
+	const stale = loadBooks()
+	const si = findCached(book.id, stale)
+	if (si >= 0) {
+		stale.splice(si, 1)
+		saveBooks(stale)
+	}
+}
+
+/**
+ * 登录后同步离线导入书籍（书架进入时经 fetchBooksFromCloud 调用，登录态已确认）：
+ * 逐本云端登记（同名复用行）→ id 迁移 → 离线进度/笔记回补；任一本失败仅告警并保留待同步态，
+ * 下次书架进入再试（每本独立容错，不阻断其余同步与书架刷新）
+ */
+async function syncPendingBooks() : Promise<void> {
+	const list = loadBooks()
+	const pending : LocalBook[] = []
+	for (let i = 0; i < list.length; i++) {
+		if (list[i].id < 0) {
+			pending.push(list[i])
+		}
+	}
+	// 按导入时间升序注册：后端新增书置顶（最小序），后导入的后注册获得更小序，连续导入仍保持「最后添加最前」
+	pending.sort((a : LocalBook, b : LocalBook) : number => a.addedAt - b.addedAt)
+	for (let i = 0; i < pending.length; i++) {
+		const book = pending[i]
+		try {
+			const res = await registerBook(book.title, book.format, book.size, book.chapterCount, book.hasPreface)
+			if (res.code == 0 && res.data != null) {
+				await migratePendingBook(book, res.data!)
+			}
+		} catch (e) {
+			console.warn('离线导入书籍同步失败，保留本地待下次再试：' + book.title, e)
+		}
+	}
 }
 
 // ==================== 阅读时长（按日云端统计 + 本地缓存镜像） ====================

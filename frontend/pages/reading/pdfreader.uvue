@@ -112,7 +112,8 @@
 		// #endif
 		const bid = options['bookId']
 		const bidNum = bid != null ? parseInt(bid) : 0
-		if (bidNum <= 0 || isNaN(bidNum)) {
+		// 0/非法为异常入参；负数 id 为离线导入待同步书籍，正常打开
+		if (bidNum == 0 || isNaN(bidNum)) {
 			uni.showToast({ title: '书籍不存在', icon: 'none' })
 			setTimeout(() => {
 				uni.navigateBack()
@@ -286,7 +287,7 @@
 
 	/** 结算阅读：进度百分比落库（书籍记录云端跟随） + 回写最近阅读状态 + 累计今日时长（onHide 先于 onUnload，enterAt 置零防双计） */
 	function persistReading() : void {
-		if (bookId.value <= 0) {
+		if (bookId.value == 0) {
 			return
 		}
 		savePdfProgress(bookId.value, { percent: curPercent.value, ratio: pageRatio.value } as PdfProgress)
