@@ -293,17 +293,16 @@
 
 <script setup lang="uts">
 	import { READER_THEME_LIGHT, READER_THEME_NIGHT, READER_THEME_PAPER } from '@/utils/theme.uts'
-	import { useUserStore, avatarPathOf } from '@/stores/user.uts'
+	import { useUserStore, avatarSrcOf } from '@/stores/user.uts'
 	import { LocalBook, BookProgress, findBook, isBookDirty, loadBookProgress, saveBookProgress, updateBookReading, addTodayMinutes } from '@/utils/books.uts'
 	import { parseChapters, readTextFile, ParsedChapter } from '@/utils/bookparse.uts'
-	import { fetchBookNotes, fetchBookBookmarks } from '@/api/reading.uts'
-	import { hasAccessToken } from '@/utils/request.uts'
-	import { Chapter, Paragraph, Bookmark, Thought, UnderlineEntry, NoteRecord, ShareQuoteCtx, SelSpan, SpanSeg, TextMetrics, ParaRect, ReaderSettings, FONT_OPTIONS, fontOptionOf, setActiveBookId, underlineFromCloud, thoughtFromCloud, bookmarkFromCloud, storeUnderlines, storeThoughts, storeBookmarks, loadUnderlines, loadThoughts, findUnderlineEntry, loadBookmarks, loadSettings, normalizeSpan, buildNoteRecords, buildShareQuoteCtx } from '@/utils/readerTypes.uts'
+	import { Chapter, Paragraph, Bookmark, Thought, UnderlineEntry, NoteRecord, ShareQuoteCtx, SelSpan, SpanSeg, TextMetrics, ParaRect, ReaderSettings, FONT_OPTIONS, fontOptionOf, setActiveBookId, loadUnderlines, loadThoughts, findUnderlineEntry, loadBookmarks, loadSettings, buildNoteRecords, buildShareQuoteCtx, fetchNotesToCache, fetchBookmarksToCache, VIRTUAL_BOOK_ID, SENTENCE_END_CHARS, thoughtAt, spanOfThought, buildSpanSegs } from '@/utils/readerTypes.uts'
 	import { PageSlice, computePageBreaks, computePageBreaksMeasured, computePageBreaksExact, ParaLineLayout } from '@/utils/pagination.uts'
 	// #ifdef APP-ANDROID
 	import { buildParaLayout } from '@/utils/textlayout.uts'
 	// #endif
 	import { flipCurrentLayerStyle, flipPrevLayerStyle, flipNextLayerStyle, flipCoverNextOpacity, flipCoverCurrentOpacity } from '@/utils/flipstyle.uts'
+	import { mpCapsuleRect } from '@/utils/layout.uts'
 	import SelectionPopover from '@/components/selection/SelectionPopover.uvue'
 	import ReaderControl from '@/components/reader/ReaderControl.uvue'
 	import ReaderFooterBar from '@/components/reader/ReaderFooterBar.uvue'
@@ -329,9 +328,6 @@
 		to: number
 		text: string
 	}
-
-	/** 章节正文（默认空；真实书籍数据统一经 loadBookContent 注入，段落索引是划线/想法/进度的定位键） */
-	const paragraphs = ref<Paragraph[]>([])
 
 	/** 目录章节（默认空；真实书籍数据统一经 loadBookContent 注入，id 即章序号） */
 	const chapters = ref<Chapter[]>([])
@@ -551,6 +547,16 @@
 		return p
 	}
 
+	/** Map 写时复制更新（返回新 Map 触发响应式重算，测量缓存统一经由本工具落库） */
+	function mapWithEntry<K, V>(src : Map<K, V>, key : K, value : V) : Map<K, V> {
+		const next : Map<K, V> = new Map()
+		src.forEach((v : V, k : K) => {
+			next.set(k, v)
+		})
+		next.set(key, value)
+		return next
+	}
+
 	/** 在测标记清理 */
 	function removeMeasuring(cid : number) : void {
 		const idx = measuringCids.indexOf(cid)
@@ -589,12 +595,7 @@
 				}
 				if (rects != null && rects.length == 1 && rects[0].height > 0) {
 					// 写时复制落缓存（触发分页重算），卸载探针节点
-					const next : Map<number, number> = new Map()
-					chapterHeadHCache.value.forEach((v : number, k : number) => {
-						next.set(k, v)
-					})
-					next.set(cid, rects[0].height + uni.upx2px(108))
-					chapterHeadHCache.value = next
+					chapterHeadHCache.value = mapWithEntry(chapterHeadHCache.value, cid, rects[0].height + uni.upx2px(108))
 					measureHeaders.value = [] as number[]
 					resolve()
 					return
@@ -699,12 +700,7 @@
 
 	/** 精确排版数据落缓存（写时复制触发分页重算） */
 	function storeLayout(cid : number, layout : ParaLineLayout) : void {
-		const next : Map<number, ParaLineLayout> = new Map()
-		paraLayoutCache.value.forEach((v : ParaLineLayout, k : number) => {
-			next.set(k, v)
-		})
-		next.set(cid, layout)
-		paraLayoutCache.value = next
+		paraLayoutCache.value = mapWithEntry(paraLayoutCache.value, cid, layout)
 	}
 	// #endif
 
@@ -762,12 +758,7 @@
 					const len = paras[i].text.length
 					lines.push(len > 0 ? Math.max(1, Math.round(rects[i].height / lineH)) : 0)
 				}
-				const nextLines : Map<number, number[]> = new Map()
-				paraLinesCache.value.forEach((v : number[], k : number) => {
-					nextLines.set(k, v)
-				})
-				nextLines.set(cid, lines)
-				paraLinesCache.value = nextLines
+				paraLinesCache.value = mapWithEntry(paraLinesCache.value, cid, lines)
 				// 卸载整章节点，转入末行探测（探测节点更轻量）
 				measureParas.value = [] as number[]
 				probeTailChars(cid, epoch, new Map<number, TailSearch>(), new Map<number, number>(), 0, resolve)
@@ -901,10 +892,6 @@
 		if (found.size == 0) {
 			return
 		}
-		const nextTails : Map<number, number[]> = new Map()
-		paraTailCache.value.forEach((v : number[], k : number) => {
-			nextTails.set(k, v)
-		})
 		const prev = paraTailCache.value.get(cid)
 		const arr : number[] = []
 		for (let i = 0; i < paras.length; i++) {
@@ -912,8 +899,7 @@
 			const p = prev != null && prev[i] > 0 ? prev[i] : 0
 			arr.push(f != null ? f : p)
 		}
-		nextTails.set(cid, arr)
-		paraTailCache.value = nextTails
+		paraTailCache.value = mapWithEntry(paraTailCache.value, cid, arr)
 	}
 
 	/** 分页结果：每页的段落切片数组（流式分页，段落可跨页）。实测就绪走实测分页（与真实渲染零漂移），
@@ -955,6 +941,28 @@
 			const full = s.origin >= 0 && s.origin < paras.length ? paras[s.origin].text : ''
 			return { origin: s.origin, from: s.from, to: s.to, text: full.substring(s.from, s.to + 1) } as PageItem
 		})
+	}
+
+	/** 定位覆盖目标字符位的页（跨页段落可精确到字符所在页；字符位未命中——分页回退估算漂移——回退目标段落所在首页，均未命中返回 -1） */
+	function findPageOf(breaks : PageSlice[][], origin : number, charTarget : number) : number {
+		for (let pi = 0; pi < breaks.length; pi++) {
+			const slices = breaks[pi]
+			for (let si = 0; si < slices.length; si++) {
+				const s = slices[si]
+				if (s.origin == origin && s.from <= charTarget && s.to >= charTarget) {
+					return pi
+				}
+			}
+		}
+		for (let pi = 0; pi < breaks.length; pi++) {
+			const slices = breaks[pi]
+			for (let si = 0; si < slices.length; si++) {
+				if (slices[si].origin == origin) {
+					return pi
+				}
+			}
+		}
+		return -1
 	}
 
 	/** 分页变化（字号调节/设置恢复/标定更新）后钳制当前页码，避免指向不存在的空页 */
@@ -1005,7 +1013,6 @@
 	function loadBookContent(chs : Chapter[], allParas : string[][]) : void {
 		chapters.value = chs
 		chapterParas.value = allParas.map((texts : string[]) : Paragraph[] => toParagraphs(texts))
-		paragraphs.value = allParas.length > 0 ? toParagraphs(allParas[0]) : []
 		currentChapterId.value = 0
 		pageIndex.value = 0
 		scrollChapters.value = [0]
@@ -1032,7 +1039,7 @@
 	 * 故实测「视口顶落在哪一章 + 距该章顶的偏移」，恢复时单章渲染按偏移定位即可精确回到原位（跨设备亦稳定）
 	 */
 	function scheduleAnchorCalc() : void {
-		if (!scrollMode.value || bookId.value == 0) {
+		if (!scrollMode.value || bookId.value == VIRTUAL_BOOK_ID) {
 			return
 		}
 		if (anchorTimer >= 0) {
@@ -1062,7 +1069,7 @@
 	}
 
 	function saveProgress() : void {
-		if (bookId.value == 0) {
+		if (bookId.value == VIRTUAL_BOOK_ID) {
 			return
 		}
 		// 滚动模式：存「视口顶所在章 + 章内偏移」锚点，恢复时单章渲染按偏移精确定位
@@ -1100,7 +1107,7 @@
 
 	/** 结算本次阅读：累计今日分钟数 + 回写书架最近阅读状态（onHide 先于 onUnload 触发，enterAt 置零防双计） */
 	function recordReadingSession() : void {
-		if (bookId.value == 0) {
+		if (bookId.value == VIRTUAL_BOOK_ID) {
 			return
 		}
 		if (enterAt > 0) {
@@ -1419,12 +1426,11 @@
 		if (safeArea != null) {
 			safeAreaBottomPx.value = Math.max(0, win.windowHeight - safeArea.bottom)
 		}
-		// #ifdef MP-WEIXIN
-		const capsule = uni.getMenuButtonBoundingClientRect()
-		if (capsule.height > 0) {
-			contentTopPx.value = capsule.bottom + 8
+		// 小程序正文区从胶囊下方起（mpCapsuleRect 内聚条件编译，非微信端为 null 不覆盖）
+		const capsule = mpCapsuleRect()
+		if (capsule != null) {
+			contentTopPx.value = capsule.top + capsule.height + 8
 		}
-		// #endif
 	}
 
 	/** ===== 书签（真源在 ReaderControl 组件：增删/持久化内聚；页面维护内存镜像供当前页旗帜渲染） ===== */
@@ -1441,40 +1447,6 @@
 	}
 
 	/** ===== 划线与想法（本地存储真源在 utils/readerTypes.uts：气泡组件写入；页面维护内存副本供渲染与查看，组件 sync 事件时重读） ===== */
-	/** 判定想法覆盖某章某段落的某字符（跨段跨章选区，章 id 升序即阅读顺序） */
-	function thoughtCovers(t : Thought, cid : number, origin : number, charIdx : number) : boolean {
-		if (cid < t.fromCid || cid > t.toCid) {
-			return false
-		}
-		if (t.fromCid == t.toCid) {
-			if (origin < t.fromOrigin || origin > t.toOrigin) {
-				return false
-			}
-			if (origin == t.fromOrigin && origin == t.toOrigin) {
-				return charIdx >= t.fromStart && charIdx <= t.toEnd
-			}
-			if (origin == t.fromOrigin) {
-				return charIdx >= t.fromStart
-			}
-			if (origin == t.toOrigin) {
-				return charIdx <= t.toEnd
-			}
-			return true
-		}
-		if (cid == t.fromCid) {
-			if (origin < t.fromOrigin) {
-				return false
-			}
-			return origin > t.fromOrigin || charIdx >= t.fromStart
-		}
-		if (cid == t.toCid) {
-			if (origin > t.toOrigin) {
-				return false
-			}
-			return origin < t.toOrigin || charIdx <= t.toEnd
-		}
-		return true
-	}
 
 	const underlineStore = ref<UnderlineEntry[]>([])
 	const thoughts = ref<Thought[]>([])
@@ -1673,35 +1645,8 @@
 					applyChapterSwitch(r.cid, false)
 				}
 				// 页=段落切片数组（{origin,from,to}）：定位覆盖记录字符位的切片所在页（跨页段落可精确到划线所在页）；
-				// 字符位未命中（分页回退估算漂移）时回退到记录段落所在首页
-				let targetPage = -1
-				for (let pi = 0; pi < pageBreaks.value.length; pi++) {
-					const slices = pageBreaks.value[pi]
-					for (let si = 0; si < slices.length; si++) {
-						const s = slices[si]
-						if (s.origin == r.origin && s.from <= r.qStart && s.to >= r.qStart) {
-							targetPage = pi
-							break
-						}
-					}
-					if (targetPage >= 0) {
-						break
-					}
-				}
-				if (targetPage < 0) {
-					for (let pi = 0; pi < pageBreaks.value.length; pi++) {
-						const slices = pageBreaks.value[pi]
-						for (let si = 0; si < slices.length; si++) {
-							if (slices[si].origin == r.origin) {
-								targetPage = pi
-								break
-							}
-						}
-						if (targetPage >= 0) {
-							break
-						}
-					}
-				}
+				// 字符位未命中（分页回退估算漂移）时回退到记录段落所在首页（见 findPageOf）
+				const targetPage = findPageOf(pageBreaks.value, r.origin, r.qStart)
 				if (targetPage >= 0) {
 					pageIndex.value = targetPage
 				}
@@ -1743,18 +1688,17 @@
 
 	/** 选区两端锚点（零宽字符，排入选中文本流）：其渲染位置即字符边界的真实位置，手柄/气泡吸附实测值 */
 	const ANCHOR_CHAR = '\u200B'
-	/** 句末标点与闭合引号（句界扫描：句末标点后紧跟闭合引号视为引用嵌入、非句子边界） */
-	const SENTENCE_END_CHARS = '。！？!?…'
+	/** 句末标点与闭合引号（句界扫描：句末标点后紧跟闭合引号视为引用嵌入、非句子边界；句末集常量收口 readerTypes） */
 	const SENTENCE_CLOSERS = '”』」）)】》"'
 
-	/** 当前选区文本（跨段拼接，段间换行；复用 spanSegs 段序列，段内字符长度与段落数严格区分） */
+	/** 当前选区文本（跨段拼接，段间换行；段序列经共享 buildSpanSegs 展开，段内字符长度与段落数严格区分） */
 	function selectionText() : string {
 		const s0 = selSpan.value
 		if (s0 == null) {
 			return ''
 		}
 		let out = ''
-		for (const seg of spanSegs(s0)) {
+		for (const seg of buildSpanSegs(s0, paragraphsOf)) {
 			if (seg.end < seg.start) {
 				continue
 			}
@@ -1767,43 +1711,6 @@
 		return out
 	}
 
-	/** 选区覆盖的段序列（SpanSeg 类型见 utils/readerTypes.uts；跨章时按章连续展开） */
-		function spanSegs(s0 : SelSpan) : SpanSeg[] {
-			const s = normalizeSpan(s0)
-			const segs : SpanSeg[] = []
-			const fromParas = paragraphsOf(s.fromCid)
-			const fromTextLen = fromParas[s.fromOrigin].text.length
-			if (s.toCid == s.fromCid && s.toOrigin == s.fromOrigin) {
-				if (s.toEnd >= s.fromStart) {
-					segs.push({ cid: s.fromCid, origin: s.fromOrigin, start: s.fromStart, end: s.toEnd } as SpanSeg)
-				}
-				return segs
-			}
-			segs.push({ cid: s.fromCid, origin: s.fromOrigin, start: s.fromStart, end: fromTextLen - 1 } as SpanSeg)
-			if (s.toCid == s.fromCid) {
-				// 同章跨段：中间段取起点章真实段落数
-				for (let o = s.fromOrigin + 1; o < s.toOrigin && o < fromParas.length; o++) {
-					segs.push({ cid: s.fromCid, origin: o, start: 0, end: fromParas[o].text.length - 1 } as SpanSeg)
-				}
-			} else {
-				// 跨章：各章按自身真实段落数展开（滚动模式多章正文长度各异，不能套用当前章段落数）
-				for (let o = s.fromOrigin + 1; o < fromParas.length; o++) {
-					segs.push({ cid: s.fromCid, origin: o, start: 0, end: fromParas[o].text.length - 1 } as SpanSeg)
-				}
-				for (let c = s.fromCid + 1; c < s.toCid; c++) {
-					const midParas = paragraphsOf(c)
-					for (let o = 0; o < midParas.length; o++) {
-						segs.push({ cid: c, origin: o, start: 0, end: midParas[o].text.length - 1 } as SpanSeg)
-					}
-				}
-				const toParas = paragraphsOf(s.toCid)
-				for (let o = 0; o < s.toOrigin && o < toParas.length; o++) {
-					segs.push({ cid: s.toCid, origin: o, start: 0, end: toParas[o].text.length - 1 } as SpanSeg)
-				}
-			}
-			segs.push({ cid: s.toCid, origin: s.toOrigin, start: 0, end: s.toEnd } as SpanSeg)
-			return segs
-		}
 
 	/** 段落渲染分段（按划线/想法区间与当前选区切分，相邻同属性段合并；选区两端插入零宽锚点段供实测边界坐标） */
 	type TextSeg = {
@@ -1977,26 +1884,7 @@
 				onContentTap()
 				return
 			}
-			const m = layoutMetrics()
-			const sliceLen = to - from + 1
-			// 切片行数：段首切片（from==0）首行容量 = perLine-2（缩进占 2 字），续切片每行 perLine
-			let maxRow : number
-			if (from == 0) {
-				const rest = sliceLen - (m.perLine - 2)
-				maxRow = rest <= 0 ? 0 : Math.ceil(rest / m.perLine)
-			} else {
-				maxRow = Math.max(0, Math.ceil(sliceLen / m.perLine) - 1)
-			}
-			let row = Math.floor((clientY - rect.top) / m.lineH)
-			row = Math.max(0, Math.min(row, maxRow))
-			// 首行触点先扣除缩进宽（两个全角空格），字距：首行与末行未拉伸用自然字距，中间满行用两端对齐拉伸字距
-			const indent = (from == 0 && row == 0) ? m.indentPx : 0
-			const spacing = row == 0 ? m.charW : (row < maxRow ? m.fullCharW : m.charW)
-			let col = Math.floor((clientX - rect.left - indent) / spacing)
-			col = Math.max(0, Math.min(col, m.perLine - 1))
-			// 切片内字符索引（首行容量 perLine-2）加切片偏移 = 整段坐标
-			const sliceIdx = row == 0 ? col : (m.perLine - 2) + (row - 1) * m.perLine + col
-			const charIdx = Math.min(sliceIdx, sliceLen - 1) + from
+			const charIdx = charIndexOfRect(rect, clientX, clientY, from, to)
 			let inUl = false
 			for (const u of ranges) {
 				if (charIdx >= u[0] && charIdx <= u[1]) {
@@ -2011,11 +1899,9 @@
 				return
 			}
 			// 命中划线区间：有想法则弹查看卡片（气泡组件内聚，锚定划线下方，空间不足转上方），纯划线无展示
-			for (const t of thoughts.value) {
-				if (thoughtCovers(t, renderCid, origin, charIdx)) {
-					popoverRef.value?.showThoughtView(t.quote, t.content, rect.bottom, rect.top)
-					return
-				}
+			const hit = thoughtAt(thoughts.value, renderCid, origin, charIdx)
+			if (hit != null) {
+				popoverRef.value?.showThoughtView(hit.quote, hit.content, rect.bottom, rect.top)
 			}
 			}).exec()
 			}
@@ -2053,7 +1939,6 @@
 		}
 		if (p.chapterId >= 0 && p.chapterId < chapters.value.length) {
 			currentChapterId.value = p.chapterId
-			paragraphs.value = paragraphsOf(p.chapterId)
 			if (p.pageIndex >= 0 && p.pageIndex < pageBreaks.value.length) {
 				pageIndex.value = p.pageIndex
 			}
@@ -2079,65 +1964,16 @@
 	})
 
 	/**
-	 * 云端笔记拉取并落当前书籍缓存（划线/想法/书签；云端为准覆盖本地缓存）。
-	 * 失败静默保留本地缓存（离线容错），镜像刷新仍执行保证视图一致
+	 * 云端笔记拉取并落当前书籍缓存（划线/想法/书签；云端为准覆盖本地，容错收口 readerTypes）。
+	 * 镜像刷新由调用方在落缓存后统一执行
 	 */
 	async function syncNotesFromCloud(bid : number) : Promise<void> {
-		// 未登录：不发请求，划线/想法/书签走本地缓存（书架已拦截无正文书，此处防御）
-		if (!hasAccessToken()) {
-			return
-		}
 		// 复用云端行的离线书（dirty）：本地笔记尚未回补云端，先拉取会覆盖掉离线新增，跳过待书架回补完成后恢复
 		if (isBookDirty(bid)) {
 			return
 		}
-		try {
-			const notesRes = await fetchBookNotes(bid)
-			if (notesRes.code == 0 && notesRes.data != null) {
-				const underlines : UnderlineEntry[] = []
-				const rawU = notesRes.data!.getArray('underlines')
-				if (rawU != null) {
-					rawU.forEach((el) => {
-						const e = underlineFromCloud(el as UTSJSONObject)
-						if (e != null) {
-							underlines.push(e)
-						}
-					})
-				}
-				const thoughtsList : Thought[] = []
-				const rawT = notesRes.data!.getArray('thoughts')
-				if (rawT != null) {
-					rawT.forEach((el) => {
-						const t = thoughtFromCloud(el as UTSJSONObject)
-						if (t != null) {
-							thoughtsList.push(t)
-						}
-					})
-				}
-				storeUnderlines(underlines)
-				storeThoughts(thoughtsList)
-			}
-		} catch (e) {
-			console.warn('云端笔记拉取失败，使用本地缓存', e)
-		}
-		try {
-			const bmRes = await fetchBookBookmarks(bid)
-			if (bmRes.code == 0 && bmRes.data != null) {
-				const bms : Bookmark[] = []
-				const rawB = bmRes.data!.getArray('list')
-				if (rawB != null) {
-					rawB.forEach((el) => {
-						const b = bookmarkFromCloud(el as UTSJSONObject)
-						if (b != null) {
-							bms.push(b)
-						}
-					})
-				}
-				storeBookmarks(bms)
-			}
-		} catch (e) {
-			console.warn('云端书签拉取失败，使用本地缓存', e)
-		}
+		await fetchNotesToCache(bid)
+		await fetchBookmarksToCache(bid)
 	}
 
 	/** 读取本地书籍文件并解析注入（云端笔记先行落缓存）；失败（书被删/文件被清理）提示后返回书架 */
@@ -2404,7 +2240,6 @@
 			return
 		}
 		currentChapterId.value = id
-		paragraphs.value = paragraphsOf(id)
 		pageIndex.value = atLastPage ? pageBreaks.value.length - 1 : 0
 		scrollChapters.value = [id]
 		scrollModeTop.value = atLastPage ? 999999 : 0
@@ -2469,6 +2304,31 @@
 			fullCharW: contentW / perLine,
 			indentPx: fontSize.value * 2
 		} as TextMetrics
+	}
+
+	/** 触点 → 整段字符索引（触点相对本页切片渲染矩形做行列换算，切片内索引加切片偏移对齐整段坐标；
+	 *  与分页排版同源公式：段首切片首行容量 perLine-2（缩进占 2 字），续行 perLine） */
+	function charIndexOfRect(rect : NodeInfo, clientX : number, clientY : number, from : number, to : number) : number {
+		const m = layoutMetrics()
+		const sliceLen = to - from + 1
+		// 切片行数：段首切片（from==0）首行容量 = perLine-2（缩进占 2 字），续切片每行 perLine
+		let maxRow : number
+		if (from == 0) {
+			const rest = sliceLen - (m.perLine - 2)
+			maxRow = rest <= 0 ? 0 : Math.ceil(rest / m.perLine)
+		} else {
+			maxRow = Math.max(0, Math.ceil(sliceLen / m.perLine) - 1)
+		}
+		let row = Math.floor((clientY - rect.top) / m.lineH)
+		row = Math.max(0, Math.min(row, maxRow))
+		// 首行触点先扣除缩进宽（两个全角空格），字距：首行与末行未拉伸用自然字距，中间满行用两端对齐拉伸字距
+		const indent = (from == 0 && row == 0) ? m.indentPx : 0
+		const spacing = row == 0 ? m.charW : (row < maxRow ? m.fullCharW : m.charW)
+		let col = Math.floor((clientX - rect.left - indent) / spacing)
+		col = Math.max(0, Math.min(col, m.perLine - 1))
+		// 切片内字符索引（首行容量 perLine-2）加切片偏移 = 整段坐标
+		const sliceIdx = row == 0 ? col : (m.perLine - 2) + (row - 1) * m.perLine + col
+		return Math.min(sliceIdx, sliceLen - 1) + from
 	}
 
 	/** 所在句范围（[起点, 终点] 闭区间）：触点向前/向后扫句末标点定句界，标点后的闭合引号随句并入 */
@@ -2633,43 +2493,18 @@
 			}
 			// 段落文本按被长按段落所在章取（滚动模式多章渲染下 pi 属于 spanCid 章）；句界在整段文本上计算（跨页句子的两端坐标仍属整段）
 			const p = paragraphsOf(spanCid)[pi]
-			const m = layoutMetrics()
 			const sliceLen = to - from + 1
-			// 切片行数：段首切片（from==0）首行容量 = perLine-2（缩进占 2 字），续切片每行 perLine
-			let maxRow : number
-			if (from == 0) {
-				const rest = sliceLen - (m.perLine - 2)
-				maxRow = rest <= 0 ? 0 : Math.ceil(rest / m.perLine)
-			} else {
-				maxRow = Math.max(0, Math.ceil(sliceLen / m.perLine) - 1)
-			}
-			// 触点相对段落文本区 → 行列估算字符索引（与分页排版同源公式）；首行触点扣除缩进宽，切片内索引加 from 对齐整段坐标
-			let row = Math.floor((clientY - rect.top) / m.lineH)
-			row = Math.max(0, Math.min(row, maxRow))
-			const indent = (from == 0 && row == 0) ? m.indentPx : 0
-			const spacing = row == 0 ? m.charW : (row < maxRow ? m.fullCharW : m.charW)
-			let col = Math.floor((clientX - rect.left - indent) / spacing)
-			col = Math.max(0, Math.min(col, m.perLine - 1))
-			const sliceIdx = row == 0 ? col : (m.perLine - 2) + (row - 1) * m.perLine + col
-			const charIdx = Math.min(sliceIdx, sliceLen - 1) + from
+			// 触点相对段落文本区 → 行列估算字符索引（换算公式与分页排版同源，见 charIndexOfRect）
+			const charIdx = charIndexOfRect(rect, clientX, clientY, from, to)
 			if (spanCid != currentChapterId.value) {
 				currentChapterId.value = spanCid
 				saveProgress()
 			}
 			// 长按位置落在已有想法区间：恢复该想法的完整选区（含划线区域）；否则按句选取
+			const hit = thoughtAt(thoughts.value, spanCid, pi, charIdx)
 			let span : SelSpan | null = null
-			for (const t of thoughts.value) {
-				if (thoughtCovers(t, spanCid, pi, charIdx)) {
-					span = {
-						fromCid: t.fromCid,
-						fromOrigin: t.fromOrigin,
-						fromStart: t.fromStart,
-						toCid: t.toCid,
-						toOrigin: t.toOrigin,
-						toEnd: t.toEnd
-					} as SelSpan
-					break
-				}
+			if (hit != null) {
+				span = spanOfThought(hit)
 			}
 			if (span == null) {
 				const range = sentenceRange(p.text, charIdx)
@@ -2699,7 +2534,7 @@
 		if (s == null) {
 			return [] as SpanSeg[]
 		}
-		return spanSegs(s)
+		return buildSpanSegs(s, paragraphsOf)
 	})
 
 	/** 选区文本（跨段拼接） */
@@ -2723,13 +2558,7 @@
 	})
 
 	/** 分享卡片头像：登录用户取其头像 key 映射的静态图，未登录/无头像用默认 hei */
-	const shareLogoSrc = computed(() : string => {
-		const info = userStore.userInfo
-		if (info != null && info.avatar_url.length > 0) {
-			return avatarPathOf(info.avatar_url)
-		}
-		return '/static/touxiang/hei.png'
-	})
+	const shareLogoSrc = computed(() : string => avatarSrcOf(userStore.userInfo))
 
 	/** 设置面板开关（Stitch: 展开时隐藏顶栏与听书球） */
 	function toggleSettings() : void {
@@ -2941,35 +2770,8 @@
 			return
 		}
 		currentChapterId.value = cid
-		paragraphs.value = paragraphsOf(cid)
 		const breaks = chapterBreaks(cid)
-		let pi = -1
-		for (let p = 0; p < breaks.length; p++) {
-			const slices = breaks[p]
-			for (let si = 0; si < slices.length; si++) {
-				if (slices[si].origin == origin && slices[si].from <= charTarget && slices[si].to >= charTarget) {
-					pi = p
-					break
-				}
-			}
-			if (pi >= 0) {
-				break
-			}
-		}
-		if (pi < 0) {
-			for (let p = 0; p < breaks.length; p++) {
-				const slices = breaks[p]
-				for (let si = 0; si < slices.length; si++) {
-					if (slices[si].origin == origin) {
-						pi = p
-						break
-					}
-				}
-				if (pi >= 0) {
-					break
-				}
-			}
-		}
+		const pi = findPageOf(breaks, origin, charTarget)
 		if (pi >= 0) {
 			pageIndex.value = pi
 		}

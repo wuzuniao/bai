@@ -10,3 +10,24 @@ export function mainTopPx() : number {
 	}
 	return 96
 }
+
+/** 小程序胶囊按钮矩形（避让计算源） */
+export type CapsuleRect = {
+	/** 胶囊顶边（px） */
+	top : number
+	/** 胶囊左缘（px） */
+	left : number
+	/** 胶囊高度（px） */
+	height : number
+}
+
+/** 微信小程序胶囊按钮矩形（条件编译内聚：非微信端恒返回 null），各页面导航避让据此换算 */
+export function mpCapsuleRect() : CapsuleRect | null {
+	// #ifdef MP-WEIXIN
+	const capsule = uni.getMenuButtonBoundingClientRect()
+	if (capsule.height > 0) {
+		return { top: capsule.top, left: capsule.left, height: capsule.height } as CapsuleRect
+	}
+	// #endif
+	return null
+}

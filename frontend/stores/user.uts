@@ -181,6 +181,14 @@ export const useUserStore = defineStore('user', () => {
 	}
 })
 
+/** 分享卡片头像（登录用户取头像映射静态图，未登录/无头像用默认）——阅读页与首页诗共用 */
+export function avatarSrcOf(info : UserInfo | null) : string {
+	if (info != null && info.avatar_url.length > 0) {
+		return avatarPathOf(info.avatar_url)
+	}
+	return '/static/touxiang/hei.png'
+}
+
 /** 头像 key 与静态资源路径映射（数据库存 key；未知 key 回退 hong）——全局共享，页面勿重复定义 */
 export function avatarPathOf(key: string) : string {
 	if (key == 'hei') {

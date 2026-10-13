@@ -37,6 +37,7 @@
 </template>
 
 <script setup lang="uts">
+	import { mpCapsuleRect } from '@/utils/layout.uts'
 	import { findBook, loadPdfProgress, savePdfProgress, updateBookReading, addTodayMinutes } from '@/utils/books.uts'
 	import { openPdfSession } from '@/utils/pdfrender.uts'
 
@@ -96,20 +97,14 @@
 		const win = uni.getWindowInfo()
 		winW = win.windowWidth
 		winH = win.windowHeight
-		// #ifdef MP-WEIXIN
-		const capsule = uni.getMenuButtonBoundingClientRect()
-		if (capsule.height > 0) {
+		// 小程序端顶栏与胶囊对齐，其余端状态栏下（App/Web：statusBarHeight 恒 0 时保持默认）
+		const capsule = mpCapsuleRect()
+		if (capsule != null) {
 			navTop.value = capsule.top
 			navHeight.value = capsule.height
 		} else if (win.statusBarHeight > 0) {
 			navTop.value = win.statusBarHeight
 		}
-		// #endif
-		// #ifdef APP-ANDROID || APP-IOS
-		if (win.statusBarHeight > 0) {
-			navTop.value = win.statusBarHeight
-		}
-		// #endif
 		const bid = options['bookId']
 		const bidNum = bid != null ? parseInt(bid) : 0
 		// 0/非法为异常入参；负数 id 为离线导入待同步书籍，正常打开

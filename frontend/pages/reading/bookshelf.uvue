@@ -211,9 +211,10 @@
 	import BottomNavBar from '@/components/common/BottomNavBar.uvue'
 	import { PLACEHOLDER_STYLE } from '@/utils/theme.uts'
 	import { LocalBook, loadBooks, saveBooks, syncBookOrder, removeBookData, getTodayMinutes, fetchBooksFromCloud, fetchReadingStatsFromCloud, cleanupLegacyBooks } from '@/utils/books.uts'
-	import { saveBookshelfStyle } from '@/utils/readerTypes.uts'
+	import { saveBookshelfStyle, loadBookshelfStyle } from '@/utils/readerTypes.uts'
 	import { importBook } from '@/utils/bookparse.uts'
 	import { hasAccessToken } from '@/utils/request.uts'
+	import { mpCapsuleRect } from '@/utils/layout.uts'
 
 	/** 书架书籍（云端元数据 + 本机正文缓存合并列表，顺序即云端手动排序结果；未导入时仅显示添加格） */
 	const books = ref<LocalBook[]>([])
@@ -276,10 +277,7 @@
 
 	/** 从缓存读取书架卡片样式（云端偏好由 App 启动/本页刷新时落缓存） */
 	function readStyleFromCache() : void {
-		const storedStyle : any = uni.getStorageSync('bookshelf_style')
-		if (typeof storedStyle == 'string' && ((storedStyle as string) == 'plain' || (storedStyle as string) == 'photo')) {
-			shelfStyle.value = storedStyle as string
-		}
+		shelfStyle.value = loadBookshelfStyle()
 	}
 
 	/** 同步渲染本地缓存（先展示后刷新，避免网络等待白屏） */
@@ -595,20 +593,16 @@
 
 	onLoad(() => {
 		const win = uni.getWindowInfo()
-		// #ifdef MP-WEIXIN
-		// 胶囊按钮矩形：导航行与胶囊同行（顶部/高度对齐），右侧按钮避让到胶囊左边 8px
-		const capsule = uni.getMenuButtonBoundingClientRect()
-		if (capsule.height > 0) {
+		// 胶囊按钮矩形：导航行与胶囊同行（顶部/高度对齐），右侧按钮避让到胶囊左边 8px；
+		// 非小程序端：App 取状态栏 + 14（statusBarHeight 恒 > 0），Web 端 statusBarHeight 恒 0 保持默认
+		const capsule = mpCapsuleRect()
+		if (capsule != null) {
 			navTop.value = capsule.top
 			navHeight.value = capsule.height
 			navRight.value = win.windowWidth - capsule.left + 8
 		} else if (win.statusBarHeight > 0) {
 			navTop.value = win.statusBarHeight + 14
 		}
-		// #endif
-		// #ifdef APP-ANDROID || APP-IOS
-		navTop.value = win.statusBarHeight + 14
-		// #endif
 	})
 
 	onShow(() => {

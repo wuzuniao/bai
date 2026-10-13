@@ -83,216 +83,12 @@
 	import SelectionPopover from '@/components/selection/SelectionPopover.uvue'
 	import ReaderToast from '@/components/reader/ReaderToast.uvue'
 	import { READER_THEME_LIGHT } from '@/utils/theme.uts'
-	import { useUserStore, avatarPathOf } from '@/stores/user.uts'
-	import { hasAccessToken } from '@/utils/request.uts'
-	import { fetchBookNotes } from '@/api/reading.uts'
-	import { SelSpan, SpanSeg, TextMetrics, ParaRect, ShareQuoteCtx, Thought, UnderlineEntry, comparePos, normalizeSpan, setActiveBookId, loadUnderlines, loadThoughts, storeUnderlines, storeThoughts, underlineFromCloud, thoughtFromCloud } from '@/utils/readerTypes.uts'
+	import { useUserStore, avatarSrcOf } from '@/stores/user.uts'
+	import { SelSpan, SpanSeg, TextMetrics, ParaRect, ShareQuoteCtx, Thought, UnderlineEntry, Paragraph, normalizeSpan, setActiveBookId, loadUnderlines, loadThoughts, fetchNotesToCache, VIRTUAL_BOOK_ID, SENTENCE_END_CHARS, thoughtAt, spanOfThought, thoughtTextOfSpan, buildSpanSegs } from '@/utils/readerTypes.uts'
+	import { POEM_LINES, PoemLine } from '@/utils/poem.uts'
 
-	type PoemChar = {
-		char: string
-		pinyin: string
-	}
-
-	type PoemLine = {
-		chars: PoemChar[]
-		punct: string
-	}
-
-	/** 诗文内容（8 联 16 行，逐字拼音取自设计稿） */
-	const poemLines = ref<PoemLine[]>([
-		{
-			chars: [
-				{ char: '世', pinyin: 'shì' } as PoemChar,
-				{ char: '界', pinyin: 'jiè' } as PoemChar,
-				{ char: '尽', pinyin: 'jìn' } as PoemChar,
-				{ char: '头', pinyin: 'tóu' } as PoemChar,
-				{ char: '千', pinyin: 'qiān' } as PoemChar,
-				{ char: '般', pinyin: 'bān' } as PoemChar,
-				{ char: '法', pinyin: 'fǎ' } as PoemChar
-			],
-			punct: '，'
-		} as PoemLine,
-		{
-			chars: [
-				{ char: '不', pinyin: 'bù' } as PoemChar,
-				{ char: '外', pinyin: 'wài' } as PoemChar,
-				{ char: '彼', pinyin: 'bǐ' } as PoemChar,
-				{ char: '岸', pinyin: 'àn' } as PoemChar,
-				{ char: '七', pinyin: 'qī' } as PoemChar,
-				{ char: '色', pinyin: 'sè' } as PoemChar,
-				{ char: '花', pinyin: 'huā' } as PoemChar
-			],
-			punct: '。'
-		} as PoemLine,
-		{
-			chars: [
-				{ char: '滚', pinyin: 'gǔn' } as PoemChar,
-				{ char: '滚', pinyin: 'gǔn' } as PoemChar,
-				{ char: '红', pinyin: 'hóng' } as PoemChar,
-				{ char: '尘', pinyin: 'chén' } as PoemChar,
-				{ char: '修', pinyin: 'xiū' } as PoemChar,
-				{ char: '玲', pinyin: 'líng' } as PoemChar,
-				{ char: '珑', pinyin: 'lóng' } as PoemChar
-			],
-			punct: '，'
-		} as PoemLine,
-		{
-			chars: [
-				{ char: '业', pinyin: 'yè' } as PoemChar,
-				{ char: '业', pinyin: 'yè' } as PoemChar,
-				{ char: '罪', pinyin: 'zuì' } as PoemChar,
-				{ char: '火', pinyin: 'huǒ' } as PoemChar,
-				{ char: '炼', pinyin: 'liàn' } as PoemChar,
-				{ char: '金', pinyin: 'jīn' } as PoemChar,
-				{ char: '身', pinyin: 'shēn' } as PoemChar
-			],
-			punct: '。'
-		} as PoemLine,
-		{
-			chars: [
-				{ char: '三', pinyin: 'sān' } as PoemChar,
-				{ char: '生', pinyin: 'shēng' } as PoemChar,
-				{ char: '长', pinyin: 'cháng' } as PoemChar,
-				{ char: '有', pinyin: 'yǒu' } as PoemChar,
-				{ char: '心', pinyin: 'xīn' } as PoemChar,
-				{ char: '虚', pinyin: 'xū' } as PoemChar,
-				{ char: '节', pinyin: 'jié' } as PoemChar
-			],
-			punct: '，'
-		} as PoemLine,
-		{
-			chars: [
-				{ char: '六', pinyin: 'liù' } as PoemChar,
-				{ char: '道', pinyin: 'dào' } as PoemChar,
-				{ char: '依', pinyin: 'yī' } as PoemChar,
-				{ char: '旧', pinyin: 'jiù' } as PoemChar,
-				{ char: '意', pinyin: 'yì' } as PoemChar,
-				{ char: '昆', pinyin: 'kūn' } as PoemChar,
-				{ char: '仑', pinyin: 'lún' } as PoemChar
-			],
-			punct: '。'
-		} as PoemLine,
-		{
-			chars: [
-				{ char: '自', pinyin: 'zì' } as PoemChar,
-				{ char: '有', pinyin: 'yǒu' } as PoemChar,
-				{ char: '傲', pinyin: 'ào' } as PoemChar,
-				{ char: '雪', pinyin: 'xuě' } as PoemChar,
-				{ char: '寒', pinyin: 'hán' } as PoemChar,
-				{ char: '梅', pinyin: 'méi' } as PoemChar,
-				{ char: '意', pinyin: 'yì' } as PoemChar
-			],
-			punct: '，'
-		} as PoemLine,
-		{
-			chars: [
-				{ char: '何', pinyin: 'hé' } as PoemChar,
-				{ char: '惧', pinyin: 'jù' } as PoemChar,
-				{ char: '风', pinyin: 'fēng' } as PoemChar,
-				{ char: '雷', pinyin: 'léi' } as PoemChar,
-				{ char: '与', pinyin: 'yǔ' } as PoemChar,
-				{ char: '天', pinyin: 'tiān' } as PoemChar,
-				{ char: '争', pinyin: 'zhēng' } as PoemChar
-			],
-			punct: '。'
-		} as PoemLine,
-		{
-			chars: [
-				{ char: '步', pinyin: 'bù' } as PoemChar,
-				{ char: '履', pinyin: 'lǚ' } as PoemChar,
-				{ char: '铿', pinyin: 'kēng' } as PoemChar,
-				{ char: '锵', pinyin: 'qiāng' } as PoemChar,
-				{ char: '竞', pinyin: 'jìng' } as PoemChar,
-				{ char: '逐', pinyin: 'zhú' } as PoemChar,
-				{ char: '上', pinyin: 'shàng' } as PoemChar
-			],
-			punct: '，'
-		} as PoemLine,
-		{
-			chars: [
-				{ char: '无', pinyin: 'wú' } as PoemChar,
-				{ char: '惧', pinyin: 'jù' } as PoemChar,
-				{ char: '枷', pinyin: 'jiā' } as PoemChar,
-				{ char: '锁', pinyin: 'suǒ' } as PoemChar,
-				{ char: '紧', pinyin: 'jǐn' } as PoemChar,
-				{ char: '缠', pinyin: 'chán' } as PoemChar,
-				{ char: '身', pinyin: 'shēn' } as PoemChar
-			],
-			punct: '。'
-		} as PoemLine,
-		{
-			chars: [
-				{ char: '今', pinyin: 'jīn' } as PoemChar,
-				{ char: '日', pinyin: 'rì' } as PoemChar,
-				{ char: '登', pinyin: 'dēng' } as PoemChar,
-				{ char: '临', pinyin: 'lín' } as PoemChar,
-				{ char: '泰', pinyin: 'tài' } as PoemChar,
-				{ char: '山', pinyin: 'shān' } as PoemChar,
-				{ char: '顶', pinyin: 'dǐng' } as PoemChar
-			],
-			punct: '，'
-		} as PoemLine,
-		{
-			chars: [
-				{ char: '身', pinyin: 'shēn' } as PoemChar,
-				{ char: '旁', pinyin: 'páng' } as PoemChar,
-				{ char: '早', pinyin: 'zǎo' } as PoemChar,
-				{ char: '已', pinyin: 'yǐ' } as PoemChar,
-				{ char: '无', pinyin: 'wú' } as PoemChar,
-				{ char: '一', pinyin: 'yī' } as PoemChar,
-				{ char: '人', pinyin: 'rén' } as PoemChar
-			],
-			punct: '。'
-		} as PoemLine,
-		{
-			chars: [
-				{ char: '魑', pinyin: 'chī' } as PoemChar,
-				{ char: '魅', pinyin: 'mèi' } as PoemChar,
-				{ char: '魍', pinyin: 'wǎng' } as PoemChar,
-				{ char: '魉', pinyin: 'liǎng' } as PoemChar,
-				{ char: '齐', pinyin: 'qí' } as PoemChar,
-				{ char: '登', pinyin: 'dēng' } as PoemChar,
-				{ char: '临', pinyin: 'lín' } as PoemChar
-			],
-			punct: '，'
-		} as PoemLine,
-		{
-			chars: [
-				{ char: '为', pinyin: 'wéi' } as PoemChar,
-				{ char: '鬼', pinyin: 'guǐ' } as PoemChar,
-				{ char: '为', pinyin: 'wéi' } as PoemChar,
-				{ char: '蜮', pinyin: 'yù' } as PoemChar,
-				{ char: '逞', pinyin: 'chěng' } as PoemChar,
-				{ char: '凶', pinyin: 'xiōng' } as PoemChar,
-				{ char: '威', pinyin: 'wēi' } as PoemChar
-			],
-			punct: '。'
-		} as PoemLine,
-		{
-			chars: [
-				{ char: '挺', pinyin: 'tǐng' } as PoemChar,
-				{ char: '然', pinyin: 'rán' } as PoemChar,
-				{ char: '相', pinyin: 'xiāng' } as PoemChar,
-				{ char: '斗', pinyin: 'dòu' } as PoemChar,
-				{ char: '一', pinyin: 'yī' } as PoemChar,
-				{ char: '千', pinyin: 'qiān' } as PoemChar,
-				{ char: '场', pinyin: 'chǎng' } as PoemChar
-			],
-			punct: '，'
-		} as PoemLine,
-		{
-			chars: [
-				{ char: '轮', pinyin: 'lún' } as PoemChar,
-				{ char: '回', pinyin: 'huí' } as PoemChar,
-				{ char: '路', pinyin: 'lù' } as PoemChar,
-				{ char: '上', pinyin: 'shàng' } as PoemChar,
-				{ char: '是', pinyin: 'shì' } as PoemChar,
-				{ char: '初', pinyin: 'chū' } as PoemChar,
-				{ char: '心', pinyin: 'xīn' } as PoemChar
-			],
-			punct: '。'
-		} as PoemLine
-	])
+	/** 诗文内容（8 联 16 行，逐字拼音取自设计稿，数据真源 utils/poem.uts） */
+	const poemLines = ref<PoemLine[]>(POEM_LINES)
 
 	/** 顶部留白：设计稿 48px 含状态栏，优先取系统状态栏高度（Web 端回退 48px） */
 	const topInset = ref(48)
@@ -332,12 +128,8 @@
 	}
 
 	/** ===== 首页诗划词气泡（复用阅读页 SelectionPopover：选区/手柄/拖动与五项动作内聚组件） ===== */
-	/** 首页诗虚拟书 id：云端 reading_notes 以 book_id=0 存储《无题》笔记（无 user_books 行，不进书架、无进度） */
-	const HOME_BOOK_ID = 0
 	/** 诗行字符容量：7 字 + 行尾标点（选区/划线/想法统一坐标口径，标点占每行末位 idx=7） */
 	const LINE_CHAR_COUNT = 8
-	/** 句末标点集（句号/叹号/问号结句，逗号不结句；与阅读页句间扫描同口径） */
-	const SENTENCE_END_CHARS = '。！？!?…'
 
 	/** 划词气泡与提示组件引用 */
 	const popoverRef = ref<SelectionPopover | null>(null)
@@ -369,22 +161,13 @@
 	const underlines = ref<UnderlineEntry[]>([])
 	const thoughts = ref<Thought[]>([])
 
-	/** 选区覆盖段序列（首页单章 cid=0，段=诗行；划线按项写入所在行，首末行按端点截取） */
-	function spanSegs(s : SelSpan) : SpanSeg[] {
-		const n = normalizeSpan(s)
-		const segs : SpanSeg[] = []
-		for (let li = n.fromOrigin; li <= n.toOrigin; li++) {
-			if (li < 0 || li >= poemLines.value.length) {
-				continue
-			}
-			segs.push({
-				cid: 0,
-				origin: li,
-				start: li == n.fromOrigin ? n.fromStart : 0,
-				end: li == n.toOrigin ? n.toEnd : LINE_CHAR_COUNT - 1
-			} as SpanSeg)
+	/** 诗行 → 段落提供者（行文本 = 7 字 + 行尾标点，长度恒 8；选区段序列与选区文本经共享 buildSpanSegs 消费） */
+	function poemParasOf(cid : number) : Paragraph[] {
+		const paras : Paragraph[] = []
+		for (let li = 0; li < poemLines.value.length; li++) {
+			paras.push({ text: lineText(li) } as Paragraph)
 		}
-		return segs
+		return paras
 	}
 
 	/** 行完整文本（7 字 + 行尾标点） */
@@ -406,16 +189,15 @@
 		if (s == null) {
 			return ''
 		}
-		const n = normalizeSpan(s)
 		let out = ''
-		for (const seg of spanSegs(n)) {
+		for (const seg of buildSpanSegs(s, poemParasOf)) {
 			if (seg.end < seg.start) {
 				continue
 			}
 			if (out.length > 0) {
 				out += '\n'
 			}
-			out += lineText(seg.origin).slice(seg.start, seg.end + 1)
+			out += poemParasOf(seg.cid)[seg.origin].text.slice(seg.start, seg.end + 1)
 		}
 		return out
 	}
@@ -426,27 +208,10 @@
 		if (s == null) {
 			return [] as SpanSeg[]
 		}
-		return spanSegs(s)
+		return buildSpanSegs(s, poemParasOf)
 	})
 
 	const selText = computed(() : string => selectionText())
-
-	/** 选区关联想法内容（区间与选区相交的首个想法，与阅读页分享快照口径一致；无则纯划线分享） */
-	function spanThoughtText() : string {
-		const s = selSpan.value
-		if (s == null) {
-			return ''
-		}
-		const n = normalizeSpan(s)
-		for (const t of thoughts.value) {
-			const tEndAfterSpanFrom = comparePos(t.toCid, t.toOrigin, t.toEnd, n.fromCid, n.fromOrigin, n.fromStart) >= 0
-			const tStartBeforeSpanEnd = comparePos(t.fromCid, t.fromOrigin, t.fromStart, n.toCid, n.toOrigin, n.toEnd) <= 0
-			if (tEndAfterSpanFrom && tStartBeforeSpanEnd) {
-				return t.content
-			}
-		}
-		return ''
-	}
 
 	/** 分享卡片内容快照（首页诗无上下文渐出，出处固定为铭文） */
 	const shareCtx = computed<ShareQuoteCtx | null>(() : ShareQuoteCtx | null => {
@@ -460,7 +225,7 @@
 			quote: selectionText(),
 			nearAfter: '',
 			farAfter: '',
-			thoughtText: spanThoughtText(),
+			thoughtText: thoughtTextOfSpan(s, thoughts.value),
 			source: '无足鸟著 2017年2月',
 			bookTitle: '无题'
 		} as ShareQuoteCtx
@@ -468,13 +233,7 @@
 
 	/** ===== 用户信息（分享卡片头像，与阅读页同口径） ===== */
 	const userStore = useUserStore()
-	const shareLogoSrc = computed(() : string => {
-		const info = userStore.userInfo
-		if (info != null && info.avatar_url.length > 0) {
-			return avatarPathOf(info.avatar_url)
-		}
-		return '/static/touxiang/hei.png'
-	})
+	const shareLogoSrc = computed(() : string => avatarSrcOf(userStore.userInfo))
 
 	/** ===== 渲染函数（模板调用：选区高亮与划线/想法装饰） ===== */
 
@@ -499,16 +258,10 @@
 		if (r == null) {
 			return ''
 		}
-		const step = uni.upx2px(69)
+		const step = poemMetrics.charW
 		const right = r[1] >= LINE_CHAR_COUNT - 1 ? uni.upx2px(510) : (r[1] + 1) * step
 		const left = r[0] * step
 		return 'left:' + left + 'px;top:' + uni.upx2px(27) + 'px;width:' + (right - left) + 'px;height:' + uni.upx2px(50) + 'px'
-	}
-
-	/** 想法区间是否覆盖字符（虚拟书单章：cid 恒 0，按行序号与字符索引比对） */
-	function thoughtCovers(t : Thought, li : number, idx : number) : boolean {
-		return comparePos(t.fromCid, t.fromOrigin, t.fromStart, 0, li, idx) <= 0
-			&& comparePos(t.toCid, t.toOrigin, t.toEnd, 0, li, idx) >= 0
 	}
 
 	/** 行内划线条带区间（划线记录的字符区间对剔除想法覆盖段——想法优先，
@@ -553,7 +306,7 @@
 
 	/** 装饰条带内联样式（横向几何与选区高亮条同口径：left/width，纵向位置固定于样式类） */
 	function bandStyle(band : number[]) : string {
-		const step = uni.upx2px(69)
+		const step = poemMetrics.charW
 		const right = band[1] >= LINE_CHAR_COUNT - 1 ? uni.upx2px(510) : (band[1] + 1) * step
 		return 'left:' + band[0] * step + 'px;width:' + (right - band[0] * step) + 'px'
 	}
@@ -617,28 +370,23 @@
 			// 长按字符列命中想法区间时恢复该想法的完整选区（含划线区域，默认高亮想法选区，
 			// 与阅读页「句间吸附前判定想法」同语义）；否则按句选取——句号结尾的才是一句，
 			// 逗号行与句号行构成一联一起选中（与阅读页句间吸附同语义）
-			const col = Math.max(0, Math.min(Math.floor((clientX - rects[li].left) / uni.upx2px(69)), LINE_CHAR_COUNT - 1))
+			const col = Math.max(0, Math.min(Math.floor((clientX - rects[li].left) / poemMetrics.charW), LINE_CHAR_COUNT - 1))
 			const range = sentenceRangeOf(li)
-			let span = {
-				fromCid: 0,
-				fromOrigin: range[0],
-				fromStart: 0,
-				toCid: 0,
-				toOrigin: range[1],
-				toEnd: LINE_CHAR_COUNT - 1
-			} as SelSpan
-			for (const t of thoughts.value) {
-				if (thoughtCovers(t, li, col)) {
-					span = {
-						fromCid: t.fromCid,
-						fromOrigin: t.fromOrigin,
-						fromStart: t.fromStart,
-						toCid: t.toCid,
-						toOrigin: t.toOrigin,
-						toEnd: t.toEnd
-					} as SelSpan
-					break
-				}
+			let span : SelSpan
+			const hit = thoughtAt(thoughts.value, 0, li, col)
+			if (hit != null) {
+				// 长按列命中想法区间：恢复该想法的完整选区（含划线区域，与阅读页「句间吸附前判定想法」同语义）
+				span = spanOfThought(hit)
+			} else {
+				// 按句选取：句号结尾的才是一句，逗号行与句号行构成一联一起选中（与阅读页句间吸附同语义）
+				span = {
+					fromCid: 0,
+					fromOrigin: range[0],
+					fromStart: 0,
+					toCid: 0,
+					toOrigin: range[1],
+					toEnd: LINE_CHAR_COUNT - 1
+				} as SelSpan
 			}
 			// 起点段矩形按选区起点行取（跨行想法的估算基准落在起点行；锚点实测以端点动态查询为准）
 			const sn = normalizeSpan(span)
@@ -713,12 +461,10 @@
 			if (rect == null) {
 				return
 			}
-			const col = Math.max(0, Math.min(Math.floor((e.clientX - rect.left) / uni.upx2px(69)), LINE_CHAR_COUNT - 1))
-			for (const t of thoughts.value) {
-				if (thoughtCovers(t, li, col)) {
-					popoverRef.value?.showThoughtView(t.quote, t.content, rect.bottom, rect.top)
-					return
-				}
+			const col = Math.max(0, Math.min(Math.floor((e.clientX - rect.left) / poemMetrics.charW), LINE_CHAR_COUNT - 1))
+			const hit = thoughtAt(thoughts.value, 0, li, col)
+			if (hit != null) {
+				popoverRef.value?.showThoughtView(hit.quote, hit.content, rect.bottom, rect.top)
 			}
 		}).exec()
 	}
@@ -741,43 +487,12 @@
 		reloadNotesMirror()
 	}
 
-	/** 进入页面：锁定虚拟书 + 云端拉取覆盖缓存（与阅读页打开书籍同口径） */
+	/** 进入页面：锁定虚拟书 + 云端拉取覆盖缓存（与阅读页打开书籍同口径，拉取容错收口 readerTypes） */
 	async function loadHomeNotes() : Promise<void> {
-		setActiveBookId(HOME_BOOK_ID)
+		setActiveBookId(VIRTUAL_BOOK_ID)
 		reloadNotesMirror()
-		if (!hasAccessToken()) {
-			return
-		}
-		try {
-			const res = await fetchBookNotes(HOME_BOOK_ID)
-			if (res.code == 0 && res.data != null) {
-				const ulist : UnderlineEntry[] = []
-				const rawU = res.data!.getArray('underlines')
-				if (rawU != null) {
-					rawU.forEach((el) => {
-						const e = underlineFromCloud(el as UTSJSONObject)
-						if (e != null) {
-							ulist.push(e)
-						}
-					})
-				}
-				const tlist : Thought[] = []
-				const rawT = res.data!.getArray('thoughts')
-				if (rawT != null) {
-					rawT.forEach((el) => {
-						const t = thoughtFromCloud(el as UTSJSONObject)
-						if (t != null) {
-							tlist.push(t)
-						}
-					})
-				}
-				storeUnderlines(ulist)
-				storeThoughts(tlist)
-				reloadNotesMirror()
-			}
-		} catch (e) {
-			console.warn('首页诗笔记拉取失败，使用本地缓存', e)
-		}
+		await fetchNotesToCache(VIRTUAL_BOOK_ID)
+		reloadNotesMirror()
 	}
 
 	/** 气泡动作提示（复制成功/失败、查询占位，经阅读提示卡片组件展示） */

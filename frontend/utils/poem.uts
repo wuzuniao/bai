@@ -1,0 +1,212 @@
+/**
+ * 首页诗文数据《无题》（无足鸟著 2017 年 2 月，8 联 16 行）
+ * 行结构 = 7 个字单元（拼音 + 汉字）+ 行尾标点，供首页划词、选区渲染与虚拟书 0 笔记坐标消费
+ */
+
+/** 字单元（拼音 + 汉字） */
+export type PoemChar = {
+	char: string
+	pinyin: string
+}
+
+/** 诗行（7 字单元 + 行尾标点） */
+export type PoemLine = {
+	chars: PoemChar[]
+	punct: string
+}
+
+/** 诗文内容（8 联 16 行，逐字拼音取自设计稿） */
+export const POEM_LINES : PoemLine[] = [
+	{
+		chars: [
+			{ char: '世', pinyin: 'shì' } as PoemChar,
+			{ char: '界', pinyin: 'jiè' } as PoemChar,
+			{ char: '尽', pinyin: 'jìn' } as PoemChar,
+			{ char: '头', pinyin: 'tóu' } as PoemChar,
+			{ char: '千', pinyin: 'qiān' } as PoemChar,
+			{ char: '般', pinyin: 'bān' } as PoemChar,
+			{ char: '法', pinyin: 'fǎ' } as PoemChar
+		],
+		punct: '，'
+	} as PoemLine,
+	{
+		chars: [
+			{ char: '不', pinyin: 'bù' } as PoemChar,
+			{ char: '外', pinyin: 'wài' } as PoemChar,
+			{ char: '彼', pinyin: 'bǐ' } as PoemChar,
+			{ char: '岸', pinyin: 'àn' } as PoemChar,
+			{ char: '七', pinyin: 'qī' } as PoemChar,
+			{ char: '色', pinyin: 'sè' } as PoemChar,
+			{ char: '花', pinyin: 'huā' } as PoemChar
+		],
+		punct: '。'
+	} as PoemLine,
+	{
+		chars: [
+			{ char: '滚', pinyin: 'gǔn' } as PoemChar,
+			{ char: '滚', pinyin: 'gǔn' } as PoemChar,
+			{ char: '红', pinyin: 'hóng' } as PoemChar,
+			{ char: '尘', pinyin: 'chén' } as PoemChar,
+			{ char: '修', pinyin: 'xiū' } as PoemChar,
+			{ char: '玲', pinyin: 'líng' } as PoemChar,
+			{ char: '珑', pinyin: 'lóng' } as PoemChar
+		],
+		punct: '，'
+	} as PoemLine,
+	{
+		chars: [
+			{ char: '业', pinyin: 'yè' } as PoemChar,
+			{ char: '业', pinyin: 'yè' } as PoemChar,
+			{ char: '罪', pinyin: 'zuì' } as PoemChar,
+			{ char: '火', pinyin: 'huǒ' } as PoemChar,
+			{ char: '炼', pinyin: 'liàn' } as PoemChar,
+			{ char: '金', pinyin: 'jīn' } as PoemChar,
+			{ char: '身', pinyin: 'shēn' } as PoemChar
+		],
+		punct: '。'
+	} as PoemLine,
+	{
+		chars: [
+			{ char: '三', pinyin: 'sān' } as PoemChar,
+			{ char: '生', pinyin: 'shēng' } as PoemChar,
+			{ char: '长', pinyin: 'cháng' } as PoemChar,
+			{ char: '有', pinyin: 'yǒu' } as PoemChar,
+			{ char: '心', pinyin: 'xīn' } as PoemChar,
+			{ char: '虚', pinyin: 'xū' } as PoemChar,
+			{ char: '节', pinyin: 'jié' } as PoemChar
+		],
+		punct: '，'
+	} as PoemLine,
+	{
+		chars: [
+			{ char: '六', pinyin: 'liù' } as PoemChar,
+			{ char: '道', pinyin: 'dào' } as PoemChar,
+			{ char: '依', pinyin: 'yī' } as PoemChar,
+			{ char: '旧', pinyin: 'jiù' } as PoemChar,
+			{ char: '意', pinyin: 'yì' } as PoemChar,
+			{ char: '昆', pinyin: 'kūn' } as PoemChar,
+			{ char: '仑', pinyin: 'lún' } as PoemChar
+		],
+		punct: '。'
+	} as PoemLine,
+	{
+		chars: [
+			{ char: '自', pinyin: 'zì' } as PoemChar,
+			{ char: '有', pinyin: 'yǒu' } as PoemChar,
+			{ char: '傲', pinyin: 'ào' } as PoemChar,
+			{ char: '雪', pinyin: 'xuě' } as PoemChar,
+			{ char: '寒', pinyin: 'hán' } as PoemChar,
+			{ char: '梅', pinyin: 'méi' } as PoemChar,
+			{ char: '意', pinyin: 'yì' } as PoemChar
+		],
+		punct: '，'
+	} as PoemLine,
+	{
+		chars: [
+			{ char: '何', pinyin: 'hé' } as PoemChar,
+			{ char: '惧', pinyin: 'jù' } as PoemChar,
+			{ char: '风', pinyin: 'fēng' } as PoemChar,
+			{ char: '雷', pinyin: 'léi' } as PoemChar,
+			{ char: '与', pinyin: 'yǔ' } as PoemChar,
+			{ char: '天', pinyin: 'tiān' } as PoemChar,
+			{ char: '争', pinyin: 'zhēng' } as PoemChar
+		],
+		punct: '。'
+	} as PoemLine,
+	{
+		chars: [
+			{ char: '步', pinyin: 'bù' } as PoemChar,
+			{ char: '履', pinyin: 'lǚ' } as PoemChar,
+			{ char: '铿', pinyin: 'kēng' } as PoemChar,
+			{ char: '锵', pinyin: 'qiāng' } as PoemChar,
+			{ char: '竞', pinyin: 'jìng' } as PoemChar,
+			{ char: '逐', pinyin: 'zhú' } as PoemChar,
+			{ char: '上', pinyin: 'shàng' } as PoemChar
+		],
+		punct: '，'
+	} as PoemLine,
+	{
+		chars: [
+			{ char: '无', pinyin: 'wú' } as PoemChar,
+			{ char: '惧', pinyin: 'jù' } as PoemChar,
+			{ char: '枷', pinyin: 'jiā' } as PoemChar,
+			{ char: '锁', pinyin: 'suǒ' } as PoemChar,
+			{ char: '紧', pinyin: 'jǐn' } as PoemChar,
+			{ char: '缠', pinyin: 'chán' } as PoemChar,
+			{ char: '身', pinyin: 'shēn' } as PoemChar
+		],
+		punct: '。'
+	} as PoemLine,
+	{
+		chars: [
+			{ char: '今', pinyin: 'jīn' } as PoemChar,
+			{ char: '日', pinyin: 'rì' } as PoemChar,
+			{ char: '登', pinyin: 'dēng' } as PoemChar,
+			{ char: '临', pinyin: 'lín' } as PoemChar,
+			{ char: '泰', pinyin: 'tài' } as PoemChar,
+			{ char: '山', pinyin: 'shān' } as PoemChar,
+			{ char: '顶', pinyin: 'dǐng' } as PoemChar
+		],
+		punct: '，'
+	} as PoemLine,
+	{
+		chars: [
+			{ char: '身', pinyin: 'shēn' } as PoemChar,
+			{ char: '旁', pinyin: 'páng' } as PoemChar,
+			{ char: '早', pinyin: 'zǎo' } as PoemChar,
+			{ char: '已', pinyin: 'yǐ' } as PoemChar,
+			{ char: '无', pinyin: 'wú' } as PoemChar,
+			{ char: '一', pinyin: 'yī' } as PoemChar,
+			{ char: '人', pinyin: 'rén' } as PoemChar
+		],
+		punct: '。'
+	} as PoemLine,
+	{
+		chars: [
+			{ char: '魑', pinyin: 'chī' } as PoemChar,
+			{ char: '魅', pinyin: 'mèi' } as PoemChar,
+			{ char: '魍', pinyin: 'wǎng' } as PoemChar,
+			{ char: '魉', pinyin: 'liǎng' } as PoemChar,
+			{ char: '齐', pinyin: 'qí' } as PoemChar,
+			{ char: '登', pinyin: 'dēng' } as PoemChar,
+			{ char: '临', pinyin: 'lín' } as PoemChar
+		],
+		punct: '，'
+	} as PoemLine,
+	{
+		chars: [
+			{ char: '为', pinyin: 'wéi' } as PoemChar,
+			{ char: '鬼', pinyin: 'guǐ' } as PoemChar,
+			{ char: '为', pinyin: 'wéi' } as PoemChar,
+			{ char: '蜮', pinyin: 'yù' } as PoemChar,
+			{ char: '逞', pinyin: 'chěng' } as PoemChar,
+			{ char: '凶', pinyin: 'xiōng' } as PoemChar,
+			{ char: '威', pinyin: 'wēi' } as PoemChar
+		],
+		punct: '。'
+	} as PoemLine,
+	{
+		chars: [
+			{ char: '挺', pinyin: 'tǐng' } as PoemChar,
+			{ char: '然', pinyin: 'rán' } as PoemChar,
+			{ char: '相', pinyin: 'xiāng' } as PoemChar,
+			{ char: '斗', pinyin: 'dòu' } as PoemChar,
+			{ char: '一', pinyin: 'yī' } as PoemChar,
+			{ char: '千', pinyin: 'qiān' } as PoemChar,
+			{ char: '场', pinyin: 'chǎng' } as PoemChar
+		],
+		punct: '，'
+	} as PoemLine,
+	{
+		chars: [
+			{ char: '轮', pinyin: 'lún' } as PoemChar,
+			{ char: '回', pinyin: 'huí' } as PoemChar,
+			{ char: '路', pinyin: 'lù' } as PoemChar,
+			{ char: '上', pinyin: 'shàng' } as PoemChar,
+			{ char: '是', pinyin: 'shì' } as PoemChar,
+			{ char: '初', pinyin: 'chū' } as PoemChar,
+			{ char: '心', pinyin: 'xīn' } as PoemChar
+		],
+		punct: '。'
+	} as PoemLine
+]

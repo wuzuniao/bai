@@ -76,6 +76,7 @@
 </template>
 
 <script setup lang="uts">
+	import { mpCapsuleRect } from '@/utils/layout.uts'
 	import { READER_THEME_LIGHT, READER_THEME_NIGHT, READER_THEME_PAPER, ReaderTheme } from '@/utils/theme.uts'
 	import { Chapter, NoteRecord, Bookmark, ReaderSettings, loadSettings } from '@/utils/readerTypes.uts'
 	import DrawerPanel from '@/components/reader/DrawerPanel.uvue'
@@ -153,17 +154,12 @@
 			navTop.value = win.statusBarHeight
 		}
 		const navH = uni.upx2px(152)
-		// #ifdef MP-WEIXIN
-		const capsule = uni.getMenuButtonBoundingClientRect()
-		if (capsule.height > 0) {
+		const capsule = mpCapsuleRect()
+		if (capsule != null) {
 			drawerPanelHeight.value = win.windowHeight - (capsule.top + capsule.height + 8) - navH
 		} else {
 			drawerPanelHeight.value = win.windowHeight - (navTop.value + navHeight.value + 8) - navH
 		}
-		// #endif
-		// #ifndef MP-WEIXIN
-		drawerPanelHeight.value = win.windowHeight - (navTop.value + navHeight.value + 8) - navH
-		// #endif
 	}
 
 	/** ===== 交互事件上行（导航类耦合宿主正文） ===== */

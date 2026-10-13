@@ -5,7 +5,8 @@
  * 锁定当前书籍并拉取云端覆盖缓存，写入类工具本地即写 + 云端静默跟随。
  */
 
-import { upsertUnderline, createThought, replaceBookmarks, savePreferences, syncQuiet } from '../api/reading.uts'
+import { upsertUnderline, createThought, replaceBookmarks, savePreferences, fetchBookNotes, fetchBookBookmarks, syncQuiet } from '../api/reading.uts'
+import { hasAccessToken } from './request.uts'
 
 /** 目录章节（目录列表与正文页头共用） */
 export type Chapter = {
@@ -135,6 +136,91 @@ export function normalizeSpan(s : SelSpan) : SelSpan {
 	return s
 }
 
+/** 句末标点集（句号/叹号/问号结句，逗号不结句；阅读页句界扫描与首页诗行间句界共用） */
+export const SENTENCE_END_CHARS : string = '。！？!?…'
+
+/** 判定想法覆盖某章某段落的某字符（位置字典序落在 [from, to] 闭区间内；跨段跨章，章 id 升序即阅读顺序） */
+export function thoughtCovers(t : Thought, cid : number, origin : number, charIdx : number) : boolean {
+	return comparePos(t.fromCid, t.fromOrigin, t.fromStart, cid, origin, charIdx) <= 0
+		&& comparePos(cid, origin, charIdx, t.toCid, t.toOrigin, t.toEnd) <= 0
+}
+
+/** 想法记录 → 其选区区间（长按命中想法恢复完整选区用） */
+export function spanOfThought(t : Thought) : SelSpan {
+	return {
+		fromCid: t.fromCid,
+		fromOrigin: t.fromOrigin,
+		fromStart: t.fromStart,
+		toCid: t.toCid,
+		toOrigin: t.toOrigin,
+		toEnd: t.toEnd
+	} as SelSpan
+}
+
+/** 命中某章某段落某字符位置的想法（长按恢复选区/点击查看想法共用；无命中返回 null） */
+export function thoughtAt(thoughts : Thought[], cid : number, origin : number, charIdx : number) : Thought | null {
+	for (const t of thoughts) {
+		if (thoughtCovers(t, cid, origin, charIdx)) {
+			return t
+		}
+	}
+	return null
+}
+
+/** 选区关联想法内容（区间与选区相交的首个想法，拖动微调后仍关联；无则空串） */
+export function thoughtTextOfSpan(s : SelSpan, thoughts : Thought[]) : string {
+	const n = normalizeSpan(s)
+	for (const t of thoughts) {
+		const tEndAfterSpanFrom = comparePos(t.toCid, t.toOrigin, t.toEnd, n.fromCid, n.fromOrigin, n.fromStart) >= 0
+		const tStartBeforeSpanEnd = comparePos(t.fromCid, t.fromOrigin, t.fromStart, n.toCid, n.toOrigin, n.toEnd) <= 0
+		if (tEndAfterSpanFrom && tStartBeforeSpanEnd) {
+			return t.content
+		}
+	}
+	return ''
+}
+
+/**
+ * 选区覆盖段序列（划线按项写入所在章）：跨章时按各章真实段落数展开（滚动模式多章正文长度各异，
+ * 不能套用当前章段落数），段长由 parasOf 提供——阅读页传章段落表、首页诗传虚拟行段
+ */
+export function buildSpanSegs(s0 : SelSpan, parasOf : (cid : number) => Paragraph[]) : SpanSeg[] {
+	const s = normalizeSpan(s0)
+	const segs : SpanSeg[] = []
+	const fromParas = parasOf(s.fromCid)
+	const fromTextLen = fromParas[s.fromOrigin].text.length
+	if (s.toCid == s.fromCid && s.toOrigin == s.fromOrigin) {
+		if (s.toEnd >= s.fromStart) {
+			segs.push({ cid: s.fromCid, origin: s.fromOrigin, start: s.fromStart, end: s.toEnd } as SpanSeg)
+		}
+		return segs
+	}
+	segs.push({ cid: s.fromCid, origin: s.fromOrigin, start: s.fromStart, end: fromTextLen - 1 } as SpanSeg)
+	if (s.toCid == s.fromCid) {
+		// 同章跨段：中间段取起点章真实段落数
+		for (let o = s.fromOrigin + 1; o < s.toOrigin && o < fromParas.length; o++) {
+			segs.push({ cid: s.fromCid, origin: o, start: 0, end: fromParas[o].text.length - 1 } as SpanSeg)
+		}
+	} else {
+		// 跨章：各章按自身真实段落数展开（滚动模式多章正文长度各异，不能套用当前章段落数）
+		for (let o = s.fromOrigin + 1; o < fromParas.length; o++) {
+			segs.push({ cid: s.fromCid, origin: o, start: 0, end: fromParas[o].text.length - 1 } as SpanSeg)
+		}
+		for (let c = s.fromCid + 1; c < s.toCid; c++) {
+			const midParas = parasOf(c)
+			for (let o = 0; o < midParas.length; o++) {
+				segs.push({ cid: c, origin: o, start: 0, end: midParas[o].text.length - 1 } as SpanSeg)
+			}
+		}
+		const toParas = parasOf(s.toCid)
+		for (let o = 0; o < s.toOrigin && o < toParas.length; o++) {
+			segs.push({ cid: s.toCid, origin: o, start: 0, end: toParas[o].text.length - 1 } as SpanSeg)
+		}
+	}
+	segs.push({ cid: s.toCid, origin: s.toOrigin, start: 0, end: s.toEnd } as SpanSeg)
+	return segs
+}
+
 /** 分享卡片内容快照（点分享时由页面按选区计算，组件渲染与绘制共用） */
 export type ShareQuoteCtx = {
 	/** 引文前上/下文（两档透明度渐出） */
@@ -164,6 +250,9 @@ const UNDERLINE_STORAGE_KEY = 'reader_underlines'
 const THOUGHT_STORAGE_KEY = 'reader_thoughts'
 const BOOKMARK_STORAGE_KEY = 'reader_bookmarks'
 const SETTINGS_STORAGE_KEY = 'reader_settings'
+
+/** 首页诗虚拟书 id：云端 reading_notes 以 book_id=0 存储《无题》笔记（无 user_books 行，不进书架、无进度；阅读页进度/时长/书签按此跳过） */
+export const VIRTUAL_BOOK_ID : number = 0
 
 /** 锁定当前阅读书籍（打开书籍/首页诗时由页面调用；划线/想法/书签读写与云端同步按此 id 定位） */
 export function setActiveBookId(bookId : number) : void {
@@ -253,14 +342,7 @@ export function saveBookmarksToStorage(list : Bookmark[]) : void {
 	}
 	uni.setStorageSync(key, JSON.stringify(list))
 	if (activeBookId > 0) {
-		const items : UTSJSONObject[] = []
-		for (let i = 0; i < list.length; i++) {
-			const item = {} as UTSJSONObject
-			item['chapter_id'] = list[i].chapterId
-			item['page_index'] = list[i].pageIndex
-			items.push(item)
-		}
-		syncQuiet(replaceBookmarks(activeBookId, items))
+		syncQuiet(replaceBookmarks(activeBookId, bookmarksToCloudItems(list)))
 	}
 }
 
@@ -276,12 +358,6 @@ export type TextMetrics = {
 	fullCharW: number
 	/** 段落首行缩进（px，= 字号×2；首行字符容量为 perLine-2，行列换算与分页容量共用此值） */
 	indentPx: number
-}
-
-/** 指定行的字距：满行经两端对齐拉伸按行宽均分，末行未满不拉伸按自然字距（与渲染排版对齐） */
-export function rowSpacing(m : TextMetrics, len : number, maxRow : number, row : number) : number {
-	const rest = len - maxRow * m.perLine
-	return (row < maxRow || rest == m.perLine) ? m.fullCharW : m.charW
 }
 
 /** 拖动中的段落视口矩形缓存项（触点→段落映射，支撑跨段拖动；len 为本 rect 文本切片长度供字符换算，from 为切片在整段中的起始偏移） */
@@ -377,6 +453,91 @@ export function storeBookmarks(list : Bookmark[]) : void {
 	uni.setStorageSync(key, JSON.stringify(list))
 }
 
+// ==================== 云端笔记/书签拉取落缓存（打开书籍与首页诗共用，云端为准覆盖本地） ====================
+
+/** 云端 notes 响应 data → 划线列表（缺省/损坏项跳过） */
+function underlinesFromCloudData(data : UTSJSONObject) : UnderlineEntry[] {
+	const list : UnderlineEntry[] = []
+	const raw = data.getArray('underlines')
+	if (raw != null) {
+		raw.forEach((el) => {
+			const e = underlineFromCloud(el as UTSJSONObject)
+			if (e != null) {
+				list.push(e)
+			}
+		})
+	}
+	return list
+}
+
+/** 云端 notes 响应 data → 想法列表（缺省/损坏项跳过） */
+function thoughtsFromCloudData(data : UTSJSONObject) : Thought[] {
+	const list : Thought[] = []
+	const raw = data.getArray('thoughts')
+	if (raw != null) {
+		raw.forEach((el) => {
+			const t = thoughtFromCloud(el as UTSJSONObject)
+			if (t != null) {
+				list.push(t)
+			}
+		})
+	}
+	return list
+}
+
+/**
+ * 云端笔记（划线/想法）拉取并落当前书籍缓存（云端为准覆盖本地）。
+ * 未登录不发请求；失败静默保留本地缓存（离线容错，镜像由调用方刷新）
+ */
+export async function fetchNotesToCache(bookId : number) : Promise<void> {
+	if (!hasAccessToken()) {
+		return
+	}
+	try {
+		const res = await fetchBookNotes(bookId)
+		if (res.code == 0 && res.data != null) {
+			storeUnderlines(underlinesFromCloudData(res.data!))
+			storeThoughts(thoughtsFromCloudData(res.data!))
+		}
+	} catch (e) {
+		console.warn('云端笔记拉取失败，使用本地缓存', e)
+	}
+}
+
+/** 云端书签拉取并落当前书籍缓存（未登录不发请求；失败静默保留本地缓存） */
+export async function fetchBookmarksToCache(bookId : number) : Promise<void> {
+	if (!hasAccessToken()) {
+		return
+	}
+	try {
+		const res = await fetchBookBookmarks(bookId)
+		if (res.code == 0 && res.data != null) {
+			const bms : Bookmark[] = []
+			const rawB = res.data!.getArray('list')
+			if (rawB != null) {
+				rawB.forEach((el) => {
+					const b = bookmarkFromCloud(el as UTSJSONObject)
+					if (b != null) {
+						bms.push(b)
+					}
+				})
+			}
+			storeBookmarks(bms)
+		}
+	} catch (e) {
+		console.warn('云端书签拉取失败，使用本地缓存', e)
+	}
+}
+
+/** 读取本地书架卡片样式（缺省/非法回退 plain；云端偏好由 App 启动/书架刷新落缓存） */
+export function loadBookshelfStyle() : string {
+	const stored : any = uni.getStorageSync('bookshelf_style')
+	if (typeof stored == 'string' && ((stored as string) == 'plain' || (stored as string) == 'photo')) {
+		return stored as string
+	}
+	return 'plain'
+}
+
 /** 读取本地划线记录（当前书籍缓存；空/未锁书/损坏容错返回空表） */
 export function loadUnderlines() : UnderlineEntry[] {
 	const key = bookScopedKey(UNDERLINE_STORAGE_KEY)
@@ -418,6 +579,28 @@ export function findUnderlineEntry(list : UnderlineEntry[], cid : number, origin
 		}
 	}
 	return null
+}
+
+/** 划线区间扁平化（云端传输格式 [s1,e1,s2,e2,...]） */
+function flatRanges(entry : UnderlineEntry) : number[] {
+	const flat : number[] = []
+	for (const u of entry.ranges) {
+		flat.push(u[0])
+		flat.push(u[1])
+	}
+	return flat
+}
+
+/** 书签列表 → 云端传输项（[{chapter_id, page_index}]） */
+function bookmarksToCloudItems(list : Bookmark[]) : UTSJSONObject[] {
+	const items : UTSJSONObject[] = []
+	for (let i = 0; i < list.length; i++) {
+		const item = {} as UTSJSONObject
+		item['chapter_id'] = list[i].chapterId
+		item['page_index'] = list[i].pageIndex
+		items.push(item)
+	}
+	return items
 }
 
 /**
@@ -493,14 +676,7 @@ export function applySpanUnderlineToStorage(segs : SpanSeg[], add : boolean) : v
 			const origin = parseInt(k.substring(sep + 1))
 			// 云端传输为扁平区间（[s1,e1,s2,e2]），本地存储保持区间对结构不变
 			const entry = findUnderlineEntry(list, cid, origin)
-			const flat : number[] = []
-			if (entry != null) {
-				for (const u of entry.ranges) {
-					flat.push(u[0])
-					flat.push(u[1])
-				}
-			}
-			syncQuiet(upsertUnderline(activeBookId, cid, origin, flat))
+			syncQuiet(upsertUnderline(activeBookId, cid, origin, entry != null ? flatRanges(entry) : [] as number[]))
 		}
 	}
 }
@@ -543,12 +719,7 @@ async function migrateUnderlinesStorage(oldId : number, newId : number) : Promis
 	for (let i = 0; i < list.length; i++) {
 		const entry = list[i]
 		// 云端传输为扁平区间（[s1,e1,s2,e2]），空数组=整段取消
-		const flat : number[] = []
-		for (let j = 0; j < entry.ranges.length; j++) {
-			flat.push(entry.ranges[j][0])
-			flat.push(entry.ranges[j][1])
-		}
-		await upsertUnderline(newId, entry.cid, entry.origin, flat)
+		await upsertUnderline(newId, entry.cid, entry.origin, flatRanges(entry))
 	}
 	uni.setStorageSync(UNDERLINE_STORAGE_KEY + newId, raw)
 	uni.removeStorageSync(UNDERLINE_STORAGE_KEY + oldId)
@@ -584,14 +755,7 @@ async function migrateBookmarksStorage(oldId : number, newId : number) : Promise
 		uni.removeStorageSync(BOOKMARK_STORAGE_KEY + oldId)
 		return
 	}
-	const items : UTSJSONObject[] = []
-	for (let i = 0; i < list.length; i++) {
-		const item = {} as UTSJSONObject
-		item['chapter_id'] = list[i].chapterId
-		item['page_index'] = list[i].pageIndex
-		items.push(item)
-	}
-	await replaceBookmarks(newId, items)
+	await replaceBookmarks(newId, bookmarksToCloudItems(list))
 	uni.setStorageSync(BOOKMARK_STORAGE_KEY + newId, raw)
 	uni.removeStorageSync(BOOKMARK_STORAGE_KEY + oldId)
 }
@@ -632,12 +796,7 @@ export async function repushBookNotes(bookId : number, cloudThoughts : Thought[]
 		if (ulist != null) {
 			for (let i = 0; i < ulist.length; i++) {
 				const e = ulist[i]
-				const flat : number[] = []
-				for (let j = 0; j < e.ranges.length; j++) {
-					flat.push(e.ranges[j][0])
-					flat.push(e.ranges[j][1])
-				}
-				await upsertUnderline(bookId, e.cid, e.origin, flat)
+				await upsertUnderline(bookId, e.cid, e.origin, flatRanges(e))
 			}
 		}
 	}
@@ -645,14 +804,7 @@ export async function repushBookNotes(bookId : number, cloudThoughts : Thought[]
 	if (bRaw.length > 0) {
 		const blist = JSON.parse<Array<Bookmark>>(bRaw)
 		if (blist != null) {
-			const items : UTSJSONObject[] = []
-			for (let i = 0; i < blist.length; i++) {
-				const item = {} as UTSJSONObject
-				item['chapter_id'] = blist[i].chapterId
-				item['page_index'] = blist[i].pageIndex
-				items.push(item)
-			}
-			await replaceBookmarks(bookId, items)
+			await replaceBookmarks(bookId, bookmarksToCloudItems(blist))
 		}
 	}
 	const tRaw = readNoteStorageRaw(THOUGHT_STORAGE_KEY + bookId)
@@ -727,16 +879,8 @@ export function buildShareQuoteCtx(s : SelSpan, fromText : string, toText : stri
 	const after = toText.slice(s.toEnd + 1, ctxEnd)
 	const halfB = Math.ceil(before.length / 2)
 	const halfA = Math.floor(after.length / 2)
-	let thoughtText = ''
-	for (const t of thoughts) {
-		// 选区与想法区间相交即展示（拖动微调后仍关联）
-		const tEndAfterSpanFrom = comparePos(t.toCid, t.toOrigin, t.toEnd, s.fromCid, s.fromOrigin, s.fromStart) >= 0
-		const tStartBeforeSpanEnd = comparePos(t.fromCid, t.fromOrigin, t.fromStart, s.toCid, s.toOrigin, s.toEnd) <= 0
-		if (tEndAfterSpanFrom && tStartBeforeSpanEnd) {
-			thoughtText = t.content
-			break
-		}
-	}
+	// 选区与想法区间相交即展示（拖动微调后仍关联，判定收口 thoughtTextOfSpan）
+	const thoughtText = thoughtTextOfSpan(s, thoughts)
 	return {
 		farBefore: before.slice(0, halfB),
 		nearBefore: before.slice(halfB),
