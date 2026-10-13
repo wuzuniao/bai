@@ -2,6 +2,8 @@
 数据库基础设施（SQLAlchemy 2.0 异步 + asyncmy）
 --------------------------------------------------------------------------
 - 引擎按 backend/.env 的 DATABASE_URL 创建；连接初始化统一设置东八区时区
+- 隔离级别 READ COMMITTED：进度/排序/笔记写点均为「读最新→改→提交」短事务，
+  默认 REPEATABLE READ 下并发回写同一行会报 1020（Record has changed since last read）
 - 建表统一由 backend/sql/ 原始脚本管理，本模块仅承载 ORM 映射与请求级会话
 
 用法：
@@ -31,6 +33,7 @@ engine = create_async_engine(
     settings.DATABASE_URL,
     pool_pre_ping=True,
     pool_recycle=3600,
+    isolation_level="READ COMMITTED",
     connect_args={"init_command": "SET time_zone='+08:00'"},
 )
 
