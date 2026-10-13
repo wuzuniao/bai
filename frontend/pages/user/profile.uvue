@@ -4,7 +4,7 @@
 				<!-- 分组 1：资料修改（账号待删除状态整体置灰并禁用交互） -->
 				<ListGroup :disabled="isDeletionScheduled">
 					<!-- 修改用户名 -->
-					<ListCell label="修改用户名" tone="default" :bordered="true" :arrow="true" @tap="toggleUsername" />
+					<ListCell label="修改用户名" tone="default" :bordered="true" :arrow="true" @select="toggleUsername" />
 					<view v-if="expandUsername" class="profile-page__form-section">
 						<view class="profile-page__form-field">
 							<FormInput v-model="usernameValue" label="新用户名" placeholder="请输入新用户名（2-15 个字符）" :maxlength="15" :error="usernameError" @blur="onUsernameBlur" />
@@ -20,7 +20,7 @@
 					</view>
 
 					<!-- 修改头像 -->
-					<ListCell label="修改头像" tone="default" :bordered="true" :arrow="true" @tap="toggleAvatar" />
+					<ListCell label="修改头像" tone="default" :bordered="true" :arrow="true" @select="toggleAvatar" />
 					<view v-if="expandAvatar" class="profile-page__form-section">
 						<view class="profile-page__avatar-list">
 							<view
@@ -44,7 +44,7 @@
 					</view>
 
 					<!-- 修改签名 -->
-					<ListCell label="修改签名" tone="default" :bordered="true" :arrow="true" @tap="toggleSignature" />
+					<ListCell label="修改签名" tone="default" :bordered="true" :arrow="true" @select="toggleSignature" />
 					<view v-if="expandSignature" class="profile-page__form-section">
 						<FormInput v-model="signatureValue" label="" placeholder="请输入签名（最多 70 个字符）" :maxlength="70" :error="signatureError" />
 						<view class="profile-page__form-actions">
@@ -58,7 +58,7 @@
 					</view>
 
 					<!-- 修改密码 / 设置密码（无密码用户显示「设置密码」） -->
-					<ListCell :label="hasPassword ? '修改密码' : '设置密码'" tone="default" :bordered="true" :arrow="true" @tap="togglePassword" />
+					<ListCell :label="hasPassword ? '修改密码' : '设置密码'" tone="default" :bordered="true" :arrow="true" @select="togglePassword" />
 					<view v-if="expandPassword" class="profile-page__form-section">
 						<view v-if="hasPassword" class="profile-page__form-field">
 							<PasswordInput v-model="oldPasswordValue" label="旧密码" placeholder="请输入旧密码" :maxlength="20" :error="oldPasswordError" @blur="onOldPasswordBlur" />
@@ -80,7 +80,7 @@
 					</view>
 
 					<!-- 修改邮箱 / 绑定邮箱（无邮箱用户显示「绑定邮箱」），分组最后一项无下边框 -->
-					<ListCell :label="hasEmail ? '修改邮箱' : '绑定邮箱'" tone="default" :bordered="false" :arrow="true" @tap="toggleEmail" />
+					<ListCell :label="hasEmail ? '修改邮箱' : '绑定邮箱'" tone="default" :bordered="false" :arrow="true" @select="toggleEmail" />
 					<view v-if="expandEmail" class="profile-page__form-section">
 						<!-- 步骤1：旧邮箱验证（仅已有邮箱的用户需要） -->
 						<view v-if="hasEmail && emailStep === 1">
@@ -141,9 +141,9 @@
 
 				<!-- 分组 2：退出登录 + 删除账号（危险操作红色提示） -->
 				<ListGroup :disabled="false">
-					<ListCell label="退出登录" tone="danger" :bordered="true" :arrow="true" @tap="handleLogout" />
-					<ListCell :label="isDeletionScheduled ? '取消删除' : '删除账号'" tone="danger" :bordered="false" :arrow="true" @tap="handleDeletion" />
-					<ListCell label="了解账号删除与数据说明" tone="hint" :bordered="false" :arrow="true" @tap="goDeleteAccountHelp" />
+					<ListCell label="退出登录" tone="danger" :bordered="true" :arrow="true" @select="handleLogout" />
+					<ListCell :label="isDeletionScheduled ? '取消删除' : '删除账号'" tone="danger" :bordered="false" :arrow="true" @select="handleDeletion" />
+					<ListCell label="了解账号删除与数据说明" tone="hint" :bordered="false" :arrow="true" @select="goDeleteAccountHelp" />
 				</ListGroup>
 	</PageShell>
 </template>
@@ -873,10 +873,12 @@
 	.profile-page__avatar-list {
 		padding: 16rpx 0;
 		flex-direction: row;
+		flex-wrap: wrap;
 	}
 
 	.profile-page__avatar-option {
 		margin-right: 32rpx;
+		margin-bottom: 16rpx;
 		width: 144rpx;
 		height: 144rpx;
 		border-radius: 24rpx;

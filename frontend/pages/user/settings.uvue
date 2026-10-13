@@ -64,8 +64,8 @@
 
 				<!-- 帮助入口分组：帮助中心 + 联系我们 -->
 				<ListGroup :disabled="false">
-					<ListCell label="帮助中心" tone="default" :bordered="true" :arrow="true" @tap="goHelp" />
-					<ListCell label="联系我们" tone="default" :bordered="false" :arrow="true" @tap="goContact" />
+					<ListCell label="帮助中心" tone="default" :bordered="true" :arrow="true" @select="goHelp" />
+					<ListCell label="联系我们" tone="default" :bordered="false" :arrow="true" @select="goContact" />
 				</ListGroup>
 			</view>
 		</scroll-view>
