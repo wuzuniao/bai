@@ -5,46 +5,59 @@
 			<image class="pay-page__back-icon" src="/static/icons/arrow-back-light.svg" mode="aspectFit" />
 		</view>
 
-		<scroll-view class="pay-page__scroll" direction="vertical" :show-scrollbar="false">
-			<!-- 主内容：标题区 / 权益卡 / 价格区 -->
-			<view class="pay-page__main" :style="'padding-top:' + mainTop + 'px'">
-				<view class="pay-page__heading">
-					<text class="pay-page__title">会员</text>
-					<text class="pay-page__subtitle">终极体验，即刻开启</text>
-				</view>
+		<!-- 主内容：标题区 / 权益卡 / 价格区（单屏布局，无滚动） -->
+		<view class="pay-page__main" :style="'padding-top:' + mainTop + 'px'">
+			<view class="pay-page__heading">
+				<text class="pay-page__title">黑铁会员</text>
+				<text class="pay-page__subtitle">终极体验，即刻开启</text>
+			</view>
 
-				<view class="pay-page__perks">
-					<view class="pay-page__perk">
-						<text class="pay-page__perk-title">离线畅读</text>
-						<text class="pay-page__perk-text">海量书籍离线缓存，无网也能沉浸阅读</text>
-					</view>
-					<view class="pay-page__perk pay-page__perk--second">
-						<text class="pay-page__perk-title">极致纯净</text>
-						<text class="pay-page__perk-text">永久移除所有广告，享受无干扰的流畅体验</text>
-					</view>
+			<view class="pay-page__perks">
+				<view class="pay-page__perk">
+					<text class="pay-page__perk-title">随心补签</text>
+					<text class="pay-page__perk-text">漏签无需担忧，每月赠 3 次补签机会</text>
 				</view>
+				<view class="pay-page__perk pay-page__perk--second">
+					<text class="pay-page__perk-title">极致纯净</text>
+					<text class="pay-page__perk-text">永久移除所有广告，享受无干扰的流畅体验</text>
+				</view>
+			</view>
 
-				<view class="pay-page__pricing">
-					<view class="pay-page__price-row">
-						<text class="pay-page__price">¥6</text>
-						<text class="pay-page__price-unit">/ 月</text>
-					</view>
-					<view class="pay-page__price-meta">
-						<text class="pay-page__price-origin">原价 ¥36</text>
-						<view class="pay-page__pill">
-							<text class="pay-page__pill-text">限时节省 83%</text>
-						</view>
+			<view class="pay-page__pricing">
+				<view class="pay-page__price-row">
+					<!-- #ifdef APP -->
+					<text class="pay-page__price">¥6</text>
+					<!-- #endif -->
+					<!-- #ifdef MP-WEIXIN -->
+					<text class="pay-page__price">1 金币</text>
+					<!-- #endif -->
+					<text class="pay-page__price-unit">/ 月</text>
+				</view>
+				<view class="pay-page__price-meta">
+					<!-- #ifdef APP -->
+					<text class="pay-page__price-origin">原价 ¥36</text>
+					<!-- #endif -->
+					<!-- #ifdef MP-WEIXIN -->
+					<text class="pay-page__price-origin">原价 6 金币</text>
+					<!-- #endif -->
+					<view class="pay-page__pill">
+						<text class="pay-page__pill-text">限时节省 83%</text>
 					</view>
 				</view>
 			</view>
-		</scroll-view>
+		</view>
 
 		<!-- 底部操作区；仅前端展示，未接入支付逻辑 -->
 		<view class="pay-page__action">
 			<view class="pay-page__btn" hover-class="pay-page__btn--hover" :hover-stay-time="70">
 				<text class="pay-page__btn-text">立即订阅</text>
 			</view>
+			<!-- #ifdef APP -->
 			<text class="pay-page__safe-tip">支付安全由应用商店提供极致保障</text>
+			<!-- #endif -->
+			<!-- #ifdef MP-WEIXIN -->
+			<text class="pay-page__safe-tip">支付将从金币余额中扣除</text>
+			<!-- #endif -->
 		</view>
 	</view>
 </template>
@@ -54,6 +67,7 @@
 	 * 会员支付页（member-pay.uvue）
 	 * --------------------------------------------------------------------------
 	 * - 纯前端静态展示：权益卡、价格与限时胶囊、订阅按钮（未接入任何支付后端逻辑）
+	 * - 分端计价（模板条件编译）：APP 端为应用商店支付（¥ 计价）；微信小程序端为金币计价
 	 * - 入口：「我的」页会员卡片「立即抢购」按钮（仅 App 商店分发渠道显示）
 	 * - 固定深色皮肤：支付相关区块按约定保留原支付配色（不随 bai 主题令牌更换）
 	 */
@@ -87,10 +101,6 @@
 		flex-direction: column;
 	}
 
-	.pay-page__scroll {
-		flex: 1;
-	}
-
 	/* ===== 返回按钮 ===== */
 	.pay-page__back {
 		position: absolute;
@@ -110,7 +120,7 @@
 
 	/* ===== 主内容 ===== */
 	.pay-page__main {
-		min-height: 100vh;
+		flex: 1;
 		box-sizing: border-box;
 		padding-left: 48rpx;
 		padding-right: 48rpx;
