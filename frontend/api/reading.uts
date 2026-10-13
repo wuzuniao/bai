@@ -121,6 +121,17 @@ export function fetchReadingStats() : Promise<ApiResponse> {
 	return request(opts('/api/v1/reading/stats', 'GET', null))
 }
 
+/**
+ * 阅读会话流水批量上报（按书/时段明细账，在线直传与离线补传共用）
+ * items 元素字段：book_id/source(txt|pdf)/started_at/ended_at(YYYY-MM-DD HH:mm:ss)/minutes
+ * 书籍无效的条目由后端跳过，返回 data.accepted 实际落库条数
+ */
+export function reportReadingSessions(items: UTSJSONObject[]) : Promise<ApiResponse> {
+	const data = {} as UTSJSONObject
+	data['sessions'] = items
+	return request(opts('/api/v1/reading/sessions', 'POST', data))
+}
+
 // ==================== 偏好 ====================
 
 /** 读取偏好配置（data.prefs 未保存过为 null） */

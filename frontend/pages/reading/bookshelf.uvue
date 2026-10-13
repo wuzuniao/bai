@@ -51,10 +51,10 @@
 						</view>
 						<text class="stats-label">今日已读</text>
 					</view>
-					<view class="stats-pill" @click="openReward">
-						<text class="stats-pill-text">再读 5 分钟</text>
+					<view v-if="pillState != 'none'" class="stats-pill" @click="onPillTap">
+						<text class="stats-pill-text">{{ pillLeadText }}</text>
 						<view class="stats-pill-dot"></view>
-						<text class="stats-pill-coin">领 1</text>
+						<text class="stats-pill-coin">领 {{ pillReward }}</text>
 						<image class="stats-pill-coin-icon" src="/static/icons/coin-copper.svg" />
 					</view>
 				</view>
@@ -213,8 +213,10 @@
 	import { LocalBook, loadBooks, saveBooks, syncBookOrder, removeBookData, getTodayMinutes, fetchBooksFromCloud, fetchReadingStatsFromCloud, cleanupLegacyBooks } from '@/utils/books.uts'
 	import { saveBookshelfStyle, loadBookshelfStyle } from '@/utils/readerTypes.uts'
 	import { importBook } from '@/utils/bookparse.uts'
-	import { hasAccessToken } from '@/utils/request.uts'
+	import { hasAccessToken, ApiResponse } from '@/utils/request.uts'
 	import { mpCapsuleRect } from '@/utils/layout.uts'
+	import { REWARD_TIERS, fmtRemainMinutes } from '@/utils/rewards.uts'
+	import { fetchActivitySummary, claimReadingReward } from '@/api/activity.uts'
 
 	/** 书架书籍（云端元数据 + 本机正文缓存合并列表，顺序即云端手动排序结果；未导入时仅显示添加格） */
 	const books = ref<LocalBook[]>([])
@@ -223,6 +225,51 @@
 	const currentSort = ref('手动顺序')
 	/** 今日已读分钟数（阅读页结算，onShow 刷新） */
 	const todayMinutes = ref(0)
+	/** 阅读档位领取状态（locked/claimable/claimed，与后端一致；登录后 summary 覆盖，未登录按本地分钟推算） */
+	const tierStates = ref<string[]>([])
+	/** 胶囊领取请求进行中标记（防重复点击） */
+	const claimBusy = ref(false)
+
+	/** 下一个未领取档位索引（-1=今日全部领完，胶囊隐藏） */
+	function nextClaimIndex() : number {
+		const states = tierStates.value
+		for (let i = 0; i < states.length; i++) {
+			if (states[i] != 'claimed') {
+				return i
+			}
+		}
+		return -1
+	}
+
+	/** 胶囊态：none=全领完隐藏 / claimable=已达成可领取 / locked=未达成引导去活动页 */
+	const pillState = computed((): string => {
+		const i = nextClaimIndex()
+		if (i < 0) {
+			return 'none'
+		}
+		return tierStates.value[i]
+	})
+
+	/** 胶囊奖励额（基础 + 额外赠送） */
+	const pillReward = computed((): number => {
+		const i = nextClaimIndex()
+		if (i < 0) {
+			return 0
+		}
+		return REWARD_TIERS[i].base + REWARD_TIERS[i].bonus
+	})
+
+	/** 胶囊引导文案：locked 显示「再读 X 分钟」，claimable 显示「已达成」 */
+	const pillLeadText = computed((): string => {
+		const i = nextClaimIndex()
+		if (i < 0) {
+			return ''
+		}
+		if (tierStates.value[i] == 'claimable') {
+			return '已达成'
+		}
+		return '再读 ' + fmtRemainMinutes(REWARD_TIERS[i].minutes - todayMinutes.value)
+	})
 	/** 书架卡片统一样式：plain 白卡 / photo 深灰卡 */
 	const shelfStyle = ref('plain')
 
@@ -285,6 +332,39 @@
 		books.value = loadBooks()
 		todayMinutes.value = getTodayMinutes()
 		readStyleFromCache()
+		applyLocalTierStates()
+	}
+
+	/** 档位状态本地推算（未登录即终值；登录后 refreshTierStates 以云端覆盖，防已领档重复显示可领） */
+	function applyLocalTierStates() : void {
+		const local = todayMinutes.value
+		const states: string[] = []
+		for (let i = 0; i < REWARD_TIERS.length; i++) {
+			states.push(local >= REWARD_TIERS[i].minutes ? 'claimable' : 'locked')
+		}
+		tierStates.value = states
+	}
+
+	/** 云端档位领取状态拉取（登录态；失败保持本地推算，下次进入再试） */
+	async function refreshTierStates() : Promise<void> {
+		if (!hasAccessToken()) {
+			return
+		}
+		try {
+			const res = await fetchActivitySummary()
+			if (res.code == 0 && res.data != null) {
+				const arr = res.data!.getArray('reading_tiers')
+				if (arr != null && arr.length == REWARD_TIERS.length) {
+					const states: string[] = []
+					for (let i = 0; i < arr.length; i++) {
+						states.push(arr[i].getString('state') ?? 'locked')
+					}
+					tierStates.value = states
+				}
+			}
+		} catch (e) {
+			// 云端失败保持本地推算态，下次进入再试
+		}
 	}
 
 	/** 云端刷新（onShow 每次执行）：清理旧版数据 → 书架/时长以云端覆盖缓存 → 重渲染 */
@@ -295,6 +375,7 @@
 		await fetchReadingStatsFromCloud()
 		todayMinutes.value = getTodayMinutes()
 		readStyleFromCache()
+		await refreshTierStates()
 	}
 
 	/** 书架顺序本地持久化（手动排序云端同步在拖拽落定处单独触发） */
@@ -752,6 +833,53 @@
 		uni.navigateTo({
 			url: '/pages/reading/reward'
 		})
+	}
+
+	/** 统计卡胶囊点击：已达成未领且已登录直接领取；未达成/未登录去活动页看进度（编辑模式禁用） */
+	function onPillTap() : void {
+		if (editMode.value) {
+			return
+		}
+		const i = nextClaimIndex()
+		if (i < 0) {
+			return
+		}
+		if (tierStates.value[i] == 'claimable' && hasAccessToken()) {
+			claimNextTier(i)
+			return
+		}
+		openReward()
+	}
+
+	/** 直接领取第 i 档奖励（与活动页同接口，成功后本地状态流转到下一档） */
+	function claimNextTier(i: number) : void {
+		if (claimBusy.value) {
+			return
+		}
+		const tier = REWARD_TIERS[i]
+		claimBusy.value = true
+		claimReadingReward(tier.minutes).then((res: ApiResponse) => {
+			claimBusy.value = false
+			if (res.code == 0 && res.data != null) {
+				const reward = res.data!.getNumber('reward') ?? (tier.base + tier.bonus)
+				uni.showToast({ title: '领取成功，+' + reward + ' 铜币', icon: 'none' })
+				markTierClaimed(i)
+			}
+		}, (e: Error) => {
+			claimBusy.value = false
+			uni.showToast({ title: e.message, icon: 'none' })
+		})
+	}
+
+	/** 本地档位状态流转（整体替换数组确保视图刷新） */
+	function markTierClaimed(i: number) : void {
+		const states = tierStates.value
+		const next: string[] = []
+		for (let j = 0; j < states.length; j++) {
+			next.push(states[j])
+		}
+		next[i] = 'claimed'
+		tierStates.value = next
 	}
 </script>
 

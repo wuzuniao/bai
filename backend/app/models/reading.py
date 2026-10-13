@@ -115,6 +115,31 @@ class ReadingDailyStat(Base):
     )
 
 
+class ReadingSession(Base):
+    """阅读会话流水（按书/时段明细账；时长聚合真源仍是 ReadingDailyStat，两账不保证一致）"""
+
+    __tablename__ = "reading_sessions"
+    __table_args__ = (
+        Index("idx_rs_user_book", "user_id", "book_id"),
+        Index("idx_rs_user_started", "user_id", "started_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BIGINT, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    book_id: Mapped[int] = mapped_column(BIGINT, nullable=False, comment="书籍 id（user_books.id；删书后保留孤儿行，阅读历史属用户）")
+    book_title: Mapped[str] = mapped_column(
+        VARCHAR(200), nullable=False, default="", server_default="", comment="书名快照（落库时从 user_books.title 取，删书后按书统计展示用）"
+    )
+    source: Mapped[str] = mapped_column(VARCHAR(10), nullable=False, default="txt", server_default="txt", comment="阅读器类型 txt / pdf")
+    started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, comment="会话起算时刻（客户端本地时刻）")
+    ended_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, comment="会话结算时刻")
+    minutes: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0", comment="会话分钟数（向下取整，<1 分钟不入账）")
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default="CURRENT_TIMESTAMP")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default="CURRENT_TIMESTAMP", onupdate=datetime.now
+    )
+
+
 class UserPreference(Base):
     """用户阅读偏好（单行 JSON：阅读设置 + 书架样式）"""
 

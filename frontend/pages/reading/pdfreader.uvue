@@ -38,7 +38,7 @@
 
 <script setup lang="uts">
 	import { mpCapsuleRect } from '@/utils/layout.uts'
-	import { findBook, loadPdfProgress, savePdfProgress, updateBookReading, addTodayMinutes } from '@/utils/books.uts'
+	import { findBook, loadPdfProgress, savePdfProgress, updateBookReading, addReadingSession } from '@/utils/books.uts'
 	import { openPdfSession } from '@/utils/pdfrender.uts'
 
 	/** 页渲染数据（渲染就绪后填充） */
@@ -288,10 +288,8 @@
 		savePdfProgress(bookId.value, { percent: curPercent.value, ratio: pageRatio.value } as PdfProgress)
 		updateBookReading(bookId.value, -1, Math.round(curPercent.value))
 		if (enterAt > 0) {
-			const mins = Math.floor((Date.now() - enterAt) / 60000)
-			if (mins > 0) {
-				addTodayMinutes(mins)
-			}
+			// 会话入账统一入口：时长统计（本地镜像+云端回正）与按书/时段流水一并处理（<1 分钟内部丢弃）
+			addReadingSession(bookId.value, 'pdf', enterAt, Date.now())
 		}
 		enterAt = 0
 	}

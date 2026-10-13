@@ -6,7 +6,9 @@
 """
 from __future__ import annotations
 
-from pydantic import BaseModel, Field, field_validator
+from datetime import datetime
+
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class BookCreate(BaseModel):
@@ -107,6 +109,48 @@ class MinutesReport(BaseModel):
     """阅读时长上报（单次结算分钟数，服务端按东八区今日累加）"""
 
     minutes: int = Field(ge=1, le=1440)
+
+
+class SessionItem(BaseModel):
+    """阅读会话流水单项（起止时刻为客户端本地时刻，格式 YYYY-MM-DD HH:mm:ss）"""
+
+    book_id: int = Field(gt=0)
+    source: str = Field(default="txt", max_length=10)
+    started_at: str
+    ended_at: str
+    minutes: int = Field(ge=1, le=43200)
+
+    @field_validator("source")
+    @classmethod
+    def validate_source(cls, v: str) -> str:
+        v = v.strip().lower()
+        if v not in ("txt", "pdf"):
+            raise ValueError("source 仅支持 txt / pdf")
+        return v
+
+    @field_validator("started_at", "ended_at")
+    @classmethod
+    def validate_datetime(cls, v: str) -> str:
+        v = v.strip()
+        try:
+            datetime.strptime(v, "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            raise ValueError("时间格式须为 YYYY-MM-DD HH:mm:ss")
+        return v
+
+    @model_validator(mode="after")
+    def validate_order(self) -> "SessionItem":
+        if datetime.strptime(self.ended_at, "%Y-%m-%d %H:%M:%S") < datetime.strptime(
+            self.started_at, "%Y-%m-%d %H:%M:%S"
+        ):
+            raise ValueError("ended_at 不得早于 started_at")
+        return self
+
+
+class SessionsReport(BaseModel):
+    """阅读会话流水批量上报（离线补传与在线直传共用；书籍无效的条目由服务层跳过）"""
+
+    sessions: list[SessionItem] = Field(min_length=1, max_length=500)
 
 
 class PrefsPut(BaseModel):

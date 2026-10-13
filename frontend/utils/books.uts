@@ -12,6 +12,7 @@ import {
 	deleteBook,
 	reportMinutes,
 	fetchReadingStats,
+	reportReadingSessions,
 	syncQuiet
 } from '../api/reading.uts'
 import { hasAccessToken } from './request.uts'
@@ -220,6 +221,8 @@ export async function fetchBooksFromCloud() : Promise<LocalBook[]> {
 	}
 	// 先同步离线导入书籍（注册云端并迁移 id），避免下方云端覆盖清掉未同步数据
 	await syncPendingBooks()
+	// 离线会话流水补传（登录态；置于书籍迁移之后，负数 id 已归位再传）
+	await flushPendingSessions()
 	try {
 		const res = await fetchBooks()
 		if (res.code == 0 && res.data != null) {
@@ -576,6 +579,8 @@ async function migratePendingBook(book : LocalBook, data : UTSJSONObject) : Prom
 	}
 	// 离线期间的划线/想法/书签先回补云端（失败抛出，重试只补失败类）
 	await relocateBookNotes(book.id, newId)
+	// 暂存会话流水的 book_id 随迁（负数本地 id → 云端正数 id，后续补传按书统计可归位）
+	relocatePendingSessions(book.id, newId)
 	// 进度合并：本地最近阅读晚于云端才回写（同名书跨设备已有更新进度时以云端为准）
 	const cloudReadMs = cnDatetimeToMs(data.getString('last_read_at') ?? '')
 	if (book.lastReadAt > cloudReadMs && (book.lastChapter >= 0 || book.lastPercent > 0)) {
@@ -712,8 +717,8 @@ export async function fetchReadingStatsFromCloud() : Promise<void> {
 	}
 }
 
-/** 累计今日阅读分钟数（阅读页 onHide/onUnload 结算）：本地镜像即写 + 云端上报按响应回正（未登录仅记本地） */
-export function addTodayMinutes(mins : number) : void {
+/** 累计今日阅读分钟数（由 addReadingSession 统一入口调用）：本地镜像即写 + 云端上报按响应回正（未登录仅记本地） */
+function addTodayMinutes(mins : number) : void {
 	if (mins <= 0) {
 		return
 	}
@@ -730,6 +735,152 @@ export function addTodayMinutes(mins : number) : void {
 	}, (e) => {
 		console.warn('阅读时长上报失败', e)
 	})
+}
+
+// ==================== 阅读会话流水（按书/时段明细账；本地暂存 + 登录后补传） ====================
+
+const STORAGE_SESSIONS = 'reading_sessions_pending'
+/** 暂存队列上限（长期未登录防无限增长；超出丢最旧） */
+const SESSIONS_PENDING_CAP = 500
+
+/** 暂存会话条目（字段名与上报接口对齐） */
+type PendingSession = {
+	book_id: number
+	source: string
+	started_at: string
+	ended_at: string
+	minutes: number
+}
+
+/** ms → 'YYYY-MM-DD HH:mm:ss'（客户端本地时刻格式化，与 cnDatetimeToMs 解析口径互逆；设备时区按东八区约定） */
+function cnFormatMs(ms: number) : string {
+	const d = new Date(ms)
+	const p = (n: number) : string => (n < 10 ? '0' + n : '' + n)
+	return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds())
+}
+
+function loadPendingSessions() : PendingSession[] {
+	const stored : any = uni.getStorageSync(STORAGE_SESSIONS)
+	if (typeof stored == 'string' && (stored as string).length > 0) {
+		const obj = JSON.parse<UTSJSONObject>(stored as string)
+		const arr = obj == null ? null : obj.getArray('list')
+		const list : PendingSession[] = []
+		if (arr != null) {
+			for (let i = 0; i < arr.length; i++) {
+				const o = arr[i]
+				const bookId = o.getNumber('book_id')
+				const minutes = o.getNumber('minutes')
+				if (bookId == null || minutes == null) {
+					continue
+				}
+				list.push({
+					book_id: bookId,
+					source: o.getString('source') ?? 'txt',
+					started_at: o.getString('started_at') ?? '',
+					ended_at: o.getString('ended_at') ?? '',
+					minutes: minutes
+				} as PendingSession)
+			}
+		}
+		return list
+	}
+	return []
+}
+
+function savePendingSessions(list : PendingSession[]) : void {
+	const arr : UTSJSONObject[] = []
+	for (let i = 0; i < list.length; i++) {
+		const s = list[i]
+		const o = {} as UTSJSONObject
+		o['book_id'] = s.book_id
+		o['source'] = s.source
+		o['started_at'] = s.started_at
+		o['ended_at'] = s.ended_at
+		o['minutes'] = s.minutes
+		arr.push(o)
+	}
+	const wrap = {} as UTSJSONObject
+	wrap['list'] = arr
+	uni.setStorageSync(STORAGE_SESSIONS, JSON.stringify(wrap))
+}
+
+/** 阅读会话入账（reader/pdfreader 结算统一入口）：时长统计走既有 addTodayMinutes；流水本地暂存 + 在线即传（失败保留待补传） */
+export function addReadingSession(bookId : number, source : string, startedMs : number, endedMs : number) : void {
+	const mins = Math.floor((endedMs - startedMs) / 60000)
+	if (mins <= 0) {
+		return
+	}
+	addTodayMinutes(mins)
+	const list = loadPendingSessions()
+	list.push({
+		book_id: bookId,
+		source: source,
+		started_at: cnFormatMs(startedMs),
+		ended_at: cnFormatMs(endedMs),
+		minutes: mins
+	} as PendingSession)
+	while (list.length > SESSIONS_PENDING_CAP) {
+		list.shift()
+	}
+	savePendingSessions(list)
+	if (hasAccessToken()) {
+		flushPendingSessions()
+	}
+}
+
+/** flush 进行中标记（防结算直传与书架补传并发重传同一条目） */
+let sessionsFlushing = false
+
+/**
+ * 暂存会话补传（登录态调用；书架进入时机触发）：
+ * 批量上报全部暂存条目——请求成功即清空（含后端跳过的无效条目，重试无意义），
+ * 请求失败整体保留下次再试
+ */
+export async function flushPendingSessions() : Promise<void> {
+	if (!hasAccessToken() || sessionsFlushing) {
+		return
+	}
+	const list = loadPendingSessions()
+	if (list.length == 0) {
+		return
+	}
+	sessionsFlushing = true
+	try {
+		const arr : UTSJSONObject[] = []
+		for (let i = 0; i < list.length; i++) {
+			const s = list[i]
+			const o = {} as UTSJSONObject
+			o['book_id'] = s.book_id
+			o['source'] = s.source
+			o['started_at'] = s.started_at
+			o['ended_at'] = s.ended_at
+			o['minutes'] = s.minutes
+			arr.push(o)
+		}
+		const res = await reportReadingSessions(arr)
+		if (res.code == 0) {
+			savePendingSessions([])
+		}
+	} catch (e) {
+		console.warn('会话流水补传失败，保留待下次', e)
+	} finally {
+		sessionsFlushing = false
+	}
+}
+
+/** 离线书注册成功后，暂存会话流水的 book_id 随迁（负数本地 id → 云端正数 id） */
+function relocatePendingSessions(oldId : number, newId : number) : void {
+	const list = loadPendingSessions()
+	let changed = false
+	for (let i = 0; i < list.length; i++) {
+		if (list[i].book_id == oldId) {
+			list[i].book_id = newId
+			changed = true
+		}
+	}
+	if (changed) {
+		savePendingSessions(list)
+	}
 }
 
 // ==================== 偏好缓存应用（云端 → 本地键） ====================

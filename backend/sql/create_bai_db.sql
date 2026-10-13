@@ -94,3 +94,73 @@ CREATE TABLE IF NOT EXISTS `user_preferences` (
   `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY `uk_up_user` (`user_id`)
 ) COMMENT='用户阅读偏好';
+
+-- =============================================================
+-- 活动奖励表（货币 / 签到 / 阅读档位；业务规则见 add_activity_coins.sql 头注）
+-- =============================================================
+
+-- 6. 货币账户（金银铜余额；铜/银满 100 自动进位，余额恒 0-99）
+CREATE TABLE IF NOT EXISTS `coin_accounts` (
+  `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+  `user_id` BIGINT NOT NULL COMMENT '业务用户 id（JWT sub）',
+  `copper` INT NOT NULL DEFAULT 0 COMMENT '铜币余额（进位后恒 0-99）',
+  `silver` INT NOT NULL DEFAULT 0 COMMENT '银币余额（进位后恒 0-99）',
+  `gold` INT NOT NULL DEFAULT 0 COMMENT '金币余额',
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY `uk_ca_user` (`user_id`)
+) COMMENT='货币账户（金银铜余额）';
+
+-- 7. 货币流水（全部金银铜变动明细；「今日已获铜币」=当日 checkin/reading 铜币入账汇总）
+CREATE TABLE IF NOT EXISTS `coin_transactions` (
+  `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+  `user_id` BIGINT NOT NULL,
+  `coin_type` TINYINT(1) NOT NULL COMMENT '币种 0=铜 1=银 2=金',
+  `amount` INT NOT NULL COMMENT '变动量（正=入账 负=扣减；自动兑换产生成对增减流水）',
+  `source` VARCHAR(32) NOT NULL COMMENT '来源 checkin=每日签到 / reading=阅读档位奖励 / exchange=自动兑换 / consume=商城消费',
+  `source_id` VARCHAR(64) NOT NULL DEFAULT '' COMMENT '来源单据 id（签到/领取记录 id；兑换为空）',
+  `remark` VARCHAR(100) NOT NULL DEFAULT '' COMMENT '变动说明',
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY `idx_ct_user_time` (`user_id`, `created_at`)
+) COMMENT='货币流水';
+
+-- 8. 每日签到记录（一人一日一行；连续天数由本周记录推导，不落冗余字段）
+CREATE TABLE IF NOT EXISTS `checkin_records` (
+  `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+  `user_id` BIGINT NOT NULL,
+  `checkin_date` DATE NOT NULL COMMENT '签到日期（东八区）',
+  `reward` INT NOT NULL DEFAULT 0 COMMENT '发放铜币数（按星期定档）',
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY `uk_cr_user_date` (`user_id`, `checkin_date`)
+) COMMENT='每日签到记录';
+
+-- 9. 阅读档位奖励领取记录（按日按档唯一：达成后手动领取，余额变动不影响领取状态、不重复发放）
+CREATE TABLE IF NOT EXISTS `reading_reward_claims` (
+  `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+  `user_id` BIGINT NOT NULL,
+  `claim_date` DATE NOT NULL COMMENT '达成统计日期（东八区）',
+  `tier_minutes` INT NOT NULL COMMENT '档位阈值分钟数（5/30/120/360/720）',
+  `reward` INT NOT NULL DEFAULT 0 COMMENT '发放铜币数（基础+额外赠送）',
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY `uk_rrc_user_date_tier` (`user_id`, `claim_date`, `tier_minutes`)
+) COMMENT='阅读时长档位奖励领取记录';
+
+-- 10. 阅读会话流水（按书/时段明细账；时长聚合真源仍是 reading_daily_stats，离线补传场景两账不保证一致；
+--     口径与时长统计一致：minutes 向下取整，<1 分钟不入账；书籍删除时会话流水保留，
+--     book_title 为落库时书名快照，删书后按书统计仍能展示书名）
+CREATE TABLE IF NOT EXISTS `reading_sessions` (
+  `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+  `user_id` BIGINT NOT NULL COMMENT '业务用户 id（JWT sub）',
+  `book_id` BIGINT NOT NULL COMMENT '书籍 id（user_books.id；删书后保留孤儿行）',
+  `book_title` VARCHAR(200) NOT NULL DEFAULT '' COMMENT '书名快照（落库时从 user_books.title 取）',
+  `source` VARCHAR(10) NOT NULL DEFAULT 'txt' COMMENT '阅读器类型 txt / pdf',
+  `started_at` DATETIME NOT NULL COMMENT '会话起算时刻（客户端本地时刻）',
+  `ended_at` DATETIME NOT NULL COMMENT '会话结算时刻',
+  `minutes` INT NOT NULL DEFAULT 0 COMMENT '会话分钟数（向下取整，与时长统计口径一致）',
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY `idx_rs_user_book` (`user_id`, `book_id`),
+  KEY `idx_rs_user_started` (`user_id`, `started_at`)
+) COMMENT='阅读会话流水（按书/时段明细账）';

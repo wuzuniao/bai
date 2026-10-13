@@ -12,7 +12,7 @@
 						<view class="asset-left">
 							<text class="asset-label">今日已获铜币</text>
 							<view class="asset-num-row">
-								<text class="asset-num">5</text>
+								<text class="asset-num">{{ todayGained }}</text>
 								<text class="asset-unit">铜币</text>
 							</view>
 						</view>
@@ -23,73 +23,54 @@
 					<view class="asset-total">
 						<text class="asset-total-label">总资产：</text>
 						<view class="coin-item">
-							<text class="coin-num">0</text>
+							<text class="coin-num">{{ goldNum }}</text>
 							<image class="coin-icon" src="/static/icons/coin-gold.svg" />
 						</view>
 						<view class="coin-item">
-							<text class="coin-num">0</text>
+							<text class="coin-num">{{ silverNum }}</text>
 							<image class="coin-icon" src="/static/icons/coin-silver.svg" />
 						</view>
 						<view class="coin-item">
-							<text class="coin-num">42</text>
+							<text class="coin-num">{{ copperNum }}</text>
 							<image class="coin-icon" src="/static/icons/coin-copper.svg" />
 						</view>
 					</view>
 				</view>
 
-				<!-- 连续签到卡（Stitch: 状态头 + 7 天胶囊 + 补签提示条） -->
+				<!-- 连续签到卡（Stitch: 状态头 + 7 天胶囊 + 补签提示条；今日格点击签到） -->
 				<view class="checkin-card">
 					<view class="checkin-head">
 						<view class="checkin-head-text">
 							<view class="checkin-title-row">
 								<text class="checkin-title">已连续签到</text>
-								<text class="checkin-days">1</text>
+								<text class="checkin-days">{{ streakDays }}</text>
 								<text class="checkin-title">天</text>
 							</view>
 							<text class="checkin-sub">连签满 7 天才能领福利，断签或领奖后重新计算</text>
 						</view>
 					</view>
 					<view class="checkin-grid">
-						<!-- Day 1 已签 -->
-						<view class="day-cell day-checked">
-							<text class="day-week day-week-dim">周一</text>
-							<view class="day-circle day-circle-dim">
-								<image class="day-check-icon" src="/static/icons/check-warning.svg" />
+						<view
+							v-for="(d, di) in days"
+							:key="di"
+							:class="dayClass(d)"
+							@click="onDayTap(d)"
+						>
+							<text :class="dayWeekClass(d)">{{ d.label }}</text>
+							<view :class="dayCircleClass(d)">
+								<image v-if="d.checked" class="day-check-icon" src="/static/icons/check-warning.svg" />
+								<text v-else :class="dayRewardClass(d)">+{{ d.reward }}</text>
 							</view>
-							<text class="day-state day-state-dim">已签</text>
-						</view>
-						<!-- Day 2 今日 -->
-						<view class="day-cell day-today">
-							<text class="day-week day-week-amber">周二</text>
-							<view class="day-circle day-circle-accent">
-								<text class="day-reward day-reward-bold">+5</text>
-							</view>
-							<text class="day-state day-state-amber">今日</text>
-						</view>
-						<!-- Day 3-6 待签 -->
-						<view v-for="(d, di) in pendingDays" :key="di" class="day-cell day-pending">
-							<text class="day-week">{{ d.week }}</text>
-							<view class="day-circle day-circle-idle">
-								<text class="day-reward">+{{ d.reward }}</text>
-							</view>
-							<text class="day-state">待签</text>
-						</view>
-						<!-- Day 7 大礼 -->
-						<view class="day-cell day-grand">
-							<text class="day-week day-week-ink">周日</text>
-							<view class="day-circle day-circle-accent">
-								<text class="day-reward day-reward-bold">+20</text>
-							</view>
-							<text class="day-state day-state-ink">大礼</text>
+							<text :class="dayStateClass(d)">{{ dayStateText(d) }}</text>
 						</view>
 					</view>
 					<view class="makeup-bar">
 						<text class="makeup-text">漏签无需担忧，开通月卡每月赠 3 次补签</text>
-						<text class="makeup-btn" @click="showToast('补签规则即将上线')">查看</text>
+						<text class="makeup-btn" @click="goMemberPay">查看</text>
 					</view>
 				</view>
 
-				<!-- 阅读领铜币卡（Stitch: 头部 + 进度条 + 五档阶梯） -->
+				<!-- 阅读领铜币卡（Stitch: 头部 + 进度条 + 五档阶梯；已达成的档位可点击领取） -->
 				<view class="reward-card">
 					<view class="reward-head">
 						<text class="reward-title">阅读领铜币</text>
@@ -99,106 +80,25 @@
 						</view>
 					</view>
 					<view class="progress-track">
-						<view class="progress-fill"></view>
+						<view class="progress-fill" :style="'width:' + progressPercent + '%'"></view>
 					</view>
 					<view class="tier-list">
-						<!-- 5' 已领取 -->
-						<view class="tier-item tier-dim">
+						<view v-for="(t, ti) in tiers" :key="ti" :class="tierClass(t)">
 							<view class="tier-top">
-								<view class="tier-badge tier-badge-dim">
-									<text class="tier-badge-text">5'</text>
+								<view :class="tierBadgeClass(t)">
+									<text :class="tierBadgeTextClass(t)">{{ t.badge }}</text>
 								</view>
 								<view class="tier-title-row">
-									<text class="tier-title tier-title-dim">读满 5 分钟 (5')</text>
-									<view class="tier-tag tier-tag-badge">
-										<text class="tier-tag-text tier-tag-text-amber">+1 铜币</text>
+									<text :class="tierTitleClass(t)">{{ t.title }}</text>
+									<view :class="tierTagClass(t)">
+										<text :class="tierTagTextClass(t)">{{ tierTagText(t) }}</text>
 									</view>
 								</view>
 							</view>
 							<view class="tier-bottom">
-								<text class="tier-desc">已达成任务，获得 1 铜币</text>
-								<view class="tier-btn tier-btn-claimed">
-									<text class="tier-btn-text tier-btn-text-claimed">已领取</text>
-								</view>
-							</view>
-						</view>
-						<!-- 30' 当前目标 -->
-						<view class="tier-item tier-current">
-							<view class="tier-top">
-								<view class="tier-badge tier-badge-ink">
-									<text class="tier-badge-text tier-badge-text-white">30'</text>
-								</view>
-								<view class="tier-title-row">
-									<text class="tier-title tier-title-strong">读满 30 分钟</text>
-									<view class="tier-tag tier-tag-accent">
-										<text class="tier-tag-text tier-tag-text-ink">+6 铜币</text>
-									</view>
-								</view>
-							</view>
-							<view class="tier-bottom">
-								<text class="tier-desc tier-desc-text">还差 19 分钟 解锁</text>
-								<view class="tier-btn tier-btn-primary" @click="goReading">
-									<text class="tier-btn-text tier-btn-text-white">去阅读</text>
-								</view>
-							</view>
-						</view>
-						<!-- 2h -->
-						<view class="tier-item tier-dim">
-							<view class="tier-top">
-								<view class="tier-badge tier-badge-dim">
-									<text class="tier-badge-text">2h</text>
-								</view>
-								<view class="tier-title-row">
-									<text class="tier-title">读满 2 小时 (120')</text>
-									<view class="tier-tag tier-tag-gray">
-										<text class="tier-tag-text">+24 铜币 · 再额外赠送 10 铜币</text>
-									</view>
-								</view>
-							</view>
-							<view class="tier-bottom">
-								<text class="tier-desc">还差 <text class="tier-desc-strong">1 小时 49 分钟</text> 解锁</text>
-								<view class="tier-btn tier-btn-outline" @click="goReading">
-									<text class="tier-btn-text">去阅读</text>
-								</view>
-							</view>
-						</view>
-						<!-- 6h -->
-						<view class="tier-item tier-dim">
-							<view class="tier-top">
-								<view class="tier-badge tier-badge-dim">
-									<text class="tier-badge-text">6h</text>
-								</view>
-								<view class="tier-title-row">
-									<text class="tier-title">读满 6 小时 (360')</text>
-									<view class="tier-tag tier-tag-gray">
-										<text class="tier-tag-text">+72 铜币 · 再额外赠送 30 铜币</text>
-									</view>
-								</view>
-							</view>
-							<view class="tier-bottom">
-								<text class="tier-desc">还差 <text class="tier-desc-strong">5 小时 49 分钟</text> 解锁</text>
-								<view class="tier-btn tier-btn-outline" @click="goReading">
-									<text class="tier-btn-text">去阅读</text>
-								</view>
-							</view>
-						</view>
-						<!-- 12h -->
-						<view class="tier-item tier-dim">
-							<view class="tier-top">
-								<view class="tier-badge tier-badge-dim">
-									<text class="tier-badge-text">12h</text>
-								</view>
-								<view class="tier-title-row">
-									<text class="tier-title">读满 12 小时 (720')</text>
-									<view class="tier-tag tier-tag-gray">
-										<text class="tier-tag-text">+144 铜币 · 再额外赠送 60 铜币</text>
-									</view>
-								</view>
-							</view>
-							<view class="tier-bottom">
-								<text class="tier-desc">还差 <text class="tier-desc-strong">11 小时 49 分钟</text> 解锁</text>
-								<view class="tier-btn tier-btn-outline" @click="goReading">
-									<text class="tier-btn-text">去阅读</text>
+								<text :class="tierDescClass(t)">{{ tierDesc(t) }}</text>
+								<view :class="tierBtnClass(t)" @click="onTierTap(t)">
+									<text :class="tierBtnTextClass(t)">{{ tierBtnText(t) }}</text>
 								</view>
 							</view>
 						</view>
@@ -218,34 +118,552 @@
 	import BackButton from '@/components/common/BackButton.uvue'
 	import PageHeader from '@/components/common/PageHeader.uvue'
 	import { mainTopPx } from '@/utils/layout.uts'
-	import { getTodayMinutes, getTotalMinutes, fetchReadingStatsFromCloud } from '@/utils/books.uts'
+	import { getTodayMinutes, getTotalMinutes } from '@/utils/books.uts'
+	import { hasAccessToken, ApiResponse } from '@/utils/request.uts'
+	import { fetchActivitySummary, postCheckin, claimReadingReward } from '@/api/activity.uts'
+	import { REWARD_TIERS, fmtRemainMinutes } from '@/utils/rewards.uts'
 
-	type PendingDay = {
-		week: string
+	type DayView = {
+		weekday: number
+		label: string
 		reward: number
+		checked: boolean
+		isToday: boolean
 	}
 
-	/** 阅读时长（云端统计为准：onShow 拉取覆盖本地镜像） */
+	type TierView = {
+		minutes: number
+		badge: string
+		title: string
+		base: number
+		bonus: number
+		state: string
+	}
+
+	/** 星期标签（周一~周日，自然周口径，index 0=周一） */
+	const WEEK_LABELS: string[] = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
+	/** 每日签到奖励档（周一~周五 +5、周六 +10、周日大礼 +20；与后端 CHECKIN_REWARDS 同步维护，未登录兜底展示用） */
+	const DEFAULT_WEEK_REWARDS: number[] = [5, 5, 5, 5, 5, 10, 20]
+	/** 进度条满档分钟数（12h 最高档） */
+	const FULL_DAY_MINUTES = 720
+
+	// ==================== 页面状态 ====================
+
+	const todayGained = ref(0)
+	const goldNum = ref(0)
+	const silverNum = ref(0)
+	const copperNum = ref(0)
+	/** 阅读时长（云端统计为准：onShow 拉取覆盖本地镜像；未登录走本地缓存） */
 	const todayMinutes = ref(0)
 	const totalMinutes = ref(0)
-
-	onShow(() => {
-		fetchReadingStatsFromCloud().then(() : void => {
-			todayMinutes.value = getTodayMinutes()
-			totalMinutes.value = getTotalMinutes()
-		})
-	})
-
-	/** 待签日程（Stitch 示例：周三至周六，周日为大礼单独渲染） */
-	const pendingDays = ref<PendingDay[]>([
-		{ week: '周三', reward: 5 } as PendingDay,
-		{ week: '周四', reward: 5 } as PendingDay,
-		{ week: '周五', reward: 5 } as PendingDay,
-		{ week: '周六', reward: 10 } as PendingDay
-	])
+	const streakDays = ref(0)
+	const checkedToday = ref(false)
+	const days = ref<DayView[]>([])
+	const tiers = ref<TierView[]>([])
+	const checkinLoading = ref(false)
+	const claimBusy = ref(false)
 
 	/** 顶部留白：返回按钮（状态栏高度 + 40px）之下再留 12px（计算逻辑见 utils/layout.uts） */
 	const mainTop = ref(mainTopPx())
+
+	/** 今日星期（1=周一 ... 7=周日，自然周口径） */
+	function getTodayWeekday() : number {
+		const day = new Date().getDay()
+		return day == 0 ? 7 : day
+	}
+
+	// ==================== 数据加载 ====================
+
+	onShow(() => {
+		if (hasAccessToken()) {
+			fetchActivitySummary().then((res: ApiResponse) => {
+				if (res.code == 0 && res.data != null) {
+					applySummary(res.data!)
+				}
+			}, (_e: Error) => {
+				// 云端失败降级：阅读分钟走本地缓存，其余保持未签/未领取默认
+				applyLocalFallback()
+			})
+		} else {
+			applyLocalFallback()
+		}
+	})
+
+	/** 云端聚合数据应用（嵌套对象经索引访问 + null 判断后 as 转换，见 request.uts uts2js 说明） */
+	function applySummary(data: UTSJSONObject) : void {
+		const balanceRaw = data['balance']
+		if (balanceRaw != null) {
+			const b = balanceRaw as UTSJSONObject
+			goldNum.value = b.getNumber('gold') ?? 0
+			silverNum.value = b.getNumber('silver') ?? 0
+			copperNum.value = b.getNumber('copper') ?? 0
+		}
+		todayGained.value = data.getNumber('today_gained') ?? 0
+
+		const readingRaw = data['reading']
+		if (readingRaw != null) {
+			const r = readingRaw as UTSJSONObject
+			todayMinutes.value = r.getNumber('today_minutes') ?? 0
+			totalMinutes.value = r.getNumber('total_minutes') ?? 0
+		}
+
+		const checkinRaw = data['checkin']
+		if (checkinRaw != null) {
+			const c = checkinRaw as UTSJSONObject
+			streakDays.value = c.getNumber('streak_days') ?? 0
+			checkedToday.value = c.getBoolean('checked_today') == true
+			const arr = c.getArray('days')
+			const next: DayView[] = []
+			if (arr != null && arr.length == 7) {
+				for (let i = 0; i < arr.length; i++) {
+					const item = arr[i]
+					const weekday = item.getNumber('weekday') ?? (i + 1)
+					next.push({
+						weekday: weekday,
+						label: WEEK_LABELS[i],
+						reward: item.getNumber('reward') ?? DEFAULT_WEEK_REWARDS[i],
+						checked: item.getBoolean('checked') == true,
+						isToday: weekday == getTodayWeekday()
+					} as DayView)
+				}
+			} else {
+				for (let i = 0; i < 7; i++) {
+					next.push(buildDefaultDay(i + 1))
+				}
+			}
+			days.value = next
+		}
+
+		const tierArr = data.getArray('reading_tiers')
+		if (tierArr != null && tierArr.length > 0) {
+			const next: TierView[] = []
+			for (let i = 0; i < tierArr.length; i++) {
+				const item = tierArr[i]
+				const fallback = i < REWARD_TIERS.length ? REWARD_TIERS[i] : null
+				next.push({
+					minutes: item.getNumber('tier_minutes') ?? (fallback != null ? fallback.minutes : 0),
+					badge: fallback != null ? fallback.badge : '',
+					title: fallback != null ? fallback.title : '',
+					base: item.getNumber('base') ?? (fallback != null ? fallback.base : 0),
+					bonus: item.getNumber('bonus') ?? (fallback != null ? fallback.bonus : 0),
+					state: item.getString('state') ?? 'locked'
+				} as TierView)
+			}
+			tiers.value = next
+		}
+	}
+
+	/** 未登录/云端失败兜底：阅读分钟走本地缓存，签到格全未签、档位按本地分钟推算 */
+	function applyLocalFallback() : void {
+		const local = getTodayMinutes()
+		todayMinutes.value = local
+		totalMinutes.value = getTotalMinutes()
+		const nextDays: DayView[] = []
+		for (let i = 0; i < 7; i++) {
+			nextDays.push(buildDefaultDay(i + 1))
+		}
+		days.value = nextDays
+		const nextTiers: TierView[] = []
+		for (let i = 0; i < REWARD_TIERS.length; i++) {
+			const t = REWARD_TIERS[i]
+			nextTiers.push({
+				minutes: t.minutes,
+				badge: t.badge,
+				title: t.title,
+				base: t.base,
+				bonus: t.bonus,
+				state: local >= t.minutes ? 'claimable' : 'locked'
+			} as TierView)
+		}
+		tiers.value = nextTiers
+	}
+
+	/** 默认签到格（未登录/兜底：按星期奖励档构建未签格） */
+	function buildDefaultDay(weekday: number) : DayView {
+		return {
+			weekday: weekday,
+			label: WEEK_LABELS[weekday - 1],
+			reward: DEFAULT_WEEK_REWARDS[weekday - 1],
+			checked: false,
+			isToday: weekday == getTodayWeekday()
+		} as DayView
+	}
+
+	/** 响应内余额与今日已获应用（签到/领取成功后回填） */
+	function applyBalanceFromData(d: UTSJSONObject) : void {
+		const balanceRaw = d['balance']
+		if (balanceRaw != null) {
+			const b = balanceRaw as UTSJSONObject
+			goldNum.value = b.getNumber('gold') ?? goldNum.value
+			silverNum.value = b.getNumber('silver') ?? silverNum.value
+			copperNum.value = b.getNumber('copper') ?? copperNum.value
+		}
+		todayGained.value = d.getNumber('today_gained') ?? todayGained.value
+	}
+
+	// ==================== 签到 ====================
+
+	function onDayTap(d: DayView) : void {
+		if (!d.isToday) {
+			if (isDayMissed(d)) {
+				showToast('补签尚未开放')
+			} else if (d.checked) {
+				showToast('当天已签到')
+			} else {
+				showToast('还未到该天签到时间')
+			}
+			return
+		}
+		if (checkedToday.value) {
+			showToast('今日已签到')
+			return
+		}
+		if (!hasAccessToken()) {
+			showToast('请先登录后再签到')
+			return
+		}
+		if (checkinLoading.value) {
+			return
+		}
+		checkinLoading.value = true
+		postCheckin().then((res: ApiResponse) => {
+			checkinLoading.value = false
+			if (res.code == 0 && res.data != null) {
+				const data = res.data!
+				const reward = data.getNumber('reward') ?? 0
+				checkedToday.value = true
+				streakDays.value = data.getNumber('streak_days') ?? (streakDays.value + 1)
+				applyBalanceFromData(data)
+				markDayChecked(getTodayWeekday())
+				showToast('签到成功，+' + reward + ' 铜币')
+			}
+		}, (e: Error) => {
+			checkinLoading.value = false
+			showToast(e.message)
+		})
+	}
+
+	/** 签到成功后本地格子状态更新（整体替换数组确保视图刷新） */
+	function markDayChecked(weekday: number) : void {
+		const list = days.value
+		const next: DayView[] = []
+		for (let i = 0; i < list.length; i++) {
+			const d = list[i]
+			if (d.weekday == weekday) {
+				next.push({
+					weekday: d.weekday,
+					label: d.label,
+					reward: d.reward,
+					checked: true,
+					isToday: d.isToday
+				} as DayView)
+			} else {
+				next.push(d)
+			}
+		}
+		days.value = next
+	}
+
+	// ==================== 阅读档位 ====================
+
+	function onTierTap(t: TierView) : void {
+		if (t.state == 'claimed') {
+			return
+		}
+		if (t.state == 'claimable') {
+			if (!hasAccessToken()) {
+				showToast('请先登录后再领取')
+				return
+			}
+			if (claimBusy.value) {
+				return
+			}
+			claimBusy.value = true
+			claimReadingReward(t.minutes).then((res: ApiResponse) => {
+				claimBusy.value = false
+				if (res.code == 0 && res.data != null) {
+					const data = res.data!
+					const reward = data.getNumber('reward') ?? (t.base + t.bonus)
+					applyBalanceFromData(data)
+					setTierState(t.minutes, 'claimed')
+					showToast('领取成功，+' + reward + ' 铜币')
+				}
+			}, (e: Error) => {
+				claimBusy.value = false
+				showToast(e.message)
+			})
+			return
+		}
+		// 未达成：去阅读累计时长
+		goReading()
+	}
+
+	/** 档位状态更新（整体替换数组确保视图刷新） */
+	function setTierState(minutes: number, state: string) : void {
+		const list = tiers.value
+		const next: TierView[] = []
+		for (let i = 0; i < list.length; i++) {
+			const t = list[i]
+			if (t.minutes == minutes) {
+				next.push({
+					minutes: t.minutes,
+					badge: t.badge,
+					title: t.title,
+					base: t.base,
+					bonus: t.bonus,
+					state: state
+				} as TierView)
+			} else {
+				next.push(t)
+			}
+		}
+		tiers.value = next
+	}
+
+	/** 当前目标档 = 第一个未领取的档位（已达成或未达成均可为当前目标） */
+	function isCurrentTier(t: TierView) : boolean {
+		const list = tiers.value
+		for (let i = 0; i < list.length; i++) {
+			if (list[i].state != 'claimed') {
+				return list[i].minutes == t.minutes
+			}
+		}
+		return false
+	}
+
+	// ==================== 模板样式与文案绑定 ====================
+
+	/** 漏签格：本周已过（weekday 早于今日）且未签；今日未签不算漏（当天尚未结束） */
+	function isDayMissed(d: DayView) : boolean {
+		return !d.checked && !d.isToday && d.weekday < getTodayWeekday()
+	}
+
+	/** 签到格状态类：已签 > 今日 > 漏签（负向红）> 周日大礼 > 待签（大礼格今日未签时同样可点击签到） */
+	function dayClass(d: DayView) : string {
+		if (d.checked) {
+			return 'day-cell day-checked'
+		}
+		if (d.isToday) {
+			return 'day-cell day-today'
+		}
+		if (isDayMissed(d)) {
+			return 'day-cell day-missed'
+		}
+		if (d.weekday == 7) {
+			return 'day-cell day-grand'
+		}
+		return 'day-cell day-pending'
+	}
+
+	function dayWeekClass(d: DayView) : string {
+		if (d.checked) {
+			return 'day-week day-week-dim'
+		}
+		if (isDayMissed(d)) {
+			return 'day-week day-week-missed'
+		}
+		if (d.weekday == 7) {
+			return 'day-week day-week-ink'
+		}
+		if (d.isToday) {
+			return 'day-week day-week-amber'
+		}
+		return 'day-week'
+	}
+
+	/** 圆圈配色按奖励档分色：+20 墨黑圆白字（品牌强调）/ +10 琥珀圆墨字 / +5 灰圆；漏签负向浅红圆 */
+	function dayCircleClass(d: DayView) : string {
+		if (d.checked) {
+			return 'day-circle day-circle-dim'
+		}
+		if (d.isToday) {
+			return 'day-circle day-circle-accent'
+		}
+		if (isDayMissed(d)) {
+			return 'day-circle day-circle-missed'
+		}
+		if (d.reward >= 20) {
+			return 'day-circle day-circle-ink'
+		}
+		if (d.reward >= 10) {
+			return 'day-circle day-circle-accent'
+		}
+		return 'day-circle day-circle-idle'
+	}
+
+	function dayRewardClass(d: DayView) : string {
+		if (isDayMissed(d)) {
+			return 'day-reward day-reward-missed'
+		}
+		if (d.isToday) {
+			return 'day-reward day-reward-bold'
+		}
+		if (d.reward >= 20) {
+			return 'day-reward day-reward-grand'
+		}
+		if (d.reward >= 10) {
+			return 'day-reward day-reward-bold'
+		}
+		return 'day-reward'
+	}
+
+	/** 周末格文案按奖励档统一：+20「大礼」/ +10「双倍」/ +5「待签」（周六周日同映射） */
+	function dayStateText(d: DayView) : string {
+		if (d.checked) {
+			return '已签'
+		}
+		if (d.isToday) {
+			return '今日'
+		}
+		if (isDayMissed(d)) {
+			return '漏签'
+		}
+		if (d.weekday >= 6) {
+			if (d.reward >= 20) {
+				return '大礼'
+			}
+			if (d.reward >= 10) {
+				return '双倍'
+			}
+		}
+		return '待签'
+	}
+
+	function dayStateClass(d: DayView) : string {
+		if (d.checked) {
+			return 'day-state day-state-dim'
+		}
+		if (isDayMissed(d)) {
+			return 'day-state day-state-missed'
+		}
+		if (d.isToday) {
+			return 'day-state day-state-amber'
+		}
+		// 周末 +10/+20 档（双保/大礼）用墨色强调，+5 回归默认灰（与圆圈分档一致）
+		if (d.weekday >= 6 && d.reward >= 10) {
+			return 'day-state day-state-ink'
+		}
+		return 'day-state'
+	}
+
+	/** 进度条：今日已读 / 满档 12h，百分比一位小数封顶 100 */
+	const progressPercent = computed((): number => {
+		const p = todayMinutes.value / FULL_DAY_MINUTES * 100
+		if (p >= 100) {
+			return 100
+		}
+		return Math.round(p * 10) / 10
+	})
+
+	function tierClass(t: TierView) : string {
+		if (t.state != 'claimed' && isCurrentTier(t)) {
+			return 'tier-item tier-current'
+		}
+		return 'tier-item tier-dim'
+	}
+
+	function tierBadgeClass(t: TierView) : string {
+		if (t.state != 'claimed' && isCurrentTier(t)) {
+			return 'tier-badge tier-badge-ink'
+		}
+		return 'tier-badge tier-badge-dim'
+	}
+
+	function tierBadgeTextClass(t: TierView) : string {
+		if (t.state != 'claimed' && isCurrentTier(t)) {
+			return 'tier-badge-text tier-badge-text-white'
+		}
+		return 'tier-badge-text'
+	}
+
+	function tierTitleClass(t: TierView) : string {
+		if (t.state == 'claimed') {
+			return 'tier-title tier-title-dim'
+		}
+		if (isCurrentTier(t)) {
+			return 'tier-title tier-title-strong'
+		}
+		return 'tier-title'
+	}
+
+	function tierTagClass(t: TierView) : string {
+		if (t.state == 'claimed') {
+			return 'tier-tag tier-tag-badge'
+		}
+		if (isCurrentTier(t)) {
+			return 'tier-tag tier-tag-accent'
+		}
+		return 'tier-tag tier-tag-gray'
+	}
+
+	function tierTagTextClass(t: TierView) : string {
+		if (t.state == 'claimed') {
+			return 'tier-tag-text tier-tag-text-amber'
+		}
+		if (isCurrentTier(t)) {
+			return 'tier-tag-text tier-tag-text-ink'
+		}
+		return 'tier-tag-text'
+	}
+
+	/** 奖励标签文案：+N 铜币（含额外赠送时追加说明） */
+	function tierTagText(t: TierView) : string {
+		let text = '+' + t.base + ' 铜币'
+		if (t.bonus > 0) {
+			text += ' · 再额外赠送 ' + t.bonus + ' 铜币'
+		}
+		return text
+	}
+
+	function tierDescClass(t: TierView) : string {
+		if (t.state == 'locked' && isCurrentTier(t)) {
+			return 'tier-desc tier-desc-text'
+		}
+		return 'tier-desc'
+	}
+
+	function tierDesc(t: TierView) : string {
+		const total = t.base + t.bonus
+		if (t.state == 'claimed') {
+			return '已达成任务，获得 ' + total + ' 铜币'
+		}
+		if (t.state == 'claimable') {
+			return '已达成，可领取 ' + total + ' 铜币'
+		}
+		return '还差 ' + fmtRemainMinutes(t.minutes - todayMinutes.value) + ' 解锁'
+	}
+
+	function tierBtnClass(t: TierView) : string {
+		if (t.state == 'claimed') {
+			return 'tier-btn tier-btn-claimed'
+		}
+		if (t.state == 'claimable') {
+			return 'tier-btn tier-btn-primary'
+		}
+		return 'tier-btn tier-btn-outline'
+	}
+
+	function tierBtnText(t: TierView) : string {
+		if (t.state == 'claimed') {
+			return '已领取'
+		}
+		if (t.state == 'claimable') {
+			return '领取'
+		}
+		return '去阅读'
+	}
+
+	function tierBtnTextClass(t: TierView) : string {
+		if (t.state == 'claimed') {
+			return 'tier-btn-text tier-btn-text-claimed'
+		}
+		if (t.state == 'claimable') {
+			return 'tier-btn-text tier-btn-text-white'
+		}
+		return 'tier-btn-text'
+	}
+
+	// ==================== 导航与提示 ====================
 
 	const toastVisible = ref(false)
 	const toastMsg = ref('')
@@ -266,6 +684,13 @@
 	function goReading() : void {
 		uni.navigateTo({
 			url: '/pages/reading/reader'
+		})
+	}
+
+	/** 补签"查看"：跳转会员支付页（月卡每月赠 3 次补签） */
+	function goMemberPay() : void {
+		uni.navigateTo({
+			url: '/pages/user/member-pay'
 		})
 	}
 </script>
@@ -441,6 +866,10 @@
 		color: $bai-ink;
 	}
 
+	.day-week-missed {
+		color: $bai-negative-deep;
+	}
+
 	.day-circle {
 		width: 46rpx;
 		height: 46rpx;
@@ -456,6 +885,16 @@
 
 	.day-circle-accent {
 		background-color: $bai-warning;
+	}
+
+	/* +20 大礼圆：墨黑底白字（品牌唯一强调色，区别于 +10 的琥珀圆） */
+	.day-circle-ink {
+		background-color: $bai-ink;
+	}
+
+	/* 漏签圆：负向红弱化浅底（示意错过/损失，不炸眼） */
+	.day-circle-missed {
+		background-color: rgba($bai-negative, 0.12);
 	}
 
 	.day-circle-idle {
@@ -479,6 +918,16 @@
 		color: $bai-ink;
 	}
 
+	/* +20 奖励额：墨黑圆上的白色粗体 */
+	.day-reward-grand {
+		font-weight: 700;
+		color: $bai-on-primary;
+	}
+
+	.day-reward-missed {
+		color: $bai-negative-deep;
+	}
+
 	.day-state {
 		font-size: 19rpx;
 		color: $bai-mute;
@@ -499,6 +948,10 @@
 		color: $bai-ink;
 	}
 
+	.day-state-missed {
+		color: $bai-negative-deep;
+	}
+
 	/* Day 状态底色（Stitch: 已签墨黑 / 今日警示浅底 / 待签画布灰 / 大礼画布灰） */
 	.day-checked {
 		background-color: $bai-ink;
@@ -516,6 +969,12 @@
 	.day-grand {
 		background-color: $bai-canvas-soft;
 		border: 1px solid $bai-pale;
+	}
+
+	/* 漏签格（本周已过未签）：画布灰底 + 负向红描边，弱化损失提示 */
+	.day-missed {
+		background-color: $bai-canvas-soft;
+		border: 1px solid rgba($bai-negative, 0.35);
 	}
 
 	/* 补签提示条（Stitch: 画布灰底 圆角 lg 16px 两端分布） */
@@ -580,7 +1039,7 @@
 	}
 
 	.progress-fill {
-		width: 18.3%;
+		width: 0%;
 		height: 12rpx;
 		border-radius: $bai-rounded-pill;
 		background-color: $bai-ink;

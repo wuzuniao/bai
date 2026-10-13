@@ -14,13 +14,14 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models import ReadingBookmark, ReadingDailyStat, ReadingNote, UserBook, UserPreference
+from ..models import ReadingBookmark, ReadingDailyStat, ReadingNote, ReadingSession, UserBook, UserPreference
 from ..schemas.reading import (
     BookCreate,
     BookmarksReplace,
     BookOrderBatch,
     BookProgressUpdate,
     PrefsPut,
+    SessionsReport,
     ThoughtCreate,
     UnderlineUpsert,
 )
@@ -191,7 +192,11 @@ async def update_order(db: AsyncSession, user_id: int, data: BookOrderBatch) -> 
 
 
 async def delete_book(db: AsyncSession, user_id: int, book_id: int) -> bool:
-    """删除书籍（笔记/书签应用层级联），书籍不存在返回 False"""
+    """
+    删除书籍（笔记/书签应用层级联），书籍不存在返回 False
+    会话流水（reading_sessions）不随删清理：阅读历史属用户而非书籍，
+    保留孤儿 book_id（按书统计经 join books 过滤，时段分析不受影响）
+    """
     book = await get_book(db, user_id, book_id)
     if book is None:
         return False
@@ -375,6 +380,39 @@ async def get_stats(db: AsyncSession, user_id: int) -> dict[str, int]:
     """今日与累计阅读分钟数（书架统计卡/福利页用）"""
     today_total, total = await _stats_pair(db, user_id)
     return {"today_minutes": today_total, "total_minutes": total}
+
+
+async def add_sessions(db: AsyncSession, user_id: int, data: SessionsReport) -> int:
+    """
+    批量写入阅读会话流水（按书/时段明细账，在线直传与离线补传共用）
+    - 书籍不存在/非本人的条目跳过（离线期负数本地 id 未及迁移等场景），返回实际落库条数
+    - 先集合查询合法书籍 id+title 防 N+1；title 落库为书名快照，删书后按书统计仍能展示
+    - 时长聚合（daily_stats）由分钟上报链路另行维护，两账独立
+    """
+    ids = {item.book_id for item in data.sessions}
+    rows = await db.execute(
+        select(UserBook.id, UserBook.title).where(UserBook.user_id == user_id, UserBook.id.in_(ids))
+    )
+    title_map = {row.id: row.title for row in rows.fetchall()}
+    accepted = 0
+    for item in data.sessions:
+        if item.book_id not in title_map:
+            continue
+        db.add(
+            ReadingSession(
+                user_id=user_id,
+                book_id=item.book_id,
+                book_title=title_map[item.book_id],
+                source=item.source,
+                started_at=datetime.strptime(item.started_at, "%Y-%m-%d %H:%M:%S"),
+                ended_at=datetime.strptime(item.ended_at, "%Y-%m-%d %H:%M:%S"),
+                minutes=item.minutes,
+            )
+        )
+        accepted += 1
+    if accepted > 0:
+        await db.commit()
+    return accepted
 
 
 # ==================== 偏好 ====================
