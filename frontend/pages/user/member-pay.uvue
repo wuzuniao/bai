@@ -47,11 +47,18 @@
 			</view>
 		</view>
 
-		<!-- 底部操作区；仅前端展示，未接入支付逻辑 -->
+		<!-- 底部操作区：APP 端纯展示（应用商店内购待接入）；微信小程序端点击弹出支付确认卡 -->
 		<view class="pay-page__action">
+			<!-- #ifdef APP -->
 			<view class="pay-page__btn" hover-class="pay-page__btn--hover" :hover-stay-time="70">
 				<text class="pay-page__btn-text">立即订阅</text>
 			</view>
+			<!-- #endif -->
+			<!-- #ifdef MP-WEIXIN -->
+			<view class="pay-page__btn" hover-class="pay-page__btn--hover" :hover-stay-time="70" @click="openPaySheet">
+				<text class="pay-page__btn-text">立即订阅</text>
+			</view>
+			<!-- #endif -->
 			<!-- #ifdef APP -->
 			<text class="pay-page__safe-tip">支付安全由应用商店提供极致保障</text>
 			<!-- #endif -->
@@ -59,6 +66,76 @@
 			<text class="pay-page__safe-tip">支付将从金币余额中扣除</text>
 			<!-- #endif -->
 		</view>
+
+		<!-- #ifdef MP-WEIXIN -->
+		<!-- 支付确认卡片（底部滑出半屏，标准支付布局）：商品信息 / 支付金额 / 支付方式 / 确认按钮 -->
+		<view v-if="paySheetOpen" class="pay-sheet__mask" @click="closePaySheet">
+			<view class="pay-sheet" @click.stop>
+				<view class="pay-sheet__header">
+					<text class="pay-sheet__title">确认支付</text>
+					<text class="pay-sheet__close" @click="closePaySheet">×</text>
+				</view>
+				<view class="pay-sheet__goods">
+					<text class="pay-sheet__goods-name">黑铁会员 · 月卡</text>
+					<text class="pay-sheet__goods-desc">按月开通，续费自动顺延</text>
+				</view>
+				<view class="pay-sheet__row">
+					<text class="pay-sheet__label">购买时长</text>
+					<view class="pay-sheet__stepper">
+						<view class="pay-sheet__step-btn" :class="months <= 1 ? 'pay-sheet__step-btn--disabled' : ''" @click="changeMonths(-1)">
+							<text class="pay-sheet__step-text">−</text>
+						</view>
+						<text class="pay-sheet__months">{{ months }} 个月</text>
+						<view class="pay-sheet__step-btn" :class="months >= 12 ? 'pay-sheet__step-btn--disabled' : ''" @click="changeMonths(1)">
+							<text class="pay-sheet__step-text">+</text>
+						</view>
+					</view>
+				</view>
+				<view class="pay-sheet__row">
+					<text class="pay-sheet__label">支付金额</text>
+					<view class="pay-sheet__amount">
+						<image class="pay-sheet__coin-icon" src="/static/icons/coin-gold.svg" mode="aspectFit" />
+						<text class="pay-sheet__amount-num">{{ months }} 金币</text>
+					</view>
+				</view>
+				<view class="pay-sheet__row">
+					<text class="pay-sheet__label">支付方式</text>
+					<text class="pay-sheet__value">金币余额（{{ balanceGold }} 金币）</text>
+				</view>
+				<view class="pay-sheet__btn" hover-class="pay-sheet__btn--hover" :hover-stay-time="70" @click="confirmPay">
+					<text class="pay-sheet__btn-text">{{ payBtnText }}</text>
+				</view>
+				<text class="pay-sheet__tip">支付将从金币余额中扣除 {{ months }} 金币，会员权益即时生效</text>
+			</view>
+		</view>
+
+		<!-- 全屏支付成功卡片：订单明细 + 确认返回活动页 -->
+		<view v-if="successOpen" class="pay-success">
+			<view class="pay-success__body">
+				<view class="pay-success__icon">
+					<text class="pay-success__icon-check">✓</text>
+				</view>
+				<text class="pay-success__title">支付成功</text>
+				<view class="pay-success__info">
+					<view class="pay-success__row">
+						<text class="pay-success__label">开通项目</text>
+						<text class="pay-success__value">黑铁会员 · {{ successMonths }} 个月</text>
+					</view>
+					<view class="pay-success__row">
+						<text class="pay-success__label">支付金额</text>
+						<text class="pay-success__value pay-success__value-accent">{{ successGold }} 金币</text>
+					</view>
+					<view class="pay-success__row">
+						<text class="pay-success__label">有效期至</text>
+						<text class="pay-success__value">{{ successExpires }}</text>
+					</view>
+				</view>
+			</view>
+			<view class="pay-success__btn" hover-class="pay-success__btn--hover" :hover-stay-time="70" @click="confirmSuccess">
+				<text class="pay-success__btn-text">确认</text>
+			</view>
+		</view>
+		<!-- #endif -->
 	</view>
 </template>
 
@@ -66,11 +143,18 @@
 	/**
 	 * 会员支付页（member-pay.uvue）
 	 * --------------------------------------------------------------------------
-	 * - 纯前端静态展示：权益卡、价格与限时胶囊、订阅按钮（未接入任何支付后端逻辑）
-	 * - 分端计价（模板条件编译）：APP 端为应用商店支付（¥ 计价）；微信小程序端为金币计价
-	 * - 入口：「我的」页会员卡片「立即抢购」按钮（仅 App 商店分发渠道显示）
-	 * - 固定深色皮肤：支付相关区块按约定保留原支付配色（不随 bai 主题令牌更换）
+	 * - APP 端：纯静态展示（权益卡/价格/订阅按钮），应用商店内购待接入
+	 * - 微信小程序端：金币支付通道——「立即订阅」弹出支付确认卡，确认后调
+	 *   POST /api/v1/membership/purchase（计价 1 金币/月、单月按 31 天计为服务端真源，
+	 *   后端扣金币并调 auth 授 iron 角色续费顺延）
+	 * - 入口：APP 端「我的」页会员卡「立即抢购」；微信小程序端活动页补签
+	 *   提示条「查看」（补签权益引导购买月卡）
+	 * - 固定深色皮肤：支付相关区块（含支付确认卡）按约定保留原支付配色
+	 *   （#0e0f0c 页底 / #2f3131 卡底 + #e2e2e2 描边 / #acf67c 亮绿强调，不随 bai 主题令牌更换）
 	 */
+	import { fetchActivitySummary } from '@/api/activity.uts'
+	import { purchaseMembership } from '@/api/membership.uts'
+	import { ApiResponse, forceRefreshToken } from '@/utils/request.uts'
 
 	/** 顶部定位：返回按钮取状态栏高度，内容再避让 */
 	const backTop = ref(44)
@@ -90,6 +174,134 @@
 			uni.reLaunch({ url: '/pages/index/index' })
 		}
 	}
+
+	// #ifdef MP-WEIXIN
+	/** 支付确认卡显隐 / 支付进行中锁 / 金币余额（确认卡打开时拉取，支付后以返回值刷新） */
+	const paySheetOpen = ref(false)
+	const paying = ref(false)
+	const balanceGold = ref(0)
+	/** 购买月数（默认 1，步进范围 1~12，与后端 schema 上限一致） */
+	const months = ref(1)
+	/** 全屏支付成功卡片显隐与订单明细（支付成功后展示，确认后返回活动页） */
+	const successOpen = ref(false)
+	const successMonths = ref(1)
+	const successGold = ref(1)
+	const successExpires = ref('')
+
+	/** 支付按钮文案：支付中 / 金币不足 / 可支付 */
+	const payBtnText = computed((): string => {
+		if (paying.value) {
+			return '支付中…'
+		}
+		return balanceGold.value >= months.value ? '确认支付' : '金币不足'
+	})
+
+	/** 调整购买月数（步进钳位 1~12；支付中不可调） */
+	function changeMonths(delta: number) : void {
+		if (paying.value) {
+			return
+		}
+		const next = months.value + delta
+		if (next < 1 || next > 12) {
+			return
+		}
+		months.value = next
+	}
+
+	/**
+	 * 从活动 summary 响应中提取金币余额并刷新
+	 * uts2js（小程序/H5）的 UTSJSONObject 无 getJSONObject 方法，
+	 * 嵌套取值一律索引访问 + 判空 + as 转换（与 request.uts 同构）
+	 */
+	function applyGoldBalance(res: ApiResponse) : void {
+		if (res.code == 0 && res.data != null) {
+			const data = res.data!
+			const balanceRaw = data['balance']
+			if (balanceRaw != null) {
+				const b = balanceRaw as UTSJSONObject
+				const gold = b['gold']
+				balanceGold.value = gold == null ? 0 : gold as number
+			}
+		}
+	}
+
+	/** 打开支付确认卡（月数重置为 1，同步拉取金币余额展示） */
+	function openPaySheet() : void {
+		months.value = 1
+		paySheetOpen.value = true
+		paying.value = false
+		fetchActivitySummary().then((res: ApiResponse) => {
+			applyGoldBalance(res)
+		}, (_e: Error) => {
+			// 余额拉取失败保持当前值；确认支付时服务端仍强校验余额
+		})
+	}
+
+	/** 关闭支付确认卡（支付中禁止关闭防重复扣币） */
+	function closePaySheet() : void {
+		if (paying.value) {
+			return
+		}
+		paySheetOpen.value = false
+	}
+
+	/** 确认支付：金币购买黑铁会员（月数×单价，价格/时长服务端真源） */
+	function confirmPay() : void {
+		if (paying.value) {
+			return
+		}
+		if (balanceGold.value < months.value) {
+			uni.showToast({ title: '金币不足，先去活动页赚金币吧', icon: 'none' })
+			return
+		}
+		paying.value = true
+		purchaseMembership(months.value).then((res: ApiResponse) => {
+			paying.value = false
+			if (res.code == 0 && res.data != null) {
+				const data = res.data!
+				const balanceRaw = data['balance']
+				if (balanceRaw != null) {
+					const b = balanceRaw as UTSJSONObject
+					const gold = b['gold']
+					balanceGold.value = gold == null ? 0 : gold as number
+				}
+				// 到期时间为 ISO 字符串（无时区后缀），展示日期部分
+				const expiresAtRaw = data['expires_at']
+				const expiresAt = expiresAtRaw == null ? '' : expiresAtRaw as string
+				successMonths.value = data.getNumber('months') ?? months.value
+				successGold.value = data.getNumber('amount_gold') ?? months.value
+				successExpires.value = expiresAt.length >= 10 ? expiresAt.substring(0, 10) : ''
+				paySheetOpen.value = false
+				successOpen.value = true
+			}
+		}, (e: Error) => {
+			paying.value = false
+			uni.showToast({ title: e.message, icon: 'none' })
+			// 授权失败金币已自动退款，重新拉取余额回正
+			fetchActivitySummary().then((res: ApiResponse) => {
+				applyGoldBalance(res)
+			}, (_e: Error) => {
+			})
+		})
+	}
+
+	/**
+	 * 成功卡片确认：先主动刷新令牌（购买已触发 auth 撤销扇出，旧令牌会被判失效，
+	 * 刷新后新令牌携带会员角色），再返回活动页；刷新失败不阻塞返回
+	 * （既有 401 静默刷新链路仍兜底）
+	 */
+	function confirmSuccess() : void {
+		successOpen.value = false
+		forceRefreshToken().then((_ok: boolean) => {
+			const pages = getCurrentPages()
+			if (pages.length > 1) {
+				uni.navigateBack({ delta: 1 })
+			} else {
+				uni.reLaunch({ url: '/pages/reading/reward' })
+			}
+		})
+	}
+	// #endif
 </script>
 
 <style lang="scss">
@@ -289,5 +501,287 @@
 		line-height: 32rpx;
 		font-weight: 400;
 		text-align: center;
+	}
+
+	/* ===== 支付确认卡片（MP-WEIXIN：底部滑出半屏；配色随页面深色支付皮肤统一：
+	          #2f3131 卡底 + #e2e2e2 描边 + #acf67c 亮绿强调 + 灰阶文字，不用 $bai 主题令牌） ===== */
+	.pay-sheet__mask {
+		position: fixed;
+		left: 0;
+		right: 0;
+		top: 0;
+		bottom: 0;
+		background-color: rgba(0, 0, 0, 0.55);
+		z-index: 60;
+		flex-direction: column;
+		justify-content: flex-end;
+	}
+
+	.pay-sheet {
+		box-sizing: border-box;
+		padding: 40rpx 40rpx calc(40rpx + env(safe-area-inset-bottom));
+		background-color: #2f3131;
+		border: 1px solid #e2e2e2;
+		border-top-left-radius: 24rpx;
+		border-top-right-radius: 24rpx;
+		flex-direction: column;
+	}
+
+	.pay-sheet__header {
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+	}
+
+	.pay-sheet__title {
+		font-size: 31rpx;
+		line-height: 44rpx;
+		font-weight: 900;
+		color: #e8ebe6;
+	}
+
+	.pay-sheet__close {
+		font-size: 40rpx;
+		line-height: 44rpx;
+		color: #868685;
+		padding: 0 8rpx;
+	}
+
+	/* 商品信息块（页面底色沉一层，与卡底形成层级） */
+	.pay-sheet__goods {
+		margin-top: 32rpx;
+		padding: 24rpx;
+		border-radius: 16rpx;
+		background-color: #0e0f0c;
+		flex-direction: column;
+	}
+
+	.pay-sheet__goods-name {
+		font-size: 27rpx;
+		line-height: 38rpx;
+		font-weight: 600;
+		color: #e8ebe6;
+	}
+
+	.pay-sheet__goods-desc {
+		margin-top: 6rpx;
+		font-size: 23rpx;
+		line-height: 33rpx;
+		color: #868685;
+	}
+
+	/* 标签行：左标签右值（支付金额 / 支付方式） */
+	.pay-sheet__row {
+		margin-top: 24rpx;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+	}
+
+	.pay-sheet__label {
+		font-size: 25rpx;
+		line-height: 36rpx;
+		color: #c4c7c3;
+	}
+
+	.pay-sheet__value {
+		font-size: 25rpx;
+		line-height: 36rpx;
+		font-weight: 600;
+		color: #e8ebe6;
+	}
+
+	.pay-sheet__amount {
+		flex-direction: row;
+		align-items: center;
+	}
+
+	.pay-sheet__coin-icon {
+		width: 32rpx;
+		height: 32rpx;
+		margin-right: 8rpx;
+	}
+
+	.pay-sheet__amount-num {
+		font-size: 31rpx;
+		line-height: 44rpx;
+		font-weight: 900;
+		color: #acf67c;
+	}
+
+	/* 确认支付按钮（与页面主按钮同款亮绿 CTA + 光晕） */
+	.pay-sheet__btn {
+		margin-top: 40rpx;
+		height: 92rpx;
+		border-radius: 24rpx;
+		background-color: #acf67c;
+		box-shadow: 0 0 40px -10px rgba(172, 246, 124, 0.4);
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+		transition: opacity 0.2s, transform 0.1s;
+	}
+
+	.pay-sheet__btn--hover {
+		opacity: 0.8;
+		transform: scale(0.98);
+	}
+
+	.pay-sheet__btn-text {
+		font-size: 31rpx;
+		line-height: 44rpx;
+		font-weight: 600;
+		color: #092100;
+	}
+
+	.pay-sheet__tip {
+		margin-top: 20rpx;
+		font-size: 21rpx;
+		line-height: 30rpx;
+		color: #868685;
+		text-align: center;
+	}
+
+	/* 购买时长步进器（-/+ 圆钮 + 月数） */
+	.pay-sheet__stepper {
+		flex-direction: row;
+		align-items: center;
+	}
+
+	.pay-sheet__step-btn {
+		width: 56rpx;
+		height: 56rpx;
+		border-radius: 9999px;
+		background-color: #0e0f0c;
+		align-items: center;
+		justify-content: center;
+		flex-direction: row;
+	}
+
+	.pay-sheet__step-btn--disabled {
+		opacity: 0.35;
+	}
+
+	.pay-sheet__step-text {
+		font-size: 32rpx;
+		line-height: 36rpx;
+		font-weight: 900;
+		color: #e8ebe6;
+	}
+
+	.pay-sheet__months {
+		margin: 0 24rpx;
+		min-width: 120rpx;
+		font-size: 27rpx;
+		line-height: 38rpx;
+		font-weight: 600;
+		color: #acf67c;
+		text-align: center;
+	}
+
+	/* ===== 全屏支付成功卡片（深色支付皮肤：亮绿成功圆 + 订单明细 + 确认返回） ===== */
+	.pay-success {
+		position: fixed;
+		left: 0;
+		right: 0;
+		top: 0;
+		bottom: 0;
+		background-color: #0e0f0c;
+		z-index: 70;
+		padding: 0 48rpx;
+		padding-bottom: calc(48rpx + env(safe-area-inset-bottom));
+		flex-direction: column;
+	}
+
+	.pay-success__body {
+		flex: 1;
+		align-items: center;
+		justify-content: center;
+		flex-direction: column;
+	}
+
+	.pay-success__icon {
+		width: 160rpx;
+		height: 160rpx;
+		border-radius: 9999px;
+		background-color: #acf67c;
+		box-shadow: 0 0 80px -20px rgba(172, 246, 124, 0.5);
+		align-items: center;
+		justify-content: center;
+		flex-direction: row;
+	}
+
+	.pay-success__icon-check {
+		font-size: 80rpx;
+		line-height: 80rpx;
+		font-weight: 900;
+		color: #092100;
+	}
+
+	.pay-success__title {
+		margin-top: 40rpx;
+		font-size: 48rpx;
+		line-height: 64rpx;
+		font-weight: 900;
+		color: #e8ebe6;
+	}
+
+	.pay-success__info {
+		margin-top: 48rpx;
+		width: 100%;
+		box-sizing: border-box;
+		padding: 32rpx;
+		border-radius: 16rpx;
+		background-color: #2f3131;
+		border: 1px solid #e2e2e2;
+		flex-direction: column;
+	}
+
+	.pay-success__row {
+		padding: 12rpx 0;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+	}
+
+	.pay-success__label {
+		font-size: 25rpx;
+		line-height: 36rpx;
+		color: #c4c7c3;
+	}
+
+	.pay-success__value {
+		font-size: 25rpx;
+		line-height: 36rpx;
+		font-weight: 600;
+		color: #e8ebe6;
+	}
+
+	.pay-success__value-accent {
+		color: #acf67c;
+	}
+
+	/* 确认按钮（与页面主按钮同款亮绿 CTA） */
+	.pay-success__btn {
+		height: 128rpx;
+		border-radius: 24rpx;
+		background-color: #acf67c;
+		box-shadow: 0 0 40px -10px rgba(172, 246, 124, 0.4);
+		align-items: center;
+		justify-content: center;
+		flex-direction: row;
+		transition: opacity 0.2s, transform 0.1s;
+	}
+
+	.pay-success__btn--hover {
+		opacity: 0.8;
+		transform: scale(0.98);
+	}
+
+	.pay-success__btn-text {
+		font-size: 48rpx;
+		line-height: 64rpx;
+		font-weight: 400;
+		color: #092100;
 	}
 </style>

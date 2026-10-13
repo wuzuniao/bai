@@ -58,7 +58,10 @@ class CoinTransaction(Base):
 
 
 class CheckinRecord(Base):
-    """每日签到记录（一人一日一行；连续天数由本周记录推导，不落冗余字段）"""
+    """每日签到记录（一人一日一行；连续天数由本周记录推导，不落冗余字段）
+
+    会员补签行 is_makeup=1、reward=0（不发奖励，仅恢复签到状态）。
+    """
 
     __tablename__ = "checkin_records"
     __table_args__ = (UniqueConstraint("user_id", "checkin_date", name="uk_cr_user_date"),)
@@ -67,6 +70,10 @@ class CheckinRecord(Base):
     user_id: Mapped[int] = mapped_column(BIGINT, nullable=False)
     checkin_date: Mapped[date] = mapped_column(DATE, nullable=False, comment="签到日期（东八区）")
     reward: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0", comment="发放铜币数（按星期定档）")
+    is_makeup: Mapped[int] = mapped_column(
+        TINYINT(1), nullable=False, default=0, server_default="0",
+        comment="是否补签 0=正常签到 1=会员补签（不发奖励，仅恢复签到状态）",
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default="CURRENT_TIMESTAMP")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default="CURRENT_TIMESTAMP", onupdate=datetime.now

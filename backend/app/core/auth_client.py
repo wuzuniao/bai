@@ -235,3 +235,39 @@ def is_revoked(user_id: int, iat: int) -> bool:
     """
     revoked_before = _revocations.get(user_id)
     return revoked_before is not None and iat < revoked_before
+
+
+# ==================== 会员购买授权（服务间写调用） ====================
+
+
+async def grant_membership(
+    user_id: int,
+    role_code: str,
+    duration_days: int,
+    order_no: str,
+    amount: float,
+    currency: str,
+) -> dict:
+    """
+    请求 auth 服务授予会员角色（金币支付成功后调用；POST /internal/membership/grant）
+    - 计价与时长由本项目服务端下发（前端不可传价格），order_no 幂等防重放
+    - auth 侧续费顺延、落账购买记录并扇出令牌撤销（本项目撤销同步拉取后
+      旧令牌 401，客户端静默刷新即携带新角色）
+    :return: auth 响应 data（{duplicated, role_code, expires_at}）
+    :raises RuntimeError: auth 业务错误（code != 0）或网络异常（由调用方补偿退款）
+    """
+    data = await _post_json(
+        "/internal/membership/grant",
+        {
+            "user_id": user_id,
+            "role_code": role_code,
+            "duration_days": duration_days,
+            "client_id": settings.AUTH_CLIENT_ID,
+            "order_no": order_no,
+            "amount": amount,
+            "currency": currency,
+        },
+    )
+    if data.get("code") != 0:
+        raise RuntimeError(f"auth 授权失败：{data.get('msg', '未知错误')}")
+    return data.get("data") or {}

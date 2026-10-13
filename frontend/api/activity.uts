@@ -32,6 +32,13 @@ export function postCheckin() : Promise<ApiResponse> {
 	return request(opts('/api/v1/activity/checkin', 'POST', {} as UTSJSONObject))
 }
 
+/** 会员补签（date=被补日期 YYYY-MM-DD；黑铁及以上每月 3 次，后端实时复核会员与限额） */
+export function postCheckinMakeup(date: string) : Promise<ApiResponse> {
+	const data = {} as UTSJSONObject
+	data['date'] = date
+	return request(opts('/api/v1/activity/makeup', 'POST', data))
+}
+
 /** 领取阅读档位奖励（tierMinutes=档位阈值分钟数；未达标/已领取后端 400） */
 export function claimReadingReward(tierMinutes: number) : Promise<ApiResponse> {
 	const data = {} as UTSJSONObject

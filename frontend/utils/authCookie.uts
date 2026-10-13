@@ -371,7 +371,9 @@ async function fetchProjectUserInfo(accessToken: string): Promise<UTSJSONObject 
 			success: (res) => {
 				const body = res.data
 				if (res.statusCode >= 200 && res.statusCode < 300 && body != null && body.getNumber('code') == 0) {
-					resolve(body.getJSONObject('data'))
+					// uts2js（H5/小程序）的 UTSJSONObject 无 getJSONObject 方法，嵌套取值用索引访问
+					const dataRaw = body['data']
+					resolve(dataRaw == null ? null : dataRaw as UTSJSONObject)
 					return
 				}
 				resolve(null)

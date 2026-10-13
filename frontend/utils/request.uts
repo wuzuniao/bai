@@ -150,6 +150,23 @@ function getAccessToken() : string {
 	return v == null ? '' : v as string
 }
 
+/**
+ * 主动刷新令牌（购买等角色变更场景：立即让新令牌携带最新 roles，不等 401 触发）
+ * :return: 刷新是否成功（失败不阻塞调用方流程，既有 401 静默刷新链路仍兜底）
+ */
+export function forceRefreshToken() : Promise<boolean> {
+	if (getRefreshToken() == '') {
+		return Promise.resolve(false)
+	}
+	return new Promise<boolean>((resolve) => {
+		silentRefresh().then((_token: string) => {
+			resolve(true)
+		}, (_e) => {
+			resolve(false)
+		})
+	})
+}
+
 /** 本地是否存在登录令牌（未登录判断收口：云端调用点据此跳过请求，走本地默认/缓存） */
 export function hasAccessToken() : boolean {
 	return getAccessToken().length > 0
@@ -254,9 +271,9 @@ export function request(options: RequestOptions) : Promise<ApiResponse> {
 				}
 				if (res.statusCode >= 200 && res.statusCode < 300) {
 					// 统一解析业务包装格式 {code, msg, data}：code=0 → data 取内层业务数据；
-					// code!=0 → reject(msg)。uts2js（小程序/H5 JS 运行时）类型化 JSON.parse
-					// 产出的嵌套对象无 UTSJSONObject 方法，故响应体用泛型实参接收、
-					// 嵌套取值用索引访问（与 jin 项目同构做法）
+					// code!=0 → reject(msg)。uts2js（小程序/H5 JS 运行时）的 UTSJSONObject
+					// 无 getJSONObject 方法（getNumber/getString/getBoolean/getArray 可用），
+					// 嵌套对象取值一律索引访问（与 jin 项目同构做法，Kotlin 端同样支持）
 					if (res.data == null) {
 						resolve({ code: 0, msg: 'success', data: null } as ApiResponse)
 						return

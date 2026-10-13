@@ -124,12 +124,14 @@ CREATE TABLE IF NOT EXISTS `coin_transactions` (
   KEY `idx_ct_user_time` (`user_id`, `created_at`)
 ) COMMENT='货币流水';
 
--- 8. 每日签到记录（一人一日一行；连续天数由本周记录推导，不落冗余字段）
+-- 8. 每日签到记录（一人一日一行；连续天数由本周记录推导，不落冗余字段；
+--    会员补签行 is_makeup=1，奖励按被补日星期基准档发放）
 CREATE TABLE IF NOT EXISTS `checkin_records` (
   `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
   `user_id` BIGINT NOT NULL,
   `checkin_date` DATE NOT NULL COMMENT '签到日期（东八区）',
   `reward` INT NOT NULL DEFAULT 0 COMMENT '发放铜币数（按星期定档）',
+  `is_makeup` TINYINT NOT NULL DEFAULT 0 COMMENT '是否补签 0=正常签到 1=会员补签（奖励按被补日星期基准档）',
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY `uk_cr_user_date` (`user_id`, `checkin_date`)

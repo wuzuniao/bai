@@ -13,3 +13,9 @@ class ReadingClaimRequest(BaseModel):
     """阅读档位奖励领取（POST /activity/reading-claim）"""
 
     tier_minutes: int = Field(gt=0, le=1440, description="档位阈值分钟数")
+
+
+class MakeupRequest(BaseModel):
+    """会员补签（POST /activity/makeup）"""
+
+    date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$", description="被补签到日期（YYYY-MM-DD，东八区）")

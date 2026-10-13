@@ -16,7 +16,7 @@
 								<text class="asset-unit">铜币</text>
 							</view>
 						</view>
-						<view class="use-btn" @click="showToast('铜币商城即将上线')">
+						<view class="use-btn" @click="goMemberPay">
 							<text class="use-btn-text">去使用</text>
 						</view>
 					</view>
@@ -65,8 +65,8 @@
 						</view>
 					</view>
 					<view class="makeup-bar">
-						<text class="makeup-text">漏签无需担忧，开通月卡每月赠 3 次补签</text>
-						<text class="makeup-btn" @click="goMemberPay">查看</text>
+						<text class="makeup-text">{{ makeupBarText }}</text>
+						<text v-if="!isMember" class="makeup-btn" @click="goMemberPay">查看</text>
 					</view>
 				</view>
 
@@ -120,11 +120,13 @@
 	import { mainTopPx } from '@/utils/layout.uts'
 	import { getTodayMinutes, getTotalMinutes } from '@/utils/books.uts'
 	import { hasAccessToken, ApiResponse } from '@/utils/request.uts'
-	import { fetchActivitySummary, postCheckin, claimReadingReward } from '@/api/activity.uts'
+	import { fetchActivitySummary, postCheckin, postCheckinMakeup, claimReadingReward } from '@/api/activity.uts'
 	import { REWARD_TIERS, fmtRemainMinutes } from '@/utils/rewards.uts'
+	import { useUserStore } from '@/stores/user.uts'
 
 	type DayView = {
 		weekday: number
+		date: string
 		label: string
 		reward: number
 		checked: boolean
@@ -162,6 +164,37 @@
 	const tiers = ref<TierView[]>([])
 	const checkinLoading = ref(false)
 	const claimBusy = ref(false)
+	/** 本月已补签次数（summary 回填；补签成功后以返回值刷新） */
+	const makeupUsed = ref(0)
+	/** 补签请求进行中锁（防重复点击） */
+	const makeupBusy = ref(false)
+
+	const userStore = useUserStore()
+
+	/** 是否持有会员权益角色（黑铁及以上档位或管理员；本地即时判定做交互引导，后端补签时实时复核） */
+	const isMember = computed((): boolean => {
+		const info = userStore.userInfo
+		if (info == null) {
+			return false
+		}
+		return info.roles.includes('admin') || info.roles.includes('iron')
+			|| info.roles.includes('bronze') || info.roles.includes('silver')
+			|| info.roles.includes('gold')
+	})
+
+	/** 本月剩余补签次数（会员每月 3 次，与后端 MAKEUP_QUOTA_PER_MONTH 同步维护） */
+	const makeupLeft = computed((): number => {
+		const left = 3 - makeupUsed.value
+		return left > 0 ? left : 0
+	})
+
+	/** 补签提示条文案：非会员引导开通；会员展示剩余次数 */
+	const makeupBarText = computed((): string => {
+		if (!isMember.value) {
+			return '漏签无需担忧，开通月卡每月赠 3 次补签'
+		}
+		return '本月剩余 ' + makeupLeft.value + ' 次补签机会'
+	})
 
 	/** 顶部留白：返回按钮（状态栏高度 + 40px）之下再留 12px（计算逻辑见 utils/layout.uts） */
 	const mainTop = ref(mainTopPx())
@@ -170,6 +203,16 @@
 	function getTodayWeekday() : number {
 		const day = new Date().getDay()
 		return day == 0 ? 7 : day
+	}
+
+	/** 本周某天的日期串（YYYY-MM-DD；周一 = 今天 - (weekday - 今日星期)，跨月自动进位） */
+	function weekDateOf(weekday: number) : string {
+		const now = new Date()
+		const offset = weekday - getTodayWeekday()
+		const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset)
+		const m = d.getMonth() + 1
+		const day = d.getDate()
+		return d.getFullYear() + '-' + (m < 10 ? '0' + m : '' + m) + '-' + (day < 10 ? '0' + day : '' + day)
 	}
 
 	// ==================== 数据加载 ====================
@@ -212,6 +255,7 @@
 			const c = checkinRaw as UTSJSONObject
 			streakDays.value = c.getNumber('streak_days') ?? 0
 			checkedToday.value = c.getBoolean('checked_today') == true
+			makeupUsed.value = c.getNumber('makeup_used') ?? makeupUsed.value
 			const arr = c.getArray('days')
 			const next: DayView[] = []
 			if (arr != null && arr.length == 7) {
@@ -220,6 +264,7 @@
 					const weekday = item.getNumber('weekday') ?? (i + 1)
 					next.push({
 						weekday: weekday,
+						date: weekDateOf(weekday),
 						label: WEEK_LABELS[i],
 						reward: item.getNumber('reward') ?? DEFAULT_WEEK_REWARDS[i],
 						checked: item.getBoolean('checked') == true,
@@ -282,6 +327,7 @@
 	function buildDefaultDay(weekday: number) : DayView {
 		return {
 			weekday: weekday,
+			date: weekDateOf(weekday),
 			label: WEEK_LABELS[weekday - 1],
 			reward: DEFAULT_WEEK_REWARDS[weekday - 1],
 			checked: false,
@@ -306,7 +352,7 @@
 	function onDayTap(d: DayView) : void {
 		if (!d.isToday) {
 			if (isDayMissed(d)) {
-				showToast('补签尚未开放')
+				makeupDay(d)
 			} else if (d.checked) {
 				showToast('当天已签到')
 			} else {
@@ -343,6 +389,44 @@
 		})
 	}
 
+	/**
+	 * 会员补签漏签日（黑铁及以上每月 3 次；奖励按被补日星期基准档发放）
+	 * 前端本地 roles 判定仅做交互引导，会员身份与限额以后端令牌比对为准
+	 */
+	function makeupDay(d: DayView) : void {
+		if (!hasAccessToken()) {
+			showToast('请先登录后再补签')
+			return
+		}
+		if (!isMember.value) {
+			showToast('开通会员后每月可补签 3 次')
+			return
+		}
+		if (makeupLeft.value <= 0) {
+			showToast('本月补签次数已用完')
+			return
+		}
+		if (makeupBusy.value) {
+			return
+		}
+		makeupBusy.value = true
+		postCheckinMakeup(d.date).then((res: ApiResponse) => {
+			makeupBusy.value = false
+			if (res.code == 0 && res.data != null) {
+				const data = res.data!
+				const reward = data.getNumber('reward') ?? 0
+				makeupUsed.value = data.getNumber('makeup_used') ?? (makeupUsed.value + 1)
+				streakDays.value = data.getNumber('streak_days') ?? streakDays.value
+				applyBalanceFromData(data)
+				markDayChecked(d.weekday)
+				showToast('补签成功，+' + reward + ' 铜币')
+			}
+		}, (e: Error) => {
+			makeupBusy.value = false
+			showToast(e.message)
+		})
+	}
+
 	/** 签到成功后本地格子状态更新（整体替换数组确保视图刷新） */
 	function markDayChecked(weekday: number) : void {
 		const list = days.value
@@ -352,6 +436,7 @@
 			if (d.weekday == weekday) {
 				next.push({
 					weekday: d.weekday,
+					date: d.date,
 					label: d.label,
 					reward: d.reward,
 					checked: true,

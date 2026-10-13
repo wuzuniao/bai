@@ -4,16 +4,19 @@
 - summary：活动页聚合数据（余额 / 今日已获 / 阅读统计 / 本周签到 / 档位状态）
 - checkin：今日签到（按星期定档发放铜币）
 - reading-claim：领取阅读档位奖励（当日已读达标且未领过）
+- makeup：会员补签（黑铁及以上每月 3 次，实时查 auth 判定会员）
 - 业务规则错误由服务层抛 ValueError，此处统一转 400
 """
 from __future__ import annotations
+
+from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...core.db import get_db
-from ...core.deps import get_current_user_id
-from ...schemas.reward import ReadingClaimRequest
+from ...core.deps import get_current_payload, get_current_user_id
+from ...schemas.reward import MakeupRequest, ReadingClaimRequest
 from ...services import reward_service as svc
 
 router = APIRouter(prefix="/activity", tags=["activity"])
@@ -54,5 +57,25 @@ async def claim_reading_reward(
     """领取阅读档位奖励（未达标/已领取返回 400）"""
     try:
         return _ok(await svc.claim_reading_reward(db, user_id, data.tier_minutes))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/makeup")
+async def makeup_checkin(
+    data: MakeupRequest,
+    payload: dict = Depends(get_current_payload),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """会员补签（按令牌 roles 声明本地判定；黑铁及以上每月 3 次，非会员/超限/日期非法返回 400）"""
+    user_id = int(payload["sub"])
+    roles_raw = payload.get("roles") or []
+    roles = [str(r) for r in roles_raw]
+    try:
+        makeup_date = date.fromisoformat(data.date)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="日期格式不正确")
+    try:
+        return _ok(await svc.makeup_checkin(db, user_id, makeup_date, roles))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

@@ -50,6 +50,7 @@ COIN_GOLD = 2
 SOURCE_CHECKIN = "checkin"
 SOURCE_READING = "reading"
 SOURCE_EXCHANGE = "exchange"
+SOURCE_CONSUME = "consume"
 
 # 自动兑换比率
 COPPER_PER_SILVER = 100
@@ -135,6 +136,73 @@ def _week_monday(today: date) -> date:
     return today - timedelta(days=today.weekday())
 
 
+async def debit_gold(
+    db: AsyncSession,
+    user_id: int,
+    amount: int,
+    source_id: str,
+    remark: str,
+) -> dict[str, int]:
+    """
+    金币支出（不 commit，由调用方统一提交保证原子性）
+    - FOR UPDATE 锁账户行防并发超扣；无账户行或余额不足抛 ValueError
+    - 金币为最高币种，扣减不产生进位/兑换流水，仅写一条负流水
+    :return: 扣减后余额字典
+    """
+    if amount <= 0:
+        raise ValueError("扣减数额无效")
+    result = await db.execute(
+        select(CoinAccount).where(CoinAccount.user_id == user_id).with_for_update()
+    )
+    account = result.scalar_one_or_none()
+    if account is None or account.gold < amount:
+        raise ValueError("金币余额不足")
+    account.gold -= amount
+    db.add(
+        CoinTransaction(
+            user_id=user_id,
+            coin_type=COIN_GOLD,
+            amount=-amount,
+            source=SOURCE_CONSUME,
+            source_id=source_id,
+            remark=remark,
+        )
+    )
+    return {"gold": account.gold, "silver": account.silver, "copper": account.copper}
+
+
+async def refund_gold(
+    db: AsyncSession,
+    user_id: int,
+    amount: int,
+    source_id: str,
+    remark: str,
+) -> None:
+    """金币退款补偿（购买失败回滚；独立事务即时提交）"""
+    if amount <= 0:
+        raise ValueError("退款数额无效")
+    result = await db.execute(
+        select(CoinAccount).where(CoinAccount.user_id == user_id).with_for_update()
+    )
+    account = result.scalar_one_or_none()
+    if account is None:
+        account = CoinAccount(user_id=user_id)
+        db.add(account)
+        await db.flush()
+    account.gold += amount
+    db.add(
+        CoinTransaction(
+            user_id=user_id,
+            coin_type=COIN_GOLD,
+            amount=amount,
+            source=SOURCE_CONSUME,
+            source_id=source_id,
+            remark=remark,
+        )
+    )
+    await db.commit()
+
+
 def _weekend_reward(weekday: int, missed_days: int) -> int:
     """周末签到奖励：按本周（周一~昨日）漏签天数顺延递减（周六漏 ≥1 天降至 +5；周日 0 漏 +20 / 1 漏 +10 / ≥2 漏 +5 保底）"""
     ladder = WEEKEND_REWARDS_BY_MISS[weekday]
@@ -195,6 +263,17 @@ async def get_summary(db: AsyncSession, user_id: int) -> dict[str, Any]:
     stats = await get_stats(db, user_id)
     today_minutes = stats["today_minutes"]
 
+    # 本月已补签次数（自然月，按补签操作时刻计数；前端据此展示剩余次数）
+    makeup_used = int(
+        await db.scalar(
+            select(func.count()).select_from(CheckinRecord).where(
+                CheckinRecord.user_id == user_id,
+                CheckinRecord.is_makeup == 1,
+                CheckinRecord.created_at >= today.replace(day=1),
+            )
+        ) or 0
+    )
+
     tiers: list[dict[str, Any]] = []
     for tier_minutes, base, bonus in READING_TIERS:
         if tier_minutes in claimed_tiers:
@@ -219,6 +298,7 @@ async def get_summary(db: AsyncSession, user_id: int) -> dict[str, Any]:
         "checkin": {
             "streak_days": _streak_days(checkin_dates, today),
             "checked_today": today in checkin_dates,
+            "makeup_used": makeup_used,
             # 7 天格子（周一~周日）：checked 由本周签到记录推导；周六/周日按当前漏签数顺延递减
             "days": [
                 {
@@ -281,6 +361,90 @@ async def checkin(db: AsyncSession, user_id: int) -> dict[str, Any]:
         "reward": reward,
         "streak_days": _streak_days(dates, today),
         "checked_today": True,
+        "balance": balance_to_dict(acc_row.scalar_one_or_none()),
+        "today_gained": await _today_gained_copper(db, user_id, today),
+    }
+
+
+# ==================== 会员补签 ====================
+
+
+# 会员每月补签次数（自然月，按补签操作时刻计数；与会员页文案「每月赠 3 次」一致）
+MAKEUP_QUOTA_PER_MONTH = 3
+
+# 可享补签权益的角色（黑铁及以上档位 + 管理员；从令牌 roles 声明本地判定）
+MAKEUP_ROLE_CODES: list[str] = ["iron", "bronze", "silver", "gold", "admin"]
+
+
+async def makeup_checkin(
+    db: AsyncSession, user_id: int, makeup_date: date, roles: list[str]
+) -> dict[str, Any]:
+    """
+    会员补签：恢复指定漏签日的签到状态并按当天基准档发放铜币
+    （is_makeup=1；连续天数推导基于签到日期集合，自动包含补签日）
+    - 会员判定按令牌 roles 声明本地比对（黑铁及以上档位/管理员），不实时查 auth
+    - 被补日期须为本周一至昨日（与活动页可点格子一致）且无签到记录
+    - 每自然月限 MAKEUP_QUOTA_PER_MONTH 次（按补签操作时刻所在月计数）
+    :return: {makeup_date, reward, makeup_used, makeup_left, streak_days, balance, today_gained}
+    """
+    today = today_cn()
+    if makeup_date >= today:
+        raise ValueError("只能补签今天之前的漏签日")
+    if makeup_date < _week_monday(today):
+        raise ValueError("只能补签本周内的漏签日")
+
+    if not any(code in roles for code in MAKEUP_ROLE_CODES):
+        raise ValueError("开通会员后每月可补签 3 次")
+
+    exists = await db.execute(
+        select(CheckinRecord.id).where(
+            CheckinRecord.user_id == user_id, CheckinRecord.checkin_date == makeup_date
+        )
+    )
+    if exists.scalar_one_or_none() is not None:
+        raise ValueError("该日已签到")
+
+    # 本月已补签次数（created_at=补签操作时刻，跨月补签日也计入操作月）
+    month_start = today.replace(day=1)
+    used = int(
+        await db.scalar(
+            select(func.count()).select_from(CheckinRecord).where(
+                CheckinRecord.user_id == user_id,
+                CheckinRecord.is_makeup == 1,
+                CheckinRecord.created_at >= month_start,
+            )
+        ) or 0
+    )
+    if used >= MAKEUP_QUOTA_PER_MONTH:
+        raise ValueError("本月补签次数已用完")
+
+    # 奖励按被补日期星期基准档（周一~五 +5 / 周六 +10 / 周日 +20）
+    reward = CHECKIN_REWARDS[makeup_date.weekday()]
+    record = CheckinRecord(user_id=user_id, checkin_date=makeup_date, reward=reward, is_makeup=1)
+    db.add(record)
+    try:
+        await db.flush()  # 取记录 id 供流水关联；唯一约束 (user_id, checkin_date) 兜底并发重复补签
+    except IntegrityError:
+        await db.rollback()
+        raise ValueError("该日已签到")
+
+    await _credit(db, user_id, reward, SOURCE_CHECKIN, str(record.id), "会员补签")
+    await db.commit()
+
+    rows = await db.execute(
+        select(CheckinRecord.checkin_date).where(
+            CheckinRecord.user_id == user_id,
+            CheckinRecord.checkin_date.between(_week_monday(today), today),
+        )
+    )
+    dates = set(rows.scalars().all())
+    acc_row = await db.execute(select(CoinAccount).where(CoinAccount.user_id == user_id))
+    return {
+        "makeup_date": makeup_date.isoformat(),
+        "reward": reward,
+        "makeup_used": used + 1,
+        "makeup_left": MAKEUP_QUOTA_PER_MONTH - used - 1,
+        "streak_days": _streak_days(dates, today),
         "balance": balance_to_dict(acc_row.scalar_one_or_none()),
         "today_gained": await _today_gained_copper(db, user_id, today),
     }
