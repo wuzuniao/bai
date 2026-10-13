@@ -6,12 +6,15 @@
 				<view class="share-card">
 					<text class="share-card-app">无足鸟古诗词学习助手</text>
 					<scroll-view direction="vertical" class="share-card-scroll" :style="'max-height:' + shareCardMaxH + 'px'">
-						<!-- 引文分段渲染：\n 拆段（段边界即原文段落边界）+ 段首两全角空格缩进 + 段间距，与正文段落排版同参 -->
+						<!-- 引文分段渲染：\n 拆段（段边界即原文段落边界）+ 段首两全角空格缩进 + 段间距，与正文段落排版同参；
+						     “ 恰在段首时（无上/下文渐出）悬挂于首段缩进区内（不占文字流宽度），各段文字左缘对齐 -->
 						<view
 							v-for="(para, pi) in shareParas"
 							:key="pi"
+							class="share-para"
 							:class="pi > 0 ? 'share-para-gap' : ''"
 						>
+							<text v-if="pi == 0 && quoteStartsAtParaStart()" class="share-quote-mark share-quote-mark-hung">“</text>
 							<text class="share-card-text"><text v-for="(r, ri) in para" :key="ri" :class="r.cls">{{ r.text }}</text></text>
 						</view>
 						<view v-if="shareData.thoughtText.length > 0" class="share-card-thought">
@@ -103,7 +106,12 @@
 		if (d.nearBefore.length > 0) {
 			runs.push({ text: d.nearBefore, cls: 'share-ctx-near' } as ShareViewRun)
 		}
-		runs.push({ text: '“', cls: 'share-quote-mark' } as ShareViewRun)
+		// 开引号仅在上/下文渐出场景渲染（“ 位于文字流中不影响对齐）；“ 恰在段首时（无上/下文，
+		// 选区起点即段首）渲染会推歪首段文字、与后续段左缘参差，故不渲染——各段统一「段首两全角
+		// 缩进」文字左缘对齐，闭引号贴尾不受影响（与画布 buildShareQuoteRuns 同规则）
+		if (!quoteStartsAtParaStart()) {
+			runs.push({ text: '“', cls: 'share-quote-mark' } as ShareViewRun)
+		}
 		runs.push({ text: d.quote, cls: 'share-quote-main' } as ShareViewRun)
 		runs.push({ text: '”', cls: 'share-quote-mark' } as ShareViewRun)
 		if (d.nearAfter.length > 0) {
@@ -336,7 +344,10 @@
 		if (d.nearBefore.length > 0) {
 			runs.push({ text: d.nearBefore, fs: 12.5, bold: false, color: 'rgba(14, 15, 12, 0.4)' } as ShareRun)
 		}
-		runs.push({ text: '“', fs: 20, bold: true, color: 'rgba(14, 15, 12, 0.25)' } as ShareRun)
+		// 开引号仅在上/下文渐出场景渲染（与预览 shareParas 同规则：段首场景不渲染保证左缘对齐）
+		if (!quoteStartsAtParaStart()) {
+			runs.push({ text: '“', fs: 20, bold: true, color: 'rgba(14, 15, 12, 0.25)' } as ShareRun)
+		}
 		runs.push({ text: d.quote, fs: 13.5, bold: true, color: SHARE_INK } as ShareRun)
 		runs.push({ text: '”', fs: 20, bold: true, color: 'rgba(14, 15, 12, 0.25)' } as ShareRun)
 		if (d.nearAfter.length > 0) {
@@ -387,12 +398,19 @@
 		ctx.textAlign = 'left'
 	}
 
-	/** 绘制引文块（富文本流式：大引号 + 上/下文渐出 + 选中文本加粗；段间以 SHARE_PARA_GAP 堆叠） */
-	function drawShareQuoteBlock(ctx : CanvasRenderingContext2D, quoteParas : QuotePara[]) : void {
+	/** 绘制引文块（富文本流式：上/下文渐出 + 选中文本加粗；段间以 SHARE_PARA_GAP 堆叠；
+	 *  hungMark 为真时开引号悬挂绘制在首段缩进区内（不在文字流内，与预览悬挂同源）——
+	 *  首行行内最大字号恒为选中文本 13.5px，基线公式与 drawRenderLines 一致） */
+	function drawShareQuoteBlock(ctx : CanvasRenderingContext2D, quoteParas : QuotePara[], hungMark : boolean) : void {
 		let top = SHARE_CARD_TOP + SHARE_HEADER_H + SHARE_LINE_H + 11.5
 		for (let i = 0; i < quoteParas.length; i++) {
 			if (i > 0) {
 				top += SHARE_PARA_GAP
+			}
+			if (i == 0 && hungMark) {
+				ctx.fillStyle = 'rgba(14, 15, 12, 0.25)'
+				ctx.font = 'bold 20px sans-serif'
+				ctx.fillText('“', SHARE_TEXT_X, top + 13.5 * 0.8)
 			}
 			top = drawRenderLines(ctx, quoteParas[i].lines, SHARE_TEXT_X, top, SHARE_LINE_H)
 		}
@@ -479,7 +497,7 @@
 			canvas.height = L.H * dpr
 			ctx.scale(dpr, dpr)
 			drawShareCardBase(ctx, L.cardH)
-			drawShareQuoteBlock(ctx, quoteParas)
+			drawShareQuoteBlock(ctx, quoteParas, quoteStartsAtParaStart())
 			if (thL.length > 0) {
 				drawShareThoughtBlock(ctx, thL, L.thoughtTop)
 			}
@@ -591,9 +609,22 @@
 		flex-direction: column;
 	}
 
+	/* 引文段（relative 作为悬挂开引号的定位基准） */
+	.share-para {
+		position: relative;
+	}
+
 	.share-card-text {
 		font-size: 25rpx;
 		line-height: 42rpx;
+	}
+
+	/* 悬挂开引号（“ 恰在段首场景）：absolute 叠于段首两全角缩进区（50rpx 可容纳 40rpx 字形），
+	 * 不占文字流宽度使各段文字左缘对齐；top 与首行文字基线近似对齐，跨端差异待真机微调 */
+	.share-quote-mark-hung {
+		position: absolute;
+		left: 0;
+		top: 0;
 	}
 
 	/* 引文段落间距（与正文段落间距一致：正文 .novel-body gap 40rpx） */

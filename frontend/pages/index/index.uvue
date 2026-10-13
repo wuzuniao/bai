@@ -1,22 +1,43 @@
 <template>
 	<view class="page">
-		<scroll-view class="scroll" direction="vertical" :show-scrollbar="false">
+		<scroll-view class="scroll" direction="vertical" :show-scrollbar="false" @scroll="onScrollClear">
 			<view class="main" :style="'padding-top:' + topInset + 'px'">
 				<!-- 诗文卡片（令牌 poem-card: 白底 圆角 xl 24px 内边距 24x16） -->
 				<view class="poem-card">
-					<!-- 诗文主体：16 行，每行 7 字（拼音 + 汉字）+ 行尾标点 -->
+					<!-- 诗文主体：16 行，每行 7 字（拼音 + 汉字）+ 行尾标点；长按整行选中（诗行即句）弹出划词气泡 -->
 					<view class="poem-body">
 						<view
 							v-for="(line, li) in poemLines"
 							:key="li"
 							class="poem-line"
 							:class="lineClass(li)"
+							:id="'poem-line-' + li"
+							@longpress="onLineLongPress(li, $event)"
+							@click="onPoemTap(li, $event)"
 						>
-							<view v-for="(c, ci) in line.chars" :key="ci" class="poem-unit">
+							<view v-if="lineSelRange(li) != null" class="poem-sel-band" :style="lineSelStyle(li)"></view>
+							<view
+								v-for="(ub, ui) in lineUnderlineBands(li)"
+								:key="'u' + ui"
+								class="poem-line-band poem-line-band-underline"
+								:style="bandStyle(ub)"
+							></view>
+							<view
+								v-for="(tb, ti) in lineThoughtBands(li)"
+								:key="'t' + ti"
+								class="poem-line-band poem-line-band-thought"
+								:style="bandStyle(tb)"
+							></view>
+							<view
+								v-for="(c, ci) in line.chars"
+								:key="ci"
+								class="poem-unit"
+								:id="'poem-unit-' + li + '-' + ci"
+							>
 								<text class="poem-pinyin">{{ c.pinyin }}</text>
 								<text class="poem-char">{{ c.char }}</text>
 							</view>
-							<view class="poem-punct-wrap">
+							<view class="poem-punct-wrap" :id="'poem-unit-' + li + '-7'">
 								<text class="poem-punct">{{ line.punct }}</text>
 							</view>
 						</view>
@@ -27,11 +48,45 @@
 			</view>
 		</scroll-view>
 		<BottomNavBar active="home" />
+		<!-- 划词气泡（复用阅读页 SelectionPopover：选区/手柄拖动与五项动作内聚；划线/想法写首页诗虚拟书 0，
+		     锚点实测与拖动行矩形由本页查询回传，选区变化经 spanChanged 镜像驱动行内高亮） -->
+		<SelectionPopover
+			ref="popoverRef"
+			:bg="popoverBg"
+			:nav-top="topInset"
+			:page-w="pageW"
+			:quote-align="true"
+			:page-h="pageH"
+			:metrics="poemMetrics"
+			:segs="selSegs"
+			:text="selText"
+			:share-ctx="shareCtx"
+			:logo-src="shareLogoSrc"
+			:quote-color="quoteColor"
+			:panel-bg="panelBg"
+			:content-color="contentColor"
+			:shadow="panelShadow"
+			@sync="onPopoverSync"
+			@dismiss="clearSelection"
+			@toast="showToast"
+			@span-changed="onSpanChanged"
+			@drag-started="onDragStarted"
+			@query-anchors="measureAnchors"
+		/>
+		<!-- 全局信息提示（复制/查询等动作反馈，固定日间样式） -->
+		<ReaderToast ref="toastRef" :night="false" />
 	</view>
 </template>
 
 <script setup lang="uts">
 	import BottomNavBar from '@/components/common/BottomNavBar.uvue'
+	import SelectionPopover from '@/components/selection/SelectionPopover.uvue'
+	import ReaderToast from '@/components/reader/ReaderToast.uvue'
+	import { READER_THEME_LIGHT } from '@/utils/theme.uts'
+	import { useUserStore, avatarPathOf } from '@/stores/user.uts'
+	import { hasAccessToken } from '@/utils/request.uts'
+	import { fetchBookNotes } from '@/api/reading.uts'
+	import { SelSpan, SpanSeg, TextMetrics, ParaRect, ShareQuoteCtx, Thought, UnderlineEntry, comparePos, normalizeSpan, setActiveBookId, loadUnderlines, loadThoughts, storeUnderlines, storeThoughts, underlineFromCloud, thoughtFromCloud } from '@/utils/readerTypes.uts'
 
 	type PoemChar = {
 		char: string
@@ -241,8 +296,12 @@
 
 	/** 顶部留白：设计稿 48px 含状态栏，优先取系统状态栏高度（Web 端回退 48px） */
 	const topInset = ref(48)
-
-	onLoad(() => {
+	/** 页面尺寸（px，气泡钳制与子组件布局） */
+	const pageW = ref(0)
+	const pageH = ref(0)
+	// 窗口信息 setup 顶层同步初始化：划词气泡组件 setup 求值早于页面 onLoad，
+	// 气泡单/双行判定与定位钳制依赖 pageW/pageH 就绪（与阅读页同模式）
+	{
 		const win = uni.getWindowInfo()
 		let top = 48
 		if (win.statusBarHeight > 0) {
@@ -256,6 +315,12 @@
 		}
 		// #endif
 		topInset.value = top
+		pageW.value = win.windowWidth
+		pageH.value = win.windowHeight
+	}
+
+	onShow(() => {
+		loadHomeNotes()
 	})
 
 	/** 行间距：联内行 12px，联首行 20px（首行无间距） */
@@ -264,6 +329,460 @@
 			return ''
 		}
 		return index % 2 === 1 ? 'poem-line-gap-inner' : 'poem-line-gap-outer'
+	}
+
+	/** ===== 首页诗划词气泡（复用阅读页 SelectionPopover：选区/手柄/拖动与五项动作内聚组件） ===== */
+	/** 首页诗虚拟书 id：云端 reading_notes 以 book_id=0 存储《无题》笔记（无 user_books 行，不进书架、无进度） */
+	const HOME_BOOK_ID = 0
+	/** 诗行字符容量：7 字 + 行尾标点（选区/划线/想法统一坐标口径，标点占每行末位 idx=7） */
+	const LINE_CHAR_COUNT = 8
+	/** 句末标点集（句号/叹号/问号结句，逗号不结句；与阅读页句间扫描同口径） */
+	const SENTENCE_END_CHARS = '。！？!?…'
+
+	/** 划词气泡与提示组件引用 */
+	const popoverRef = ref<SelectionPopover | null>(null)
+	const toastRef = ref<ReaderToast | null>(null)
+
+	/** 气泡浮层配色（首页固定日间，取自阅读日间主题真源） */
+	const popoverBg = READER_THEME_LIGHT.popoverBg
+	const quoteColor = READER_THEME_LIGHT.mutedColor
+	const panelBg = '#ffffff'
+	const contentColor = READER_THEME_LIGHT.titleColor
+	const panelShadow = READER_THEME_LIGHT.panelShadow
+
+	/** 排版度量（划词换算）：诗行单行无缩进，行盒高 = 拼音区 27rpx + 汉字行高 50rpx = 77rpx；
+	 *  字步进 69rpx（单元 54 + 右距 15）均匀映射前 7 列，行尾标点区 27rpx 收敛于末列；
+	 *  perLine 借用阅读页「首行容量 = perLine - 2」公式：首页无缩进容量恒满行，取行字符数 + 2，
+	 *  使拖动映射的行数钳制恒为 0（否则行底触点会被误判到第二行、字符恒收敛到行尾标点，手柄不跟字） */
+	const poemMetrics = {
+		perLine: LINE_CHAR_COUNT + 2,
+		lineH: uni.upx2px(77),
+		charW: uni.upx2px(69),
+		fullCharW: uni.upx2px(69),
+		indentPx: 0
+	} as TextMetrics
+
+	/** 划词选区镜像（选区真源在气泡组件，spanChanged 同步驱动行内高亮） */
+	const selSpan = ref<SelSpan | null>(null)
+
+	/** 划线/想法镜像（首页诗笔记：本地缓存即真源渲染 + 云端 book_id=0 静默跟随） */
+	const underlines = ref<UnderlineEntry[]>([])
+	const thoughts = ref<Thought[]>([])
+
+	/** 选区覆盖段序列（首页单章 cid=0，段=诗行；划线按项写入所在行，首末行按端点截取） */
+	function spanSegs(s : SelSpan) : SpanSeg[] {
+		const n = normalizeSpan(s)
+		const segs : SpanSeg[] = []
+		for (let li = n.fromOrigin; li <= n.toOrigin; li++) {
+			if (li < 0 || li >= poemLines.value.length) {
+				continue
+			}
+			segs.push({
+				cid: 0,
+				origin: li,
+				start: li == n.fromOrigin ? n.fromStart : 0,
+				end: li == n.toOrigin ? n.toEnd : LINE_CHAR_COUNT - 1
+			} as SpanSeg)
+		}
+		return segs
+	}
+
+	/** 行完整文本（7 字 + 行尾标点） */
+	function lineText(li : number) : string {
+		const line = poemLines.value[li]
+		if (line == null) {
+			return ''
+		}
+		let out = ''
+		for (const c of line.chars) {
+			out += c.char
+		}
+		return out + line.punct
+	}
+
+	/** 选区文本（跨行拼接，行间换行，与阅读页跨段口径一致） */
+	function selectionText() : string {
+		const s = selSpan.value
+		if (s == null) {
+			return ''
+		}
+		const n = normalizeSpan(s)
+		let out = ''
+		for (const seg of spanSegs(n)) {
+			if (seg.end < seg.start) {
+				continue
+			}
+			if (out.length > 0) {
+				out += '\n'
+			}
+			out += lineText(seg.origin).slice(seg.start, seg.end + 1)
+		}
+		return out
+	}
+
+	/** 选区派生数据（下行气泡组件：划线写入按段序列、复制/写想法按文本） */
+	const selSegs = computed<SpanSeg[]>(() : SpanSeg[] => {
+		const s = selSpan.value
+		if (s == null) {
+			return [] as SpanSeg[]
+		}
+		return spanSegs(s)
+	})
+
+	const selText = computed(() : string => selectionText())
+
+	/** 选区关联想法内容（区间与选区相交的首个想法，与阅读页分享快照口径一致；无则纯划线分享） */
+	function spanThoughtText() : string {
+		const s = selSpan.value
+		if (s == null) {
+			return ''
+		}
+		const n = normalizeSpan(s)
+		for (const t of thoughts.value) {
+			const tEndAfterSpanFrom = comparePos(t.toCid, t.toOrigin, t.toEnd, n.fromCid, n.fromOrigin, n.fromStart) >= 0
+			const tStartBeforeSpanEnd = comparePos(t.fromCid, t.fromOrigin, t.fromStart, n.toCid, n.toOrigin, n.toEnd) <= 0
+			if (tEndAfterSpanFrom && tStartBeforeSpanEnd) {
+				return t.content
+			}
+		}
+		return ''
+	}
+
+	/** 分享卡片内容快照（首页诗无上下文渐出，出处固定为铭文） */
+	const shareCtx = computed<ShareQuoteCtx | null>(() : ShareQuoteCtx | null => {
+		const s = selSpan.value
+		if (s == null) {
+			return null
+		}
+		return {
+			farBefore: '',
+			nearBefore: '',
+			quote: selectionText(),
+			nearAfter: '',
+			farAfter: '',
+			thoughtText: spanThoughtText(),
+			source: '无足鸟著 2017年2月',
+			bookTitle: '无题'
+		} as ShareQuoteCtx
+	})
+
+	/** ===== 用户信息（分享卡片头像，与阅读页同口径） ===== */
+	const userStore = useUserStore()
+	const shareLogoSrc = computed(() : string => {
+		const info = userStore.userInfo
+		if (info != null && info.avatar_url.length > 0) {
+			return avatarPathOf(info.avatar_url)
+		}
+		return '/static/touxiang/hei.png'
+	})
+
+	/** ===== 渲染函数（模板调用：选区高亮与划线/想法装饰） ===== */
+
+	/** 行选区覆盖区间（该行被覆盖的字符闭区间 [start, end]；无覆盖返回 null） */
+	function lineSelRange(li : number) : number[] | null {
+		const s = selSpan.value
+		if (s == null) {
+			return null
+		}
+		const n = normalizeSpan(s)
+		if (li < n.fromOrigin || li > n.toOrigin) {
+			return null
+		}
+		return [li == n.fromOrigin ? n.fromStart : 0, li == n.toOrigin ? n.toEnd : LINE_CHAR_COUNT - 1]
+	}
+
+	/** 行选区高亮条内联样式（px；行内连续横向条带，纵向只盖汉字行盒——拼音区不着色。
+	 *  字符横向步进 69rpx 为显式布局值精确换算，行尾标点区右缘=行内容宽 510rpx；
+	 *  依赖行盒宽=内容宽（poem-body 交叉轴居中不拉伸），条 left=0 即首字左缘） */
+	function lineSelStyle(li : number) : string {
+		const r = lineSelRange(li)
+		if (r == null) {
+			return ''
+		}
+		const step = uni.upx2px(69)
+		const right = r[1] >= LINE_CHAR_COUNT - 1 ? uni.upx2px(510) : (r[1] + 1) * step
+		const left = r[0] * step
+		return 'left:' + left + 'px;top:' + uni.upx2px(27) + 'px;width:' + (right - left) + 'px;height:' + uni.upx2px(50) + 'px'
+	}
+
+	/** 想法区间是否覆盖字符（虚拟书单章：cid 恒 0，按行序号与字符索引比对） */
+	function thoughtCovers(t : Thought, li : number, idx : number) : boolean {
+		return comparePos(t.fromCid, t.fromOrigin, t.fromStart, 0, li, idx) <= 0
+			&& comparePos(t.toCid, t.toOrigin, t.toEnd, 0, li, idx) >= 0
+	}
+
+	/** 行内划线条带区间（划线记录的字符区间对剔除想法覆盖段——想法优先，
+	 *  被想法覆盖的区域只显示正蓝想法线、不残留灰色划线） */
+	function lineUnderlineBands(li : number) : number[][] {
+		let ranges : number[][] = [] as number[][]
+		for (const e of underlines.value) {
+			if (e.cid == 0 && e.origin == li) {
+				ranges = e.ranges
+				break
+			}
+		}
+		for (const b of lineThoughtBands(li)) {
+			const next : number[][] = [] as number[][]
+			for (const r of ranges) {
+				if (r[1] < b[0] || r[0] > b[1]) {
+					next.push(r)
+					continue
+				}
+				if (r[0] < b[0]) {
+					next.push([r[0], b[0] - 1])
+				}
+				if (r[1] > b[1]) {
+					next.push([b[1] + 1, r[1]])
+				}
+			}
+			ranges = next
+		}
+		return ranges
+	}
+
+	/** 行内想法条带区间（跨行想法在该行的投影，单段闭区间） */
+	function lineThoughtBands(li : number) : number[][] {
+		const bands : number[][] = []
+		for (const t of thoughts.value) {
+			if (t.fromOrigin <= li && li <= t.toOrigin) {
+				bands.push([t.fromOrigin == li ? t.fromStart : 0, t.toOrigin == li ? t.toEnd : LINE_CHAR_COUNT - 1])
+			}
+		}
+		return bands
+	}
+
+	/** 装饰条带内联样式（横向几何与选区高亮条同口径：left/width，纵向位置固定于样式类） */
+	function bandStyle(band : number[]) : string {
+		const step = uni.upx2px(69)
+		const right = band[1] >= LINE_CHAR_COUNT - 1 ? uni.upx2px(510) : (band[1] + 1) * step
+		return 'left:' + band[0] * step + 'px;width:' + (right - band[0] * step) + 'px'
+	}
+
+	/** ===== 划词协议（选区状态在气泡组件，锚点实测与拖动行矩形由本页查询回传） ===== */
+
+	/** 行尾标点是否句末（句号/叹号/问号结句，逗号不结句；句末集合与阅读页句间扫描同口径） */
+	function isSentenceEnd(li : number) : boolean {
+		const line = poemLines.value[li]
+		return line != null && SENTENCE_END_CHARS.indexOf(line.punct) >= 0
+	}
+
+	/** 长按行的句覆盖范围 [句首行, 句末行]：向前找句首（前行结句即到句首）、向后找句末（结句行停，末行钳制） */
+	function sentenceRangeOf(li : number) : number[] {
+		let start = li
+		while (start > 0 && !isSentenceEnd(start - 1)) {
+			start--
+		}
+		let end = li
+		while (!isSentenceEnd(end) && end < poemLines.value.length - 1) {
+			end++
+		}
+		return [start, end]
+	}
+
+	/** 行矩形 → 拖动映射缓存项（行间 margin 空隙以上一行下界补齐消除死区） */
+	function buildDragRects(rects : NodeInfo[]) : ParaRect[] {
+		const dragRects : ParaRect[] = []
+		for (let i = 0; i < rects.length && i < poemLines.value.length; i++) {
+			dragRects.push({
+				cid: 0,
+				origin: i,
+				left: rects[i].left,
+				top: rects[i].top,
+				bottom: rects[i].bottom,
+				len: LINE_CHAR_COUNT,
+				from: 0
+			} as ParaRect)
+		}
+		for (let i = 1; i < dragRects.length; i++) {
+			if (dragRects[i].top > dragRects[i - 1].bottom) {
+				dragRects[i].top = dragRects[i - 1].bottom
+			}
+		}
+		return dragRects
+	}
+
+	/** 长按诗行：整行选中（诗行即句，对齐阅读页句间吸附语义），选区在气泡组件内建立；
+	 *  同批次预查全部行矩形回传拖动映射缓存——拖动开始事件里的异步查询回来前 touchmove
+	 *  会因映射为空被丢弃（表现为主柄拖不动），长按时预查使拖动首帧即跟手 */
+	function onLineLongPress(li : number, e : UniTouchEvent) : void {
+		if (e.touches.length == 0) {
+			return
+		}
+		const clientX = e.touches[0].clientX
+		uni.createSelectorQuery().selectAll('.poem-line').boundingClientRect((rects : NodeInfo[]) : void => {
+			if (rects == null || li >= rects.length) {
+				return
+			}
+			popoverRef.value?.setDragRects(buildDragRects(rects))
+			// 长按字符列命中想法区间时恢复该想法的完整选区（含划线区域，默认高亮想法选区，
+			// 与阅读页「句间吸附前判定想法」同语义）；否则按句选取——句号结尾的才是一句，
+			// 逗号行与句号行构成一联一起选中（与阅读页句间吸附同语义）
+			const col = Math.max(0, Math.min(Math.floor((clientX - rects[li].left) / uni.upx2px(69)), LINE_CHAR_COUNT - 1))
+			const range = sentenceRangeOf(li)
+			let span = {
+				fromCid: 0,
+				fromOrigin: range[0],
+				fromStart: 0,
+				toCid: 0,
+				toOrigin: range[1],
+				toEnd: LINE_CHAR_COUNT - 1
+			} as SelSpan
+			for (const t of thoughts.value) {
+				if (thoughtCovers(t, li, col)) {
+					span = {
+						fromCid: t.fromCid,
+						fromOrigin: t.fromOrigin,
+						fromStart: t.fromStart,
+						toCid: t.toCid,
+						toOrigin: t.toOrigin,
+						toEnd: t.toEnd
+					} as SelSpan
+					break
+				}
+			}
+			// 起点段矩形按选区起点行取（跨行想法的估算基准落在起点行；锚点实测以端点动态查询为准）
+			const sn = normalizeSpan(span)
+			popoverRef.value?.beginSelection(span, rects[sn.fromOrigin].left, rects[sn.fromOrigin].top, clientX, LINE_CHAR_COUNT, 0)
+		}).exec()
+	}
+
+	/** 锚点实测（组件 emit queryAnchors）：同批次查询选区两端字符单元与所在行矩形回传差分定位；
+	 *  锚点按选区端点动态取字符单元（idx 0-6 字单元 / 7 行尾标点单元）：组件起点取左缘=字符左边界，
+	 *  终点取右缘（字盒右缘与下一字符左界差单元右距 15rpx，标点包盒右缘=行尾），手柄随拖动后端点吸附 */
+	function measureAnchors() : void {
+		const s = selSpan.value
+		if (s == null) {
+			return
+		}
+		const n = normalizeSpan(s)
+		uni.createSelectorQuery()
+			.select('#poem-unit-' + n.fromOrigin + '-' + n.fromStart).boundingClientRect()
+			.select('#poem-unit-' + n.toOrigin + '-' + n.toEnd).boundingClientRect()
+			.select('#poem-line-' + n.fromOrigin).boundingClientRect()
+			.select('#poem-line-' + n.toOrigin).boundingClientRect()
+			.exec((res) => {
+				const arr = res as Array<NodeInfo | null>
+				if (arr[0] == null || arr[1] == null) {
+					return
+				}
+				popoverRef.value?.setAnchors(n, arr[0]!, arr[1]!, arr[2]!, arr[3]!, 0, 0)
+			})
+	}
+
+	/** 拖动开始（组件 emit dragStarted）：幂等刷新行矩形缓存（长按已预查，此处防御布局变化） */
+	function onDragStarted() : void {
+		uni.createSelectorQuery().selectAll('.poem-line').boundingClientRect((rects : NodeInfo[]) : void => {
+			if (rects == null) {
+				return
+			}
+			popoverRef.value?.setDragRects(buildDragRects(rects))
+		}).exec()
+	}
+
+	/** 选区变化镜像（组件 spanChanged：建立/拖动/清除同步） */
+	function onSpanChanged(s : SelSpan | null) : void {
+		selSpan.value = s
+	}
+
+	/** 清除选区（选区真源在组件，守卫避免滚动高频触发重复复位） */
+	function clearSelection() : void {
+		if (selSpan.value == null) {
+			return
+		}
+		popoverRef.value?.hideSelection()
+	}
+
+	/** 行点击：选区打开时清除（长按松手不触发 click，无冲突）；无选区时行级预筛想法后
+	 *  按点击字符列精判命中——弹查看卡片（锚定该行上下，与阅读页点击查看同语义） */
+	function onPoemTap(li : number, e : UniPointerEvent) : void {
+		if (selSpan.value != null) {
+			clearSelection()
+			return
+		}
+		let hasThought = false
+		for (const t of thoughts.value) {
+			if (t.fromOrigin <= li && li <= t.toOrigin) {
+				hasThought = true
+				break
+			}
+		}
+		if (!hasThought) {
+			return
+		}
+		uni.createSelectorQuery().select('#poem-line-' + li).boundingClientRect((rect : NodeInfo | null) : void => {
+			if (rect == null) {
+				return
+			}
+			const col = Math.max(0, Math.min(Math.floor((e.clientX - rect.left) / uni.upx2px(69)), LINE_CHAR_COUNT - 1))
+			for (const t of thoughts.value) {
+				if (thoughtCovers(t, li, col)) {
+					popoverRef.value?.showThoughtView(t.quote, t.content, rect.bottom, rect.top)
+					return
+				}
+			}
+		}).exec()
+	}
+
+	/** 滚动清除（锚点为视口坐标，滚动即错位） */
+	function onScrollClear() : void {
+		clearSelection()
+	}
+
+	/** ===== 首页诗笔记（虚拟书 0：进入页面锁定虚拟书，登录态云端拉取覆盖缓存，未登录/失败静默保缓存） ===== */
+
+	/** 重读笔记镜像（划线/想法装饰刷新） */
+	function reloadNotesMirror() : void {
+		underlines.value = loadUnderlines()
+		thoughts.value = loadThoughts()
+	}
+
+	/** 气泡写入（划线/写想法）后重读（组件 emit sync） */
+	function onPopoverSync() : void {
+		reloadNotesMirror()
+	}
+
+	/** 进入页面：锁定虚拟书 + 云端拉取覆盖缓存（与阅读页打开书籍同口径） */
+	async function loadHomeNotes() : Promise<void> {
+		setActiveBookId(HOME_BOOK_ID)
+		reloadNotesMirror()
+		if (!hasAccessToken()) {
+			return
+		}
+		try {
+			const res = await fetchBookNotes(HOME_BOOK_ID)
+			if (res.code == 0 && res.data != null) {
+				const ulist : UnderlineEntry[] = []
+				const rawU = res.data!.getArray('underlines')
+				if (rawU != null) {
+					rawU.forEach((el) => {
+						const e = underlineFromCloud(el as UTSJSONObject)
+						if (e != null) {
+							ulist.push(e)
+						}
+					})
+				}
+				const tlist : Thought[] = []
+				const rawT = res.data!.getArray('thoughts')
+				if (rawT != null) {
+					rawT.forEach((el) => {
+						const t = thoughtFromCloud(el as UTSJSONObject)
+						if (t != null) {
+							tlist.push(t)
+						}
+					})
+				}
+				storeUnderlines(ulist)
+				storeThoughts(tlist)
+				reloadNotesMirror()
+			}
+		} catch (e) {
+			console.warn('首页诗笔记拉取失败，使用本地缓存', e)
+		}
+	}
+
+	/** 气泡动作提示（复制成功/失败、查询占位，经阅读提示卡片组件展示） */
+	function showToast(msg : string) : void {
+		toastRef.value?.show(msg)
 	}
 </script>
 
@@ -303,8 +822,9 @@
 		padding: 15rpx 0;
 	}
 
-	/* 诗行：7 字单元 + 标点，字间 8px，整体居中 */
+	/* 诗行：7 字单元 + 标点，字间 8px，整体居中；relative 作为选区高亮条（absolute）的定位基准 */
 	.poem-line {
+		position: relative;
 		flex-direction: row;
 		align-items: center;
 		justify-content: center;
@@ -370,5 +890,28 @@
 		line-height: 33rpx;
 		color: $bai-mute;
 		font-family: $bai-font-ui;
+	}
+
+	/* 划词选区高亮条（对齐阅读页 para-highlight：正蓝 14% 背景微圆角；行内绝对定位连续条带，
+	 * 纵向只盖汉字行盒——拼音区不着色；几何由 lineSelStyle 按字符步进精确计算） */
+	.poem-sel-band {
+		position: absolute;
+		background-color: rgba($bai-positive, 0.14);
+		border-radius: 4rpx;
+	}
+
+	/* 行内装饰条带：划线/想法的连续下划线（贴汉字行盒底，想法条带后渲染覆盖划线；几何由 bandStyle 计算） */
+	.poem-line-band {
+		position: absolute;
+		bottom: 4rpx;
+		height: 3rpx;
+	}
+
+	.poem-line-band-underline {
+		background-color: $bai-mute;
+	}
+
+	.poem-line-band-thought {
+		background-color: $bai-positive;
 	}
 </style>

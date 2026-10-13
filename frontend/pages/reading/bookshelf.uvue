@@ -156,8 +156,7 @@
 					<text class="search-empty-text">未找到相关书籍</text>
 				</view>
 			</view>
-		</view>
-	</scroll-view>
+		</scroll-view>
 
 		<!-- 浮层遮罩：菜单打开时覆盖全屏，点击外部关闭（Stitch: 全局点击 dismiss） -->
 		<view v-if="menuOpen || plusMenuOpen" class="menu-mask" @click="closeMenus" />

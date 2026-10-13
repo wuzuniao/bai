@@ -156,19 +156,24 @@ export type ShareQuoteCtx = {
 // 划线/想法/书签/设置的本地存储 key（缓存真源收口本文件，外部一律经下方读写工具访问；
 // 划线/想法/书签按书籍隔离（key 带云端书籍 id），设置与书架样式为全局键）
 let activeBookId : number = 0
+/** 书籍锁定标志：setActiveBookId 后为 true。0 为首页诗《无题》虚拟书（云端 reading_notes 以
+ *  book_id=0 存储，无 user_books 行，cid=0 唯一章、origin=诗行序号），key 同样有效；
+ *  未锁定（启动初始态）时读写工具按空表/忽略处理 */
+let bookLocked : boolean = false
 const UNDERLINE_STORAGE_KEY = 'reader_underlines'
 const THOUGHT_STORAGE_KEY = 'reader_thoughts'
 const BOOKMARK_STORAGE_KEY = 'reader_bookmarks'
 const SETTINGS_STORAGE_KEY = 'reader_settings'
 
-/** 锁定当前阅读书籍（打开书籍时由页面调用；划线/想法/书签读写与云端同步按此 id 定位） */
+/** 锁定当前阅读书籍（打开书籍/首页诗时由页面调用；划线/想法/书签读写与云端同步按此 id 定位） */
 export function setActiveBookId(bookId : number) : void {
 	activeBookId = bookId
+	bookLocked = true
 }
 
 /** 当前书籍存储 key（未锁书时返回 null，读写工具按空表/忽略处理；负数 id 为离线导入待同步书籍，同样本地可读写） */
 function bookScopedKey(prefix : string) : string | null {
-	return activeBookId != 0 ? prefix + activeBookId : null
+	return bookLocked ? prefix + activeBookId : null
 }
 
 /** 阅读设置（字号/翻页模式/主题/字体，真源本地存储：ReaderControl 组件读写，页面应用渲染） */
@@ -480,7 +485,8 @@ export function applySpanUnderlineToStorage(segs : SpanSeg[], add : boolean) : v
 		}
 	}
 	uni.setStorageSync(key, JSON.stringify(list))
-	if (activeBookId > 0) {
+	// 云端同步条件：锁定的虚拟书 0（首页诗）与真实书同步，离线待同步书籍（负数 id）不同步
+	if (bookLocked && activeBookId >= 0) {
 		for (const k of touched) {
 			const sep = k.indexOf(':')
 			const cid = parseInt(k.substring(0, sep))
@@ -508,7 +514,8 @@ export function saveThought(t : Thought) : void {
 	const list = loadThoughts()
 	list.push(t)
 	uni.setStorageSync(key, JSON.stringify(list))
-	if (activeBookId > 0) {
+	// 云端同步条件：锁定的虚拟书 0（首页诗）与真实书同步，离线待同步书籍（负数 id）不同步
+	if (bookLocked && activeBookId >= 0) {
 		syncQuiet(createThought(activeBookId, t.fromCid, t.fromOrigin, t.fromStart, t.toCid, t.toOrigin, t.toEnd, t.quote, t.content))
 	}
 }

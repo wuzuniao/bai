@@ -191,6 +191,7 @@
 			:bg="popoverBg"
 			:nav-top="navTop"
 			:page-w="pageW"
+			:quote-align="false"
 			:page-h="pageH"
 			:metrics="metrics"
 			:segs="selSegs"
@@ -3208,10 +3209,10 @@
 		color: rgba(0, 0, 0, 0);
 	}
 
-	/* 划线标注（Stitch: 划线持久为波浪下划线样式，颜色取弱文本 mute） */
+	/* 划线标注（划线统一为连续实线，颜色取弱文本 mute；纹理与首页诗词卡片划线条带保持一致） */
 	.para-underlined {
 		text-decoration: underline;
-		text-decoration-style: wavy;
+		text-decoration-style: solid;
 		text-decoration-color: $bai-mute;
 	}
 

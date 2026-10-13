@@ -18,7 +18,27 @@
 			<view class="thought-dialog">
 				<text class="thought-title">写想法</text>
 				<view class="thought-quote">
-					<text class="thought-quote-text" :style="'color:' + quoteColor"><text class="thought-quote-mark">“</text>{{ editorQuote }}<text class="thought-quote-mark">”</text></text>
+					<!-- 对齐式（短行诗句，首页）：开引号固定盒悬挂行首，各行文字左缘对齐 -->
+					<template v-if="quoteAlign">
+						<view
+							v-for="(ql, qi) in editorQuoteLines"
+							:key="qi"
+							class="thought-quote-line"
+							:class="qi > 0 ? 'thought-quote-line-indent' : ''"
+						>
+							<text v-if="qi == 0" class="thought-quote-mark thought-quote-mark-open">“</text>
+							<text class="thought-quote-line-text" :style="'color:' + quoteColor">{{ ql }}<text v-if="qi == editorQuoteLines.length - 1" class="thought-quote-mark thought-quote-mark-close">”</text></text>
+						</view>
+					</template>
+					<!-- 流式（长文段落，阅读页）：正文式排版——段首两全角缩进、流内折行续行顶格 -->
+					<template v-else>
+						<text
+							v-for="(ql, qi) in editorQuoteLines"
+							:key="qi"
+							class="thought-quote-text"
+							:style="'color:' + quoteColor"
+						>{{ '　　' }}<text v-if="qi == 0" class="thought-quote-mark">“</text>{{ ql }}<text v-if="qi == editorQuoteLines.length - 1" class="thought-quote-mark">”</text></text>
+					</template>
 				</view>
 				<textarea
 					class="thought-input"
@@ -76,6 +96,8 @@
 		pageH: number
 		/** 正文区顶部起点（px，查看卡片上置下界） */
 		navTop: number
+		/** 引用排版模式：true=悬挂对齐式（短行诗句，各行文字左缘对齐）；false=正文流式（长文段落，段首缩进续行顶格） */
+		quoteAlign: boolean
 	}>()
 	const emit = defineEmits(['sync', 'dismiss', 'toast', 'thoughtViewClosed'])
 
@@ -156,6 +178,10 @@
 	const editorQuote = ref('')
 	/** 打开时的选区段序列快照（微信端按钮点击冒泡会触发清选区，props.segs 随之变空；保存必须用打开时快照） */
 	const editorSegs = ref<SpanSeg[]>([])
+	/** 引文按行拆分（多行诗句逐行渲染、左缘对齐；单行原样一行） */
+	const editorQuoteLines = computed<string[]>(() : string[] => {
+		return editorQuote.value.split('\n')
+	})
 	/** 想法输入框最大高度（px）：屏高的 40%，auto-height 随内容增长到此封顶（内部滚动） */
 	const editorMaxH = computed(() : number => props.pageH * 0.4)
 
@@ -281,9 +307,28 @@
 		text-align: center;
 	}
 
-	/* 引用块：超大双引号行内混排装饰（引号随字体度量自动基线对齐），无背景 */
+	/* 引用块双排版模式（宿主 quoteAlign 下行）：
+	 * 对齐式（短行诗句）——开引号固定宽盒（56rpx）悬挂行首、后续行 padding-left 对齐，各行文字左缘一致，
+	 *   行文字 flex 占满防长行溢出；流式（长文段落）——正文式排版：每段独立 text 流式折行，段首两全角
+	 *   缩进、折行续行顶格。引号 line-height 压至正文行高防撑高行盒（大字字形上下溢出，微信端可见、
+	 *   APP 端裁剪待真机验证） */
 	.thought-quote {
 		margin-bottom: 15rpx;
+	}
+
+	.thought-quote-line {
+		flex-direction: row;
+		align-items: flex-start;
+	}
+
+	.thought-quote-line-indent {
+		padding-left: 56rpx;
+	}
+
+	.thought-quote-line-text {
+		flex: 1;
+		font-size: 25rpx;
+		line-height: 38rpx;
 	}
 
 	.thought-quote-text {
@@ -294,7 +339,18 @@
 	.thought-quote-mark {
 		font-size: 56rpx;
 		font-weight: 800;
+		line-height: 38rpx;
 		color: rgba($bai-ink, 0.18);
+	}
+
+	.thought-quote-mark-open {
+		flex-shrink: 0;
+		width: 56rpx;
+		line-height: 38rpx;
+	}
+
+	.thought-quote-mark-close {
+		line-height: 38rpx;
 	}
 
 	.thought-input {

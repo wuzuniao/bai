@@ -31,6 +31,11 @@ TZ_CN = timezone(timedelta(hours=8))
 NOTE_TYPE_UNDERLINE = 0
 NOTE_TYPE_THOUGHT = 1
 
+# 首页诗词《无题》虚拟书 id：内容全局固定，无 user_books 行（不进书架、无进度），
+# 划线/想法以 book_id=0 落 reading_notes，按 user_id 天然隔离；坐标约定 cid=0 唯一章、
+# origin=诗行序号（0-15）、字符区间含行尾标点（每行 7 字 + 标点共 8 位）
+VIRTUAL_BOOK_ID = 0
+
 
 def now_cn() -> datetime:
     """当前东八区时刻（naive，与 DATETIME 列对齐）"""
@@ -226,8 +231,8 @@ def thought_to_dict(note: ReadingNote) -> dict[str, Any]:
 
 
 async def list_notes(db: AsyncSession, user_id: int, book_id: int) -> dict[str, list[dict[str, Any]]] | None:
-    """书籍的划线与想法列表（书籍不存在返回 None）"""
-    if await get_book(db, user_id, book_id) is None:
+    """书籍的划线与想法列表（书籍不存在返回 None；虚拟书 0 为首页诗，直接放行）"""
+    if book_id != VIRTUAL_BOOK_ID and await get_book(db, user_id, book_id) is None:
         return None
     result = await db.execute(
         select(ReadingNote)
@@ -246,9 +251,9 @@ async def upsert_underline(
 ) -> dict[str, Any] | None:
     """
     划线按「章+段」upsert：ranges 空表示整段取消（删行），否则更新/写入
-    返回 {id, deleted}；书籍不存在返回 None
+    返回 {id, deleted}；书籍不存在返回 None（虚拟书 0 为首页诗，直接放行）
     """
-    if await get_book(db, user_id, book_id) is None:
+    if book_id != VIRTUAL_BOOK_ID and await get_book(db, user_id, book_id) is None:
         return None
     result = await db.execute(
         select(ReadingNote).where(
@@ -286,8 +291,8 @@ async def upsert_underline(
 async def create_thought(
     db: AsyncSession, user_id: int, book_id: int, data: ThoughtCreate
 ) -> dict[str, Any] | None:
-    """写入想法（含划线文本快照），返回 {id}；书籍不存在返回 None"""
-    if await get_book(db, user_id, book_id) is None:
+    """写入想法（含划线文本快照），返回 {id}；书籍不存在返回 None（虚拟书 0 为首页诗，直接放行）"""
+    if book_id != VIRTUAL_BOOK_ID and await get_book(db, user_id, book_id) is None:
         return None
     note = ReadingNote(
         user_id=user_id,

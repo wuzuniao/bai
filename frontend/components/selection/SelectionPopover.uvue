@@ -118,6 +118,7 @@
 			:page-w="pageW"
 			:page-h="pageH"
 			:nav-top="navTop"
+			:quote-align="quoteAlign"
 			@sync="emit('sync')"
 			@dismiss="emit('dismiss')"
 			@toast="emit('toast', $event)"
@@ -169,6 +170,8 @@
 		bg: string
 		/** 正文区顶部起点（px，气泡上置下界） */
 		navTop: number
+		/** 引用排版模式（下行想法编辑器：true=悬挂对齐式短行诗句，false=正文流式长文段落） */
+		quoteAlign: boolean
 		/** 页面宽高（px，钳制与双行判定） */
 		pageW: number
 		pageH: number
@@ -383,14 +386,16 @@
 			let endRow = ec[0]
 			let startX = fromPara.left + (fromSliceFrom == 0 && startRow == 0 ? m.indentPx : 0) + sc[1] * spacingOfRow(sc[1], m.perLine)
 			let endX = endPara.left + (toSliceFrom == 0 && endRow == 0 ? m.indentPx : 0) + (ec[1] + 1) * spacingOfRow(ec[1], m.perLine)
-			// 锚点实测优先：字符边界 X 取锚点实测值，行序号由锚点中心差分反推（与真实渲染零漂移）
+			// 锚点实测优先：字符边界 X 取锚点实测值，行序号由锚点中心差分反推（与真实渲染零漂移）；
+			// 起点锚点取矩形左缘、终点锚点取矩形右缘（阅读页零宽锚点两侧相等不受影响，
+			// 非零宽元素锚点——如首页诗行尾标点单元——直接传元素矩形即可表达末字符右缘）
 			if (anchorStart != null && anchorUsable(anchorStart, fromPara, m)) {
 				startRow = rowOfAnchor(anchorStart, fromPara, m.lineH)
 				startX = anchorStart.left
 			}
 			if (anchorEnd != null && anchorUsable(anchorEnd, endPara, m)) {
 				endRow = rowOfAnchor(anchorEnd, endPara, m.lineH)
-				endX = anchorEnd.left
+				endX = anchorEnd.right
 			}
 			// 行号钳制进段落实际行数（矩形高度反推），异常值不至飞出段落
 			startRow = Math.max(0, Math.min(startRow, maxRowOf(fromPara, m.lineH)))
