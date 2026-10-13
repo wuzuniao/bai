@@ -151,8 +151,13 @@
 						</view>
 					</view>
 				</view>
+				<!-- 搜索空态：有关键字但无匹配书籍 -->
+				<view v-if="searchEmpty" class="search-empty">
+					<text class="search-empty-text">未找到相关书籍</text>
+				</view>
 			</view>
-		</scroll-view>
+		</view>
+	</scroll-view>
 
 		<!-- 浮层遮罩：菜单打开时覆盖全屏，点击外部关闭（Stitch: 全局点击 dismiss） -->
 		<view v-if="menuOpen || plusMenuOpen" class="menu-mask" @click="closeMenus" />
@@ -221,9 +226,21 @@
 	/** 书架卡片统一样式：plain 白卡 / photo 深灰卡 */
 	const shelfStyle = ref('plain')
 
-	/** 排序视图：手动顺序=云端拖拽排序原序；最近阅读/添加时间为倒序视图（最后添加/最近阅读的排第一行第一个；次序键相同保持原相对次序） */
+	/** 内联搜索栏状态（置于过滤 computed 之前：排序视图依赖此声明；Stitch: 打开时隐藏搜索图标，输入显示清空钮） */
+	const searchOpen = ref(false)
+	const searchText = ref('')
+	const searchFocused = ref(false)
+
+	/** 是否搜索过滤中（关键字去首尾空白后非空；控制网格过滤、添加格隐藏与空态提示） */
+	const isSearching = computed(() : boolean => searchText.value.trim().length > 0)
+
+	/** 排序视图：先按书名过滤搜索关键字（包含匹配，忽略大小写与首尾空白），再按当前模式排序——手动顺序=云端拖拽排序原序；最近阅读/添加时间为倒序视图（最后添加/最近阅读的排第一行第一个；次序键相同保持原相对次序） */
 	const sortedBooks = computed<LocalBook[]>(() : LocalBook[] => {
-		const list = books.value
+		const kw = searchText.value.trim().toLowerCase()
+		let list = books.value
+		if (kw.length > 0) {
+			list = list.filter((b : LocalBook) : boolean => b.title.toLowerCase().indexOf(kw) >= 0)
+		}
 		if (currentSort.value == '最近阅读') {
 			return list.slice().sort((a : LocalBook, b : LocalBook) : number => b.lastReadAt - a.lastReadAt)
 		}
@@ -232,6 +249,9 @@
 		}
 		return list
 	})
+
+	/** 搜索空态（有关键字但无匹配书籍） */
+	const searchEmpty = computed(() : boolean => isSearching.value && sortedBooks.value.length == 0)
 
 	/** 网格分行（每行 3 本，仅真实书籍；添加格在模板中独立于数据渲染） */
 	const shelfRows = computed<LocalBook[][]>(() : LocalBook[][] => {
@@ -244,15 +264,15 @@
 		return rows
 	})
 
-	/** 末行是否行内补添加格（有书且末行未满 3；条件在 UTS 侧算好，模板仅消费布尔） */
+	/** 末行是否行内补添加格（非搜索中、有书且末行未满 3；条件在 UTS 侧算好，模板仅消费布尔） */
 	const addCellInLastRow = computed(() : boolean => {
-		const n = books.value.length
-		return n > 0 && n % 3 != 0
+		const n = sortedBooks.value.length
+		return !isSearching.value && n > 0 && n % 3 != 0
 	})
 
-	/** 是否新起一行放添加格（空书架或末行满员；与 addCellInLastRow 恒互斥） */
+	/** 是否新起一行放添加格（非搜索中的空书架或末行满员；与 addCellInLastRow 恒互斥） */
 	const addCellNewRow = computed(() : boolean => {
-		return books.value.length % 3 == 0
+		return !isSearching.value && sortedBooks.value.length % 3 == 0
 	})
 
 	/** 从缓存读取书架卡片样式（云端偏好由 App 启动/本页刷新时落缓存） */
@@ -348,10 +368,11 @@
 		}
 	}
 
-	/** 进入编辑模式（+ 菜单「编辑书架」） */
+	/** 进入编辑模式（+ 菜单「编辑书架」；编辑为全量管理操作，同时收起搜索避免过滤视图与拖拽索引错位） */
 	function enterEdit() : void {
 		editMode.value = true
 		selectedKeys.value = []
+		closeSearch()
 		plusMenuOpen.value = false
 		closeMenus()
 	}
@@ -572,11 +593,6 @@
 	/** 排序/加号浮层菜单开关 */
 	const menuOpen = ref(false)
 	const plusMenuOpen = ref(false)
-
-	/** 内联搜索栏状态（Stitch: 打开时隐藏搜索图标，输入显示清空钮） */
-	const searchOpen = ref(false)
-	const searchText = ref('')
-	const searchFocused = ref(false)
 
 	onLoad(() => {
 		const win = uni.getWindowInfo()
@@ -1190,6 +1206,19 @@
 		font-size: 19rpx;
 		line-height: 29rpx;
 		font-weight: 500;
+		color: $bai-mute;
+	}
+
+	/* 搜索空态（无匹配书籍时的居中提示） */
+	.search-empty {
+		margin-top: 160rpx;
+		flex-direction: row;
+		justify-content: center;
+	}
+
+	.search-empty-text {
+		font-size: 25rpx;
+		line-height: 35rpx;
 		color: $bai-mute;
 	}
 
