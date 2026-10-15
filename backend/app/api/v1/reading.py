@@ -1,7 +1,8 @@
 """
 阅读行为路由（/api/v1/reading）
 --------------------------------------------------------------------------
-- 阅读时长：前端按次结算上报（onHide/onUnload），服务端按东八区按日累加
+- 阅读时长：前端按次结算上报（onHide/onUnload），服务端按东八区按日累加；
+  上报确认后自动发放已达成的阅读档位奖励（签到仍由用户手动点击）
 - 统计：书架统计卡与福利页的今日/累计分钟数
 """
 from __future__ import annotations
@@ -13,6 +14,7 @@ from ...core.db import get_db
 from ...core.deps import get_current_user_id
 from ...schemas.reading import MinutesReport, SessionsReport
 from ...services import reading_service as svc
+from ...services import reward_service as reward_svc
 
 router = APIRouter(prefix="/reading", tags=["reading"])
 
@@ -28,8 +30,10 @@ async def report_minutes(
     user_id: int = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """单次阅读结算上报（分钟数累加至今日），返回今日与累计分钟数"""
-    return _ok(await svc.add_minutes(db, user_id, data.minutes))
+    """单次阅读结算上报（分钟数累加至今日）；随后自动发放已达成的阅读档位奖励"""
+    stats = await svc.add_minutes(db, user_id, data.minutes)
+    claimed = await reward_svc.auto_claim_reached(db, user_id)
+    return _ok({**stats, "claimed": claimed})
 
 
 @router.post("/sessions")

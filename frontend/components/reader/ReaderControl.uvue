@@ -76,7 +76,6 @@
 </template>
 
 <script setup lang="uts">
-	import { mpCapsuleRect } from '@/utils/layout.uts'
 	import { READER_THEME_LIGHT, READER_THEME_NIGHT, READER_THEME_PAPER, ReaderTheme } from '@/utils/theme.uts'
 	import { Chapter, NoteRecord, Bookmark, ReaderSettings, loadSettings } from '@/utils/readerTypes.uts'
 	import DrawerPanel from '@/components/reader/DrawerPanel.uvue'
@@ -146,20 +145,14 @@
 	/** 顶部导航内容行（px）：与小程序胶囊同行对齐（状态栏高度起、行高 40px） */
 	const navTop = ref(44)
 	const navHeight = ref(40)
-	/** 目录抽屉高度（px）：抽屉顶对齐小程序控制项（胶囊）下方 8px，并扣除控制行自身高度（152rpx） */
+	/** 目录抽屉高度（px）：固定为页面高度的三分之二 */
 	const drawerPanelHeight = ref(500)
 	{
 		const win = uni.getWindowInfo()
 		if (win.statusBarHeight > 0) {
 			navTop.value = win.statusBarHeight
 		}
-		const navH = uni.upx2px(152)
-		const capsule = mpCapsuleRect()
-		if (capsule != null) {
-			drawerPanelHeight.value = win.windowHeight - (capsule.top + capsule.height + 8) - navH
-		} else {
-			drawerPanelHeight.value = win.windowHeight - (navTop.value + navHeight.value + 8) - navH
-		}
+		drawerPanelHeight.value = Math.floor(win.windowHeight * 2 / 3)
 	}
 
 	/** ===== 交互事件上行（导航类耦合宿主正文） ===== */

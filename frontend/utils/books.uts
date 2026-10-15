@@ -731,10 +731,26 @@ function addTodayMinutes(mins : number) : void {
 		// 以服务端累计回正（多端同日累加不重不漏）
 		if (res.code == 0 && res.data != null) {
 			saveStats(res.data!.getNumber('today_minutes') ?? 0, res.data!.getNumber('total_minutes') ?? 0)
+			// 云端时长确认后自动发放已达成的阅读档位奖励（清单由后端返回），全局提示到账
+			notifyAutoClaimed(res.data!)
 		}
 	}, (e) => {
 		console.warn('阅读时长上报失败', e)
 	})
+}
+
+/** 阅读档位自动领取提示：时长上报响应携带本次自动发放清单（tier_minutes/reward，后端已入账）；
+结算发生在阅读页 onHide/onUnload，页面级提示不可见，故用全局 toast */
+function notifyAutoClaimed(data : UTSJSONObject) : void {
+	const arr = data.getArray('claimed')
+	if (arr == null || arr.length == 0) {
+		return
+	}
+	let sum = 0
+	for (let i = 0; i < arr.length; i++) {
+		sum += arr[i].getNumber('reward') ?? 0
+	}
+	uni.showToast({ title: '阅读奖励自动领取 +' + sum + ' 铜币', icon: 'none' })
 }
 
 // ==================== 阅读会话流水（按书/时段明细账；本地暂存 + 登录后补传） ====================

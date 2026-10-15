@@ -137,7 +137,7 @@ CREATE TABLE IF NOT EXISTS `checkin_records` (
   UNIQUE KEY `uk_cr_user_date` (`user_id`, `checkin_date`)
 ) COMMENT='每日签到记录';
 
--- 9. 阅读档位奖励领取记录（按日按档唯一：达成后手动领取，余额变动不影响领取状态、不重复发放）
+-- 9. 阅读档位奖励领取记录（按日按档唯一：达成后随分钟上报自动发放，余额变动不影响领取状态、不重复发放）
 CREATE TABLE IF NOT EXISTS `reading_reward_claims` (
   `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
   `user_id` BIGINT NOT NULL,

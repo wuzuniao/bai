@@ -1401,6 +1401,20 @@
 	/** 模式切换定位遮罩（翻页 → 滚动：盖住「章首渲染 → 锚点定位」的中间跳变，定位确认或超时后收起） */
 	const switchMask = ref(false)
 
+	/** 系统侧滑/返回键（pages.json swipeBackAsBackPress 把侧滑手势转为本事件）：任一浮层展开时先收浮层回正文，不退出页面 */
+	onBackPress((options : OnBackPressOptions) : boolean => {
+		if (options.from == 'navigateBack') {
+			return false
+		}
+		if (drawerOpen.value || settingsOpen.value || menuVisible.value) {
+			drawerOpen.value = false
+			settingsOpen.value = false
+			menuVisible.value = false
+			return true
+		}
+		return false
+	})
+
 	/** 顶部导航内容行（px）：与小程序胶囊同行对齐（同子页 BackButton 口径：状态栏高度起、行高 40px） */
 	const navTop = ref(44)
 	const navHeight = ref(40)

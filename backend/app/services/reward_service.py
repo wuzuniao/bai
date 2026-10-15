@@ -6,6 +6,7 @@
     「已连续签到」= 本周从周一起的连续签到天数（断签从缺口次日重计，
     新的一周自然重计，与「断签或领奖后重新计算」文案一致）
   - 阅读档位：按日独立领取，5'/30'/120'/360'/720' 五档，档内奖励=基础+额外赠送；
+    时长上报确认后自动发放已达成的未领取档位（auto_claim_reached），无需手动领取；
     领取记录按 (user, date, tier) 唯一——余额被兑换/消费扣除后不影响
     当日领取状态，不会随阅读时长重复发放
   - 自动兑换：铜满 100 进 1 银、银满 100 进 1 金，入账时服务端自动进位，
@@ -504,3 +505,37 @@ async def claim_reading_reward(db: AsyncSession, user_id: int, tier_minutes: int
         "balance": balance_to_dict(acc_row.scalar_one_or_none()),
         "today_gained": await _today_gained_copper(db, user_id, today),
     }
+
+
+async def auto_claim_reached(db: AsyncSession, user_id: int) -> list[dict[str, int]]:
+    """
+    自动领取今日已达成且未领取的全部阅读档位奖励（时长上报确认后调用，无需手动领取）
+    - 先一次查齐今日分钟数与已领取档位，只对可领档位逐个发放（复用 claim_reading_reward，
+      各自提交事务；并发重复领取由唯一约束兜底，业务异常静默跳过待下次发放）
+    - 返回本次实际发放清单（tier_minutes + reward），供前端提示到账
+    """
+    today = today_cn()
+    minutes_row = await db.execute(
+        select(ReadingDailyStat.minutes).where(
+            ReadingDailyStat.user_id == user_id, ReadingDailyStat.stat_date == today
+        )
+    )
+    today_minutes = int(minutes_row.scalar_one_or_none() or 0)
+    if today_minutes <= 0:
+        return []
+    claimed_rows = await db.execute(
+        select(ReadingRewardClaim.tier_minutes).where(
+            ReadingRewardClaim.user_id == user_id, ReadingRewardClaim.claim_date == today
+        )
+    )
+    claimed_minutes = set(claimed_rows.scalars().all())
+    issued: list[dict[str, int]] = []
+    for tier_minutes, _base, _bonus in READING_TIERS:
+        if today_minutes < tier_minutes or tier_minutes in claimed_minutes:
+            continue
+        try:
+            result = await claim_reading_reward(db, user_id, tier_minutes)
+        except ValueError:
+            continue  # 已领取（并发）/未达标（统计滞后）等业务异常，跳过待下次
+        issued.append({"tier_minutes": tier_minutes, "reward": int(result["reward"])})
+    return issued

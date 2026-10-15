@@ -18,7 +18,8 @@
 			"path": "pages/reading/reader",
 			"style": {
 				"navigationStyle": "custom",
-				"navigationBarTitleText": "阅读"
+				"navigationBarTitleText": "阅读",
+				"swipeBackAsBackPress": true
 			}
 		},
 		{

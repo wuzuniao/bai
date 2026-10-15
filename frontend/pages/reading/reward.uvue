@@ -1191,6 +1191,9 @@
 		flex-direction: row;
 		align-items: center;
 		gap: 15rpx;
+		/* 占满徽标右侧剩余宽度（宽度有界），档位标签一行放不下时整体换到标题下一行 */
+		flex: 1;
+		flex-wrap: wrap;
 	}
 
 	.tier-title {
@@ -1211,6 +1214,8 @@
 	.tier-tag {
 		padding: 4rpx 15rpx;
 		border-radius: $bai-rounded-sm;
+		/* 极窄屏下标签自身超宽时约束到行宽，「再额外赠送」小字自动换行 */
+		max-width: 100%;
 	}
 
 	.tier-tag-badge {
