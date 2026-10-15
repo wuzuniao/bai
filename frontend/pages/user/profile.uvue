@@ -174,8 +174,8 @@
 		bindEmail,
 		getUserInfo,
 		logout
-	} from '@/api/user.uts'
-	import { validateUsername, validatePassword, validateEmail, validateCode } from '@/utils/validators.uts'
+	} from './api/user.uts'
+	import { validateUsername, validatePassword, validateEmail, validateCode } from './utils/validators.uts'
 
 	const userStore = useUserStore()
 

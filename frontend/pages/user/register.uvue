@@ -61,8 +61,8 @@
 	import PasswordInput from '@/components/form/PasswordInput.uvue'
 	import CodeInput from '@/components/form/CodeInput.uvue'
 	import AgreementCheckbox from '@/components/form/AgreementCheckbox.uvue'
-	import { sendRegisterCode, registerUser } from '@/api/user.uts'
-	import { validateUsername, validatePassword, validateConfirmPassword, validateEmail } from '@/utils/validators.uts'
+	import { sendRegisterCode, registerUser } from './api/user.uts'
+	import { validateUsername, validatePassword, validateConfirmPassword, validateEmail } from './utils/validators.uts'
 
 	const usernameValue = ref('')
 	const passwordValue = ref('')

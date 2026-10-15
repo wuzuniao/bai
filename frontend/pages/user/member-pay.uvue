@@ -153,7 +153,7 @@
 	 *   （#0e0f0c 页底 / #2f3131 卡底 + #e2e2e2 描边 / #acf67c 亮绿强调，不随 bai 主题令牌更换）
 	 */
 	import { fetchActivitySummary } from '@/api/activity.uts'
-	import { purchaseMembership } from '@/api/membership.uts'
+	import { purchaseMembership } from './api/membership.uts'
 	import { ApiResponse, forceRefreshToken } from '@/utils/request.uts'
 
 	/** 顶部定位：返回按钮取状态栏高度，内容再避让 */

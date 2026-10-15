@@ -88,15 +88,15 @@
 	import AgreementCheckbox from '@/components/form/AgreementCheckbox.uvue'
 	import { useUserStore } from '@/stores/user.uts'
 	import { ApiResponse } from '@/utils/request.uts'
-	import { loginUser } from '@/api/user.uts'
+	import { loginUser } from './api/user.uts'
 
 	// #ifdef MP-WEIXIN
-	import { wechatLogin } from '@/api/user.uts'
+	import { wechatLogin } from './api/user.uts'
 	// #endif
 
 	// #ifdef APP
 	import { getDeviceId, storeBiometricToken, getBiometricToken, isBiometricAvailable, isBiometricEnabled, authenticate } from '@/utils/biometric.uts'
-	import { biometricLogin } from '@/api/user.uts'
+	import { biometricLogin } from './api/user.uts'
 	// #endif
 
 	const userStore = useUserStore()

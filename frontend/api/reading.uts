@@ -2,7 +2,7 @@
  * 阅读业务接口（直连本项目后端，与 auth 接口分服务）
  * --------------------------------------------------------------------------
  * - 书籍元数据 / 划线想法 / 书签 / 阅读时长 / 偏好，全部需登录态
- * - baseUrl 统一 API_BASE_URL（区别于 api/user.uts 直连 auth）
+ * - baseUrl 统一 API_BASE_URL（区别于 pages/user/api/user.uts 直连 auth）
  * - 全部标记 silent：未登录/令牌过期 401 不跳转登录页（未登录属常态，
  *   页面走本地缓存与默认样式；调用点经 hasAccessToken 源头跳过请求）
  * - 返回 ApiResponse（code=0 成功，data 为内层业务数据）
