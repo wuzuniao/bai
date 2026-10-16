@@ -60,6 +60,9 @@ app = FastAPI(title=settings.PROJECT_NAME, lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins_list,
+    # 本地开发源放行（任意 localhost/127.0.0.1 端口）：H5 开发服务器端口不固定
+    # （HBuilderX 默认 8080、Vite 5173 等），逐一登记易漏；生产页面源均为域名不受影响
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],

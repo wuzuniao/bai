@@ -2,6 +2,8 @@
 unpackage/
 .hbuilderx/
 node_modules/
+# CLI 构建产物（deploy.sh / npm run build:h5 生成，可再生成）
+dist/
 
 # 操作系统
 .DS_Store

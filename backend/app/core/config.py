@@ -28,7 +28,9 @@ class Settings(BaseSettings):
     REVOCATION_SYNC_INTERVAL_SECONDS: int = 300
 
     # CORS 允许的源（逗号分隔；小程序/App 请求不携带 Origin，不受 CORS 限制）
-    CORS_ALLOW_ORIGINS: str = "https://bai.wuzuniao.com,http://localhost:5173"
+    # 本地开发源（任意 localhost/127.0.0.1 端口，如 Vite 5173）由 main.py 的
+    # allow_origin_regex 统一放行，不再逐个登记
+    CORS_ALLOW_ORIGINS: str = "https://bai.wuzuniao.com"
 
     # 微信小程序配置（预留：业务功能使用微信能力时启用）
     WX_APPID: str = ""
