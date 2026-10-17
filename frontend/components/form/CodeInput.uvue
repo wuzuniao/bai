@@ -100,6 +100,14 @@
 	function onInput(e : UniInputEvent) : void {
 		emit('update:modelValue', e.detail.value)
 	}
+
+	// 供宿主经组件 ref 调用：发送成功开始倒计时 / 失败恢复默认态
+	// （不暴露则组件实例上不存在这两个函数，小程序端调用报「未定义的函数」）
+	defineExpose({
+		isCounting,
+		startCountdown,
+		reset
+	})
 </script>
 
 <style lang="scss">
