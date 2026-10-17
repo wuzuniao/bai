@@ -387,7 +387,8 @@ async def add_sessions(db: AsyncSession, user_id: int, data: SessionsReport) -> 
     批量写入阅读会话流水（按书/时段明细账，在线直传与离线补传共用）
     - 书籍不存在/非本人的条目跳过（离线期负数本地 id 未及迁移等场景），返回实际落库条数
     - 先集合查询合法书籍 id+title 防 N+1；title 落库为书名快照，删书后按书统计仍能展示
-    - 时长聚合（daily_stats）由分钟上报链路另行维护，两账独立
+    - aggregate_minutes=True 的条目（离线补传，未经过分钟上报链路）按起算日（东八区，客户端
+      本地时刻即东八区）聚合进 daily_stats；False 条目时长已由 /reading/minutes 计入不重复聚合
     """
     ids = {item.book_id for item in data.sessions}
     rows = await db.execute(
@@ -395,22 +396,38 @@ async def add_sessions(db: AsyncSession, user_id: int, data: SessionsReport) -> 
     )
     title_map = {row.id: row.title for row in rows.fetchall()}
     accepted = 0
+    day_minutes: dict[date, int] = {}
     for item in data.sessions:
         if item.book_id not in title_map:
             continue
+        started = datetime.strptime(item.started_at, "%Y-%m-%d %H:%M:%S")
         db.add(
             ReadingSession(
                 user_id=user_id,
                 book_id=item.book_id,
                 book_title=title_map[item.book_id],
                 source=item.source,
-                started_at=datetime.strptime(item.started_at, "%Y-%m-%d %H:%M:%S"),
+                started_at=started,
                 ended_at=datetime.strptime(item.ended_at, "%Y-%m-%d %H:%M:%S"),
                 minutes=item.minutes,
             )
         )
+        if item.aggregate_minutes:
+            day = started.date()
+            day_minutes[day] = day_minutes.get(day, 0) + item.minutes
         accepted += 1
     if accepted > 0:
+        for day, mins in day_minutes.items():
+            result = await db.execute(
+                select(ReadingDailyStat).where(
+                    ReadingDailyStat.user_id == user_id, ReadingDailyStat.stat_date == day
+                )
+            )
+            row = result.scalar_one_or_none()
+            if row is None:
+                db.add(ReadingDailyStat(user_id=user_id, stat_date=day, minutes=mins))
+            else:
+                row.minutes += mins
         await db.commit()
     return accepted
 

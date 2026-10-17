@@ -119,6 +119,9 @@ class SessionItem(BaseModel):
     started_at: str
     ended_at: str
     minutes: int = Field(ge=1, le=43200)
+    # 离线补传条目为 True（未经过 /reading/minutes 上报链路，服务层按起算日聚合进时长统计）；
+    # 在线直传条目为 False（时长已由 /reading/minutes 计入，聚合会双计）
+    aggregate_minutes: bool = False
 
     @field_validator("source")
     @classmethod

@@ -667,19 +667,31 @@ async function syncPendingBooks() : Promise<void> {
 
 // ==================== 阅读时长（按日云端统计 + 本地缓存镜像） ====================
 
-/** 阅读时长统计缓存（today/total 分钟数） */
+/** 阅读时长统计缓存（today/total 分钟数；date 为今日值归属日期，跨天 today 归零） */
 type ReadingStatsCache = {
 	today: number
 	total: number
 }
 
-/** 读取统计缓存（today/total 分钟数；损坏容错归零） */
+/** 统计缓存日期戳（'YYYY-MM-DD'，客户端本地日期，设备时区按东八区约定） */
+function statsTodayKey() : string {
+	const d = new Date()
+	const p = (n : number) : string => (n < 10 ? '0' + n : '' + n)
+	return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate())
+}
+
+/** 读取统计缓存（today/total 分钟数；损坏容错归零；date 非当日则 today 归零仅保留 total） */
 function loadStats() : ReadingStatsCache {
 	const stored : any = uni.getStorageSync(STORAGE_STATS)
 	if (typeof stored == 'string' && (stored as string).length > 0) {
 		const obj = JSON.parse<UTSJSONObject>(stored as string)
 		if (obj != null) {
-			return { today: obj.getNumber('today') ?? 0, total: obj.getNumber('total') ?? 0 }
+			const today = obj.getNumber('today') ?? 0
+			const total = obj.getNumber('total') ?? 0
+			if (obj.getString('date') == statsTodayKey()) {
+				return { today: today, total: total }
+			}
+			return { today: 0, total: total }
 		}
 	}
 	return { today: 0, total: 0 }
@@ -689,6 +701,7 @@ function saveStats(today : number, total : number) : void {
 	const obj = {} as UTSJSONObject
 	obj['today'] = today
 	obj['total'] = total
+	obj['date'] = statsTodayKey()
 	uni.setStorageSync(STORAGE_STATS, JSON.stringify(obj))
 }
 
@@ -759,13 +772,14 @@ const STORAGE_SESSIONS = 'reading_sessions_pending'
 /** 暂存队列上限（长期未登录防无限增长；超出丢最旧） */
 const SESSIONS_PENDING_CAP = 500
 
-/** 暂存会话条目（字段名与上报接口对齐） */
+/** 暂存会话条目（字段名与上报接口对齐；offline=记录时未登录，补传时需聚合时长，在线条目已由分钟上报计入防双计） */
 type PendingSession = {
 	book_id: number
 	source: string
 	started_at: string
 	ended_at: string
 	minutes: number
+	offline: boolean
 }
 
 /** ms → 'YYYY-MM-DD HH:mm:ss'（客户端本地时刻格式化，与 cnDatetimeToMs 解析口径互逆；设备时区按东八区约定） */
@@ -794,7 +808,9 @@ function loadPendingSessions() : PendingSession[] {
 					source: o.getString('source') ?? 'txt',
 					started_at: o.getString('started_at') ?? '',
 					ended_at: o.getString('ended_at') ?? '',
-					minutes: minutes
+					minutes: minutes,
+					// 旧版条目无该字段：均产生于未登录期（登录态条目即时直传），默认按离线补聚合
+					offline: o.getBoolean('offline') ?? true
 				} as PendingSession)
 			}
 		}
@@ -813,6 +829,7 @@ function savePendingSessions(list : PendingSession[]) : void {
 		o['started_at'] = s.started_at
 		o['ended_at'] = s.ended_at
 		o['minutes'] = s.minutes
+		o['offline'] = s.offline
 		arr.push(o)
 	}
 	const wrap = {} as UTSJSONObject
@@ -833,7 +850,9 @@ export function addReadingSession(bookId : number, source : string, startedMs : 
 		source: source,
 		started_at: cnFormatMs(startedMs),
 		ended_at: cnFormatMs(endedMs),
-		minutes: mins
+		minutes: mins,
+		// 未登录记录：登录后补传时需聚合时长（已登录条目时长经 addTodayMinutes→分钟上报计入）
+		offline: !hasAccessToken()
 	} as PendingSession)
 	while (list.length > SESSIONS_PENDING_CAP) {
 		list.shift()
@@ -871,6 +890,7 @@ export async function flushPendingSessions() : Promise<void> {
 			o['started_at'] = s.started_at
 			o['ended_at'] = s.ended_at
 			o['minutes'] = s.minutes
+			o['aggregate_minutes'] = s.offline
 			arr.push(o)
 		}
 		const res = await reportReadingSessions(arr)

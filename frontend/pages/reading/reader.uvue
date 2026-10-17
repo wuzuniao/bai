@@ -1,5 +1,5 @@
 <template>
-	<view class="page" :style="'background-color:' + readerBg">
+	<view class="page" :style="'background-color:' + readerBg" @touchstart="onPageTouchStart">
 		<!-- 阅读内容区：点击空白切换菜单显隐 / 清除划词 / 收起设置；左右滑动翻页（切换章节） -->
 		<view
 		class="content"
@@ -1100,10 +1100,25 @@
 
 	/** ===== 阅读时长结算（onShow 起算，onHide/onUnload 落库；书架统计卡展示） ===== */
 	let enterAt = 0
+	/** 最近操作时间（根节点 touchstart 跟踪；连续 10 分钟无操作视为本次阅读时间结束） */
+	let lastActiveAt = 0
+	/** 无操作超时阈值（超过则时长截断，下次操作重新起算） */
+	const IDLE_TIMEOUT_MS = 10 * 60 * 1000
 
 	onShow(() => {
 		enterAt = Date.now()
+		lastActiveAt = enterAt
 	})
+
+	/** 根节点触摸：记录操作时间；距上次操作超 10 分钟则上一会话以「最后操作+10min」入账并重新起算 */
+	function onPageTouchStart() : void {
+		const now = Date.now()
+		if (enterAt > 0 && lastActiveAt > 0 && now - lastActiveAt > IDLE_TIMEOUT_MS && bookId.value != VIRTUAL_BOOK_ID) {
+			addReadingSession(bookId.value, 'txt', enterAt, lastActiveAt + IDLE_TIMEOUT_MS)
+			enterAt = now
+		}
+		lastActiveAt = now
+	}
 
 	/** 结算本次阅读：累计今日分钟数 + 回写书架最近阅读状态（onHide 先于 onUnload 触发，enterAt 置零防双计） */
 	function recordReadingSession() : void {
@@ -1111,10 +1126,13 @@
 			return
 		}
 		if (enterAt > 0) {
-			// 会话入账统一入口：时长统计（本地镜像+云端回正）与按书/时段流水一并处理（<1 分钟内部丢弃）
-			addReadingSession(bookId.value, 'txt', enterAt, Date.now())
+			// 会话入账统一入口：时长统计（本地镜像+云端回正）与按书/时段流水一并处理（<1 分钟内部丢弃）；
+			// 结束点截断至「最后操作+10min」（页面后台停留期间不计时长）
+			const endAt = lastActiveAt > 0 ? Math.min(Date.now(), lastActiveAt + IDLE_TIMEOUT_MS) : Date.now()
+			addReadingSession(bookId.value, 'txt', enterAt, endAt)
 		}
 		enterAt = 0
+		lastActiveAt = 0
 		// 滚动模式按锚点章回写（currentChapterId 是滚动加载推进的「到达章」，非视口顶所在章）
 		updateBookReading(bookId.value, scrollMode.value ? anchorCid : currentChapterId.value)
 	}

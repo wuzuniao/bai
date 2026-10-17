@@ -1,5 +1,5 @@
 <template>
-	<view class="page">
+	<view class="page" @touchstart="onPageTouchStart">
 		<!-- 正文：逐页等比图（渲染完成后展示） -->
 		<scroll-view
 			class="content"
@@ -75,6 +75,10 @@
 	let disposed = false
 	/** 阅读时长起算（onShow 起算，onHide/onUnload 结算，与 reader 一致） */
 	let enterAt = 0
+	/** 最近操作时间（根节点 touchstart 跟踪；连续 10 分钟无操作视为本次阅读时间结束） */
+	let lastActiveAt = 0
+	/** 无操作超时阈值（超过则时长截断，下次操作重新起算） */
+	const IDLE_TIMEOUT_MS = 10 * 60 * 1000
 
 	/** 页 wrapper 高（px）：屏宽 × 页比例，等比缩放的布局基准（固定高保证 scroll-into-view 定位与页码推算准确） */
 	const pageWrapperH = computed(() : number => {
@@ -120,7 +124,18 @@
 
 	onShow(() => {
 		enterAt = Date.now()
+		lastActiveAt = enterAt
 	})
+
+	/** 根节点触摸：记录操作时间；距上次操作超 10 分钟则上一会话以「最后操作+10min」入账并重新起算 */
+	function onPageTouchStart() : void {
+		const now = Date.now()
+		if (enterAt > 0 && lastActiveAt > 0 && now - lastActiveAt > IDLE_TIMEOUT_MS && bookId.value != 0) {
+			addReadingSession(bookId.value, 'pdf', enterAt, lastActiveAt + IDLE_TIMEOUT_MS)
+			enterAt = now
+		}
+		lastActiveAt = now
+	}
 
 	onHide(() => {
 		persistReading()
@@ -288,10 +303,13 @@
 		savePdfProgress(bookId.value, { percent: curPercent.value, ratio: pageRatio.value } as PdfProgress)
 		updateBookReading(bookId.value, -1, Math.round(curPercent.value))
 		if (enterAt > 0) {
-			// 会话入账统一入口：时长统计（本地镜像+云端回正）与按书/时段流水一并处理（<1 分钟内部丢弃）
-			addReadingSession(bookId.value, 'pdf', enterAt, Date.now())
+			// 会话入账统一入口：时长统计（本地镜像+云端回正）与按书/时段流水一并处理（<1 分钟内部丢弃）；
+			// 结束点截断至「最后操作+10min」（页面后台停留期间不计时长）
+			const endAt = lastActiveAt > 0 ? Math.min(Date.now(), lastActiveAt + IDLE_TIMEOUT_MS) : Date.now()
+			addReadingSession(bookId.value, 'pdf', enterAt, endAt)
 		}
 		enterAt = 0
+		lastActiveAt = 0
 	}
 
 	/** 返回书架 */
