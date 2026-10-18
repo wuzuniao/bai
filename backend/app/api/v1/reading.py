@@ -7,7 +7,11 @@
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from __future__ import annotations
+
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...core.db import get_db
@@ -53,3 +57,24 @@ async def get_stats(
 ) -> dict:
     """今日与累计阅读分钟数"""
     return _ok(await svc.get_stats(db, user_id))
+
+
+@router.get("/report")
+async def get_reading_report(
+    period: str = Query("month", description="统计周期 week/month/year/total"),
+    anchor: str | None = Query(None, description="锚点日期 YYYY-MM-DD（周期内切换用，缺省为今天）"),
+    user_id: int = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """阅读统计报告（周期指标/趋势分布/阅读最久书籍/时段分布综合报表）"""
+    try:
+        anchor_date = (
+            datetime.strptime(anchor, "%Y-%m-%d").date() if anchor else svc.today_cn()
+        )
+    except ValueError:
+        raise HTTPException(status_code=400, detail="锚点日期格式错误")
+    try:
+        report = await svc.get_report(db, user_id, period, anchor_date)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return _ok(report)

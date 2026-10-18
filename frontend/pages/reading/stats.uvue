@@ -1,0 +1,1123 @@
+<template>
+	<view class="page">
+		<PageShell title="阅读时间统计" desc="按周/月/年/总查看阅读时长、书籍榜与时段分布">
+			<!-- 周期 Tab（周/月/年/总） -->
+			<view class="tabs">
+				<view
+					v-for="(t, ti) in PERIOD_TABS"
+					:key="t.key"
+					:class="period == t.key ? 'tab tab-on' : 'tab'"
+					@click="switchPeriod(t.key)"
+				>
+					<text :class="period == t.key ? 'tab-text-on' : 'tab-text'">{{ t.label }}</text>
+				</view>
+			</view>
+			<!-- 周期切换（总览无周期概念，隐藏） -->
+			<view v-if="period != 'total'" class="period-row">
+				<view class="pp-btn" @click="shiftPeriod(-1)">
+					<view class="pp-arrow pp-arrow-left"></view>
+				</view>
+				<text class="period-text">{{ periodText }}</text>
+				<view :class="atLatest ? 'pp-btn pp-btn-off' : 'pp-btn'" @click="shiftPeriod(1)">
+					<view :class="atLatest ? 'pp-arrow pp-arrow-right pp-arrow-off' : 'pp-arrow pp-arrow-right'"></view>
+				</view>
+			</view>
+
+			<!-- 总览卡：周期总时长 + 日均 + 四项指标 -->
+			<view class="card">
+				<text class="total-text">{{ totalText }}</text>
+				<text class="avg-text">日均阅读 {{ avgMinutes }} 分钟</text>
+				<view class="metric-grid">
+					<view class="metric-cell">
+						<text class="metric-label">阅读</text>
+						<view class="metric-value-row">
+							<text class="metric-num">{{ activeDays }}</text>
+							<text class="metric-unit">天</text>
+						</view>
+					</view>
+					<view class="metric-cell">
+						<text class="metric-label">笔记</text>
+						<view class="metric-value-row">
+							<text class="metric-num">{{ notesCount }}</text>
+							<text class="metric-unit">条</text>
+						</view>
+					</view>
+				</view>
+			</view>
+
+			<!-- 阅读时长分布（周=逐日条形 / 月=实际月历灰度 / 年=逐月条形 / 总=逐年条形） -->
+			<view class="card">
+				<text class="card-title">阅读时长分布</text>
+				<!-- 条形图（周/年/总）：右侧纵坐标刻度 -->
+				<view v-if="period != 'month'" class="chart-wrap">
+					<view class="chart">
+						<view v-for="(p, i) in trendBars" :key="i" class="chart-col">
+							<view class="chart-area">
+								<view class="chart-bar" :style="p.style"></view>
+							</view>
+							<text class="chart-label">{{ p.label }}</text>
+						</view>
+					</view>
+					<view class="y-axis">
+						<text v-for="(t, ti) in yTicks" :key="ti" class="y-axis-tick">{{ t }}</text>
+					</view>
+				</view>
+				<!-- 月历（月）：当日有阅读以灰度色块表示，时长越长越深，12 小时封顶纯黑 -->
+				<view v-else class="calendar">
+					<view class="cal-head">
+						<text v-for="(w, wi) in CAL_HEAD" :key="wi" class="cal-head-text">{{ w }}</text>
+					</view>
+					<view class="cal-grid">
+						<view v-for="(c, ci) in calendarCells" :key="ci" class="cal-cell">
+							<view v-if="c.day > 0" class="cal-day" :style="c.bg">
+								<text :class="c.dark ? 'cal-day-num-light' : 'cal-day-num'">{{ c.day }}</text>
+							</view>
+						</view>
+					</view>
+				</view>
+				<view v-if="peakText.length > 0" class="peak-banner">
+					<text class="peak-text">{{ peakText }}</text>
+				</view>
+			</view>
+
+			<!-- 阅读最久书籍榜（top3） -->
+			<view class="card">
+				<text class="card-title">阅读最久</text>
+				<view v-if="bookList.length == 0" class="empty-row">
+					<text class="empty-text">本期暂无阅读记录</text>
+				</view>
+				<view v-for="(b, i) in bookList" :key="i" :class="i > 0 ? 'book-item book-item-gap' : 'book-item'">
+					<view class="book-cover">
+						<text class="book-cover-text">{{ b.coverChar }}</text>
+					</view>
+					<view class="book-info">
+						<text class="book-name">{{ b.title }}</text>
+					</view>
+					<text class="book-mins">{{ b.totalText }}</text>
+				</view>
+			</view>
+
+			<!-- 阅读时段分布（累计所选时间范围内每天的对应小时阅读时间；标题按实际高峰时段生成） -->
+			<view class="card">
+				<text class="card-title">{{ hoursTitle }}</text>
+				<view class="chart-wrap">
+					<view class="chart">
+						<view v-for="(h, i) in hourBars" :key="i" class="chart-col">
+							<view class="chart-area">
+								<view class="chart-bar" :style="h.style"></view>
+							</view>
+							<!-- 固定高度标签槽：无标签列同样占位，柱基线不下坠 -->
+							<view class="chart-label-slot">
+								<text v-if="h.showLabel" class="chart-label">{{ h.label }}</text>
+							</view>
+						</view>
+					</view>
+					<view class="y-axis">
+						<text v-for="(t, ti) in hourTicks" :key="ti" class="y-axis-tick">{{ t }}</text>
+					</view>
+				</view>
+			</view>
+		</PageShell>
+	</view>
+</template>
+
+<script setup lang="uts">
+	/**
+	 * 阅读时间统计页（pages/reading/stats.uvue）
+	 * --------------------------------------------------------------------------
+	 * 数据来自业务后端 GET /api/v1/reading/report（周期周/月/年/总综合报表）；
+	 * 未登录时以本地数据兜底（暂存会话流水/书架缓存/笔记缓存构造同构报表）。
+	 * 时长趋势与指标来自 reading_daily_stats（聚合真源），书籍榜与时段分布来自
+	 * reading_sessions 明细账；柱状图为纯 view 实现（底部对齐填充块，无渐变）
+	 */
+	import PageShell from '@/components/common/PageShell.uvue'
+	import { fetchReadingReport } from '@/api/reading.uts'
+	import { hasAccessToken } from '@/utils/request.uts'
+	import { loadBooks, exportPendingSessionRows } from '@/utils/books.uts'
+
+	type PeriodTab = {
+		key: string
+		label: string
+	}
+
+	/** 柱状图单元（style 内联高度百分比；label 坐标轴标签；showLabel 抽稀显示，隐藏时以等高占位保持列对齐） */
+	type BarCell = {
+		label: string
+		style: string
+		showLabel: boolean
+	}
+
+	/** 月历单元（day=0 为首行前置空位；bg 为灰度色块内联样式；dark 深底反白） */
+	type CalCell = {
+		day: number
+		bg: string
+		dark: boolean
+	}
+
+	/** 阅读最久书籍行 */
+	type BookRow = {
+		title: string
+		coverChar: string
+		totalText: string
+	}
+
+	const PERIOD_TABS: PeriodTab[] = [
+		{ key: 'week', label: '周' } as PeriodTab,
+		{ key: 'month', label: '月' } as PeriodTab,
+		{ key: 'year', label: '年' } as PeriodTab,
+		{ key: 'total', label: '总' } as PeriodTab,
+	]
+
+	/** 月历表头（周日起始，与周粒度轴序一致） */
+	const CAL_HEAD: string[] = ['日', '一', '二', '三', '四', '五', '六']
+
+	/** 当前周期与锚点日期（锚点为周期内任一日期，周/月/年切换周期用） */
+	const period = ref('month')
+	const anchor = ref(todayStr())
+
+	// ── 报表数据 ──
+	const startDate = ref('')
+	const endDate = ref('')
+	const totalMinutes = ref(0)
+	const avgMinutes = ref(0)
+	const activeDays = ref(0)
+	const notesCount = ref(0)
+	const trendBars = ref<BarCell[]>([])
+	const yTicks = ref<string[]>(['', '', '', '', ''])
+	const calendarCells = ref<CalCell[]>([])
+	const peakText = ref('')
+	const bookList = ref<BookRow[]>([])
+	const hourBars = ref<BarCell[]>([])
+	const hourTicks = ref<string[]>(['', '', '', '', ''])
+	const hoursTitle = ref('阅读时段分布')
+
+	// ── 文案与格式化 ──
+
+	function pad2(n : number) : string {
+		return n < 10 ? '0' + n : '' + n
+	}
+
+	function todayStr() : string {
+		const d = new Date()
+		return fmtDate(d.getFullYear(), d.getMonth() + 1, d.getDate())
+	}
+
+	function fmtDate(y : number, m : number, d : number) : string {
+		return '' + y + '-' + pad2(m) + '-' + pad2(d)
+	}
+
+	/** 分钟数 → 「X小时Y分钟 / X小时 / Y分钟」 */
+	function fmtMinutes(mins : number) : string {
+		const h = Math.floor(mins / 60)
+		const r = mins % 60
+		if (h > 0 && r > 0) {
+			return h + '小时' + r + '分钟'
+		}
+		if (h > 0) {
+			return h + '小时'
+		}
+		return r + '分钟'
+	}
+
+	/** 周期切换文案（周=区间 / 月=YYYY年M月 / 年=YYYY年） */
+	const periodText = computed((): string => {
+		if (period.value == 'year') {
+			return anchor.value.substring(0, 4) + '年'
+		}
+		if (period.value == 'month') {
+			const p = anchor.value.split('-')
+			return parseInt(p[0]) + '年' + parseInt(p[1]) + '月'
+		}
+		const s = startDate.value.split('-')
+		const e = endDate.value.split('-')
+		if (s.length < 3 || e.length < 3) {
+			return ''
+		}
+		return parseInt(s[1]) + '月' + parseInt(s[2]) + '日 - ' + parseInt(e[1]) + '月' + parseInt(e[2]) + '日'
+	})
+
+	/** 周日为一周起点（轴序 日一二三四五六） */
+	function weekStartOf(y : number, m : number, d : number) : Date {
+		const dt = new Date(y, m - 1, d)
+		return new Date(y, m - 1, d - dt.getDay())
+	}
+
+	/** 右箭头禁用判定：锚点周期已是当前周期 */
+	const atLatest = computed((): boolean => {
+		const now = new Date()
+		const p = anchor.value.split('-')
+		const ay = parseInt(p[0])
+		const am = parseInt(p[1])
+		const ad = parseInt(p[2])
+		if (period.value == 'year') {
+			return ay == now.getFullYear()
+		}
+		if (period.value == 'month') {
+			return ay == now.getFullYear() && am == now.getMonth() + 1
+		}
+		return weekStartOf(ay, am, ad).getTime() == weekStartOf(now.getFullYear(), now.getMonth() + 1, now.getDate()).getTime()
+	})
+
+	/** 周期总时长文案 */
+	const totalText = computed((): string => fmtMinutes(totalMinutes.value))
+
+	// ── 交互 ──
+
+	function switchPeriod(key : string) : void {
+		if (period.value == key) {
+			return
+		}
+		period.value = key
+		anchor.value = todayStr()
+		loadReport()
+	}
+
+	function shiftPeriod(dir : number) : void {
+		if (period.value == 'total') {
+			return
+		}
+		if (dir > 0 && atLatest.value) {
+			return
+		}
+		const p = anchor.value.split('-')
+		const y = parseInt(p[0])
+		const m = parseInt(p[1])
+		const d = parseInt(p[2])
+		if (period.value == 'week') {
+			const dt = new Date(y, m - 1, d + dir * 7)
+			anchor.value = fmtDate(dt.getFullYear(), dt.getMonth() + 1, dt.getDate())
+		} else if (period.value == 'month') {
+			let nm = m + dir
+			let ny = y
+			if (nm > 12) {
+				nm = 1
+				ny++
+			}
+			if (nm < 1) {
+				nm = 12
+				ny--
+			}
+			anchor.value = fmtDate(ny, nm, 1)
+		} else {
+			anchor.value = fmtDate(y + dir, 1, 1)
+		}
+		loadReport()
+	}
+
+	// ── 未登录本地报表（与后端 report 同构，渲染走同一管线） ──
+
+	/** 日/月/年聚合桶 */
+	type MinuteBucket = {
+		key: string
+		minutes: number
+	}
+
+	/** 书籍时长聚合 */
+	type BookAgg = {
+		id: number
+		title: string
+		total: number
+	}
+
+	function addToBuckets(buckets : MinuteBucket[], key : string, mins : number) : void {
+		for (let i = 0; i < buckets.length; i++) {
+			if (buckets[i].key == key) {
+				buckets[i].minutes += mins
+				return
+			}
+		}
+		buckets.push({ key: key, minutes: mins } as MinuteBucket)
+	}
+
+	function bucketOf(buckets : MinuteBucket[], key : string) : number {
+		for (let i = 0; i < buckets.length; i++) {
+			if (buckets[i].key == key) {
+				return buckets[i].minutes
+			}
+		}
+		return 0
+	}
+
+	function daysInMonth(y : number, m : number) : number {
+		if (m == 2) {
+			return (y % 4 == 0 && y % 100 != 0) || y % 400 == 0 ? 29 : 28
+		}
+		const arr = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+		return arr[m - 1]
+	}
+
+	/** 本地笔记总数（划线+想法；缓存无时间戳，不按周期过滤；含首页诗虚拟书 0） */
+	function countLocalNotes() : number {
+		let n = 0
+		const ids: number[] = [0]
+		const books = loadBooks()
+		for (let i = 0; i < books.length; i++) {
+			ids.push(books[i].id)
+		}
+		for (let i = 0; i < ids.length; i++) {
+			const keys: string[] = ['reader_underlines' + ids[i], 'reader_thoughts' + ids[i]]
+			for (let k = 0; k < keys.length; k++) {
+				const stored : any = uni.getStorageSync(keys[k])
+				if (typeof stored == 'string' && (stored as string).length > 0) {
+					const arr = JSON.parse<UTSJSONObject[]>(stored as string)
+					if (arr != null) {
+						n += arr.length
+					}
+				}
+			}
+		}
+		return n
+	}
+
+	/**
+	 * 本地报表构造（未登录兜底）：暂存会话流水聚合出趋势/书籍榜/时段分布，
+	 * 在读/完本与笔记取自书架与笔记缓存；数据结构与后端 GET /reading/report 完全一致。
+	 * 口径差异：笔记数不按周期过滤（本地缓存无时间戳）；流水暂存上限 500 条丢弃最旧。
+	 */
+	function buildLocalReport(periodKey : string, anchorStr : string) : UTSJSONObject {
+		const now = new Date()
+		const todayKey = fmtDate(now.getFullYear(), now.getMonth() + 1, now.getDate())
+		// 周期区间（'YYYY-MM-DD' 零填充字符串可直接字典序比较；total 由流水最小日起）
+		let startKey = todayKey
+		let endKey = todayKey
+		if (periodKey == 'week') {
+			const p = anchorStr.split('-')
+			const a = weekStartOf(parseInt(p[0]), parseInt(p[1]), parseInt(p[2]))
+			const e = new Date(a.getFullYear(), a.getMonth(), a.getDate() + 6)
+			startKey = fmtDate(a.getFullYear(), a.getMonth() + 1, a.getDate())
+			endKey = fmtDate(e.getFullYear(), e.getMonth() + 1, e.getDate())
+		} else if (periodKey == 'month') {
+			const p = anchorStr.split('-')
+			const y = parseInt(p[0])
+			const m = parseInt(p[1])
+			startKey = fmtDate(y, m, 1)
+			endKey = fmtDate(y, m, daysInMonth(y, m))
+		} else if (periodKey == 'year') {
+			const y = parseInt(anchorStr.split('-')[0])
+			startKey = y + '-01-01'
+			endKey = y + '-12-31'
+		}
+
+		// 暂存会话流水聚合（未登录时全部条目均为离线流水）
+		const dayBuckets: MinuteBucket[] = []
+		const monthBuckets: MinuteBucket[] = []
+		const yearBuckets: MinuteBucket[] = []
+		const hourMins: number[] = []
+		for (let i = 0; i < 24; i++) {
+			hourMins.push(0)
+		}
+		const bookAggs: BookAgg[] = []
+		const books = loadBooks()
+		const sessions = exportPendingSessionRows()
+		for (let i = 0; i < sessions.length; i++) {
+			const s = sessions[i]
+			const dayKey = s.getString('started_at') ?? ''
+			if (dayKey.length < 13) {
+				continue
+			}
+			const day = dayKey.substring(0, 10)
+			if (periodKey != 'total' && (day < startKey || day > endKey)) {
+				continue
+			}
+			const mins = s.getNumber('minutes') ?? 0
+			addToBuckets(dayBuckets, day, mins)
+			addToBuckets(monthBuckets, day.substring(0, 7), mins)
+			addToBuckets(yearBuckets, day.substring(0, 4), mins)
+			const hour = parseInt(dayKey.substring(11, 13))
+			if (hour >= 0 && hour < 24) {
+				hourMins[hour] = hourMins[hour] + mins
+			}
+			// 书籍归属（本地缓存已无该书的流水不计入书籍榜）
+			const bookId = s.getNumber('book_id') ?? 0
+			let title = ''
+			for (let b = 0; b < books.length; b++) {
+				if (books[b].id == bookId) {
+					title = books[b].title
+					break
+				}
+			}
+			if (title.length == 0) {
+				continue
+			}
+			let aggIdx = -1
+			for (let b = 0; b < bookAggs.length; b++) {
+				if (bookAggs[b].id == bookId) {
+					aggIdx = b
+					break
+				}
+			}
+			if (aggIdx < 0) {
+				bookAggs.push({ id: bookId, title: title, total: 0 } as BookAgg)
+				aggIdx = bookAggs.length - 1
+			}
+			bookAggs[aggIdx].total = bookAggs[aggIdx].total + mins
+		}
+		if (periodKey == 'total') {
+			let minKey = todayKey
+			for (let i = 0; i < dayBuckets.length; i++) {
+				if (dayBuckets[i].key < minKey) {
+					minKey = dayBuckets[i].key
+				}
+			}
+			startKey = minKey
+		}
+
+		// 趋势点位（与后端同构：label=坐标轴标签；峰值文案单独入 peak）
+		const trendArr: UTSJSONObject[] = []
+		let peakMinutes = 0
+		let peakFull = ''
+		const WEEKDAY_CHARS: string = '日一二三四五六'
+		if (periodKey == 'week') {
+			const p = startKey.split('-')
+			const sd = new Date(parseInt(p[0]), parseInt(p[1]) - 1, parseInt(p[2]))
+			for (let i = 0; i < 7; i++) {
+				const d = new Date(sd.getFullYear(), sd.getMonth(), sd.getDate() + i)
+				const mins = bucketOf(dayBuckets, fmtDate(d.getFullYear(), d.getMonth() + 1, d.getDate()))
+				const item = {} as UTSJSONObject
+				item['label'] = WEEKDAY_CHARS.substring(i, i + 1)
+				item['minutes'] = mins
+				trendArr.push(item)
+				if (mins > peakMinutes) {
+					peakMinutes = mins
+					peakFull = (d.getMonth() + 1) + '月' + d.getDate() + '日'
+				}
+			}
+		} else if (periodKey == 'month') {
+			const p = startKey.split('-')
+			const y = parseInt(p[0])
+			const m = parseInt(p[1])
+			for (let day = 1; day <= daysInMonth(y, m); day++) {
+				const mins = bucketOf(dayBuckets, fmtDate(y, m, day))
+				const item = {} as UTSJSONObject
+				item['label'] = '' + day
+				item['minutes'] = mins
+				trendArr.push(item)
+				if (mins > peakMinutes) {
+					peakMinutes = mins
+					peakFull = day + '日'
+				}
+			}
+		} else if (periodKey == 'year') {
+			const y = startKey.substring(0, 4)
+			for (let m = 1; m <= 12; m++) {
+				const mins = bucketOf(monthBuckets, y + '-' + pad2(m))
+				const item = {} as UTSJSONObject
+				item['label'] = m + '月'
+				item['minutes'] = mins
+				trendArr.push(item)
+				if (mins > peakMinutes) {
+					peakMinutes = mins
+					peakFull = m + '月'
+				}
+			}
+		} else {
+			const y1 = parseInt(startKey.substring(0, 4))
+			const y2 = parseInt(endKey.substring(0, 4))
+			for (let y = y1; y <= y2; y++) {
+				const mins = bucketOf(yearBuckets, '' + y)
+				const item = {} as UTSJSONObject
+				item['label'] = '' + y
+				item['minutes'] = mins
+				trendArr.push(item)
+				if (mins > peakMinutes) {
+					peakMinutes = mins
+					peakFull = y + '年'
+				}
+			}
+		}
+
+		// 指标：总时长/阅读天数/日均（周期自然天数）
+		let totalMins = 0
+		let activeDays = 0
+		for (let i = 0; i < dayBuckets.length; i++) {
+			totalMins += dayBuckets[i].minutes
+			if (dayBuckets[i].minutes > 0) {
+				activeDays++
+			}
+		}
+		const sp = startKey.split('-')
+		const ep = endKey.split('-')
+		const sDate = new Date(parseInt(sp[0]), parseInt(sp[1]) - 1, parseInt(sp[2]))
+		const eDate = new Date(parseInt(ep[0]), parseInt(ep[1]) - 1, parseInt(ep[2]))
+		const dayCount = Math.max(Math.round((eDate.getTime() - sDate.getTime()) / 86400000) + 1, 1)
+		// 书籍榜 top3
+		const sorted = bookAggs.slice().sort((a: BookAgg, b: BookAgg): number => b.total - a.total)
+		const booksArr: UTSJSONObject[] = []
+		const topN = sorted.length > 3 ? 3 : sorted.length
+		for (let i = 0; i < topN; i++) {
+			const o = {} as UTSJSONObject
+			o['book_title'] = sorted[i].title
+			o['total_minutes'] = sorted[i].total
+			booksArr.push(o)
+		}
+		// 时段分布与偏好标签
+		const hoursArr: UTSJSONObject[] = []
+		for (let h = 0; h < 24; h++) {
+			const o = {} as UTSJSONObject
+			o['hour'] = h
+			o['minutes'] = hourMins[h]
+			hoursArr.push(o)
+		}
+		let peakTag = ''
+		let best = 0
+		const segRanges: number[] = [0, 5, 6, 11, 12, 17, 18, 23]
+		const segNames: string[] = ['凌晨', '上午', '下午', '夜间']
+		for (let s = 0; s < 4; s++) {
+			let sum = 0
+			for (let h = segRanges[s * 2]; h <= segRanges[s * 2 + 1]; h++) {
+				sum += hourMins[h]
+			}
+			if (sum > best) {
+				best = sum
+				peakTag = segNames[s]
+			}
+		}
+
+		const peak = {} as UTSJSONObject
+		peak['label'] = peakFull
+		peak['minutes'] = peakMinutes
+		const res = {} as UTSJSONObject
+		res['start_date'] = startKey
+		res['end_date'] = endKey
+		res['total_minutes'] = totalMins
+		res['avg_minutes'] = Math.floor(totalMins / dayCount)
+		res['active_days'] = activeDays
+		res['notes_count'] = countLocalNotes()
+		res['trend'] = trendArr
+		res['peak'] = peak
+		res['books'] = booksArr
+		res['hours'] = hoursArr
+		res['peak_tag'] = peakTag
+		return res
+	}
+
+	/** 12 小时封顶灰度色块：画布灰(#f4f4f2)→墨黑(#0e0f0c) 线性插值（时长照实统计，仅颜色封顶） */
+	function shadeStyle(minutes : number) : string {
+		const t = Math.min(minutes / 720, 1)
+		const r = Math.round(244 + (14 - 244) * t)
+		const g = Math.round(244 + (15 - 244) * t)
+		const b = Math.round(242 + (12 - 242) * t)
+		return 'background-color: rgb(' + r + ',' + g + ',' + b + ');'
+	}
+
+	/** 月历单元构造（周日起始；首行按当月 1 日星期前置空位；当日时长≥6 小时反白数字） */
+	function buildCalendar(arr : UTSJSONObject[] | null) : void {
+		const cells: CalCell[] = []
+		if (arr == null || arr.length == 0) {
+			calendarCells.value = cells
+			return
+		}
+		const p = anchor.value.split('-')
+		const firstWd = new Date(parseInt(p[0]), parseInt(p[1]) - 1, 1).getDay()
+		for (let i = 0; i < firstWd; i++) {
+			cells.push({ day: 0, bg: '', dark: false } as CalCell)
+		}
+		for (let i = 0; i < arr.length; i++) {
+			const mins = arr[i].getNumber('minutes') ?? 0
+			const day = parseInt(arr[i].getString('label') ?? '0')
+			cells.push({
+				day: day,
+				bg: mins > 0 ? shadeStyle(mins) : '',
+				dark: mins >= 360
+			} as CalCell)
+		}
+		calendarCells.value = cells
+	}
+
+	/** 刻度值文案（英文单位）：满 60 分钟按小时（最多 1 位小数），否则按分钟 */
+	function yTickText(v : number) : string {
+		if (v >= 60) {
+			const h = Math.round(v / 6) / 10
+			return (h % 1 == 0 ? '' + Math.round(h) : '' + h) + 'h'
+		}
+		return Math.round(v) + 'm'
+	}
+
+	/** 纵坐标刻度（顶=最大值，四等分；不展示 0，底部留空位保持刻度与柱高对位；本期无时长全空） */
+	function buildYTicks(max : number) : string[] {
+		const list: string[] = []
+		if (max <= 0) {
+			return ['', '', '', '', '']
+		}
+		for (let i = 4; i >= 1; i--) {
+			list.push(yTickText(max * i / 4))
+		}
+		list.push('')
+		return list
+	}
+
+	/** 时长趋势柱状（坐标轴标签逐日/逐月/逐年全量显示） */
+	function buildTrendBars(arr : UTSJSONObject[] | null) : void {
+		const cells: BarCell[] = []
+		if (arr == null) {
+			trendBars.value = cells
+			return
+		}
+		const mins: number[] = []
+		const labels: string[] = []
+		let max = 0
+		for (let i = 0; i < arr.length; i++) {
+			const m = arr[i].getNumber('minutes') ?? 0
+			mins.push(m)
+			labels.push(arr[i].getString('label') ?? '')
+			if (m > max) {
+				max = m
+			}
+		}
+		for (let i = 0; i < mins.length; i++) {
+			// 柱高完全按真实比例（无最小高度保底）
+			const pct = max > 0 ? Math.round(mins[i] * 100 / max) : 0
+			cells.push({
+				label: labels[i],
+				style: 'height: ' + pct + '%;',
+				showLabel: true
+			} as BarCell)
+		}
+		trendBars.value = cells
+		yTicks.value = buildYTicks(max)
+	}
+
+	/** 时段柱状（0-23 时逐时标签全量显示；右侧刻度与时长分布同方案；峰值柱全实，其余降透明度） */
+	function buildHourBars(arr : UTSJSONObject[] | null) : void {
+		const cells: BarCell[] = []
+		if (arr == null) {
+			hourBars.value = cells
+			hourTicks.value = buildYTicks(0)
+			return
+		}
+		const mins: number[] = []
+		let max = 0
+		for (let i = 0; i < arr.length; i++) {
+			const m = arr[i].getNumber('minutes') ?? 0
+			mins.push(m)
+			if (m > max) {
+				max = m
+			}
+		}
+		for (let i = 0; i < mins.length; i++) {
+			// 柱高完全按真实比例（无最小高度保底）
+			const pct = max > 0 ? Math.round(mins[i] * 100 / max) : 0
+			const isPeak = max > 0 && mins[i] == max
+			cells.push({
+				// 刻度标注小时段右端点（第 i 列 = i:00-(i+1):00）：3,6,9,12,15,18,21,24 等距 3 小时
+				label: '' + (i + 1),
+				style: 'height: ' + pct + '%; opacity: ' + (isPeak ? 1 : 0.4) + ';',
+				showLabel: i % 3 == 2
+			} as BarCell)
+		}
+		hourBars.value = cells
+		hourTicks.value = buildYTicks(max)
+	}
+
+	async function loadReport() : Promise<void> {
+		if (!hasAccessToken()) {
+			// 未登录：本地数据兜底渲染（暂存会话流水 + 书架缓存 + 笔记缓存，与云端报表同构）
+			renderReport(buildLocalReport(period.value, period.value == 'total' ? '' : anchor.value))
+			return
+		}
+		try {
+			const res = await fetchReadingReport(period.value, period.value == 'total' ? '' : anchor.value)
+			if (res.code == 0 && res.data != null) {
+				renderReport(res.data)
+			}
+		} catch (e) {
+			// 静默：保留当前展示，下次进入再试
+		}
+	}
+
+	/** 报表渲染（云端与本地兜底共用的同构解析管线） */
+	function renderReport(d : UTSJSONObject | null) : void {
+		if (d == null) {
+			return
+		}
+		startDate.value = d.getString('start_date') ?? ''
+		endDate.value = d.getString('end_date') ?? ''
+		totalMinutes.value = d.getNumber('total_minutes') ?? 0
+		avgMinutes.value = d.getNumber('avg_minutes') ?? 0
+		activeDays.value = d.getNumber('active_days') ?? 0
+		notesCount.value = d.getNumber('notes_count') ?? 0
+		// 趋势：月粒度渲染实际月历，其余粒度渲染条形图
+		const tarr = d.getArray('trend')
+		if (period.value == 'month') {
+			buildCalendar(tarr)
+			trendBars.value = []
+		} else {
+			buildTrendBars(tarr)
+			calendarCells.value = []
+		}
+		buildHourBars(d.getArray('hours'))
+		// 峰值提示条（本期无阅读时长则隐藏）
+		const peak = d['peak'] as UTSJSONObject | null
+		if (peak != null) {
+			const pm = peak.getNumber('minutes') ?? 0
+			const pl = peak.getString('label') ?? ''
+			peakText.value = pm > 0 && pl.length > 0 ? pl + '阅读最久 · ' + fmtMinutes(pm) : ''
+		} else {
+			peakText.value = ''
+		}
+		// 阅读最久书籍榜 top3
+		const list: BookRow[] = []
+		const barr = d.getArray('books')
+		if (barr != null) {
+			for (let i = 0; i < barr.length; i++) {
+				const o = barr[i]
+				const title = o.getString('book_title') ?? ''
+				const tm = o.getNumber('total_minutes') ?? 0
+				list.push({
+					title: title,
+					coverChar: title.length > 0 ? title.substring(0, 1) : '书',
+					totalText: fmtMinutes(tm)
+				} as BookRow)
+			}
+		}
+		bookList.value = list
+		// 时段偏好标题（按实际高峰分段生成：凌晨/上午/下午/夜间）
+		const tag = d.getString('peak_tag') ?? ''
+		hoursTitle.value = tag.length > 0 ? '偏好' + tag + '阅读' : '阅读时段分布'
+	}
+
+	onShow(() => {
+		loadReport()
+	})
+</script>
+
+<style lang="scss">
+	.page {
+		flex: 1;
+		background-color: $bai-canvas-soft;
+	}
+
+	/* ── 周期 Tab（白底胶囊分段，激活段墨黑底白字） ── */
+	.tabs {
+		flex-direction: row;
+		background-color: $bai-canvas;
+		border-radius: $bai-rounded-pill;
+		padding: 6rpx;
+		margin-top: 40rpx;
+		margin-bottom: 24rpx;
+	}
+
+	.tab {
+		flex: 1;
+		height: 68rpx;
+		justify-content: center;
+		align-items: center;
+		border-radius: $bai-rounded-pill;
+	}
+
+	.tab-on {
+		background-color: $bai-ink;
+	}
+
+	.tab-text {
+		color: $bai-body;
+		font-size: 28rpx;
+	}
+
+	.tab-text-on {
+		color: $bai-on-primary;
+		font-size: 28rpx;
+		font-weight: 600;
+	}
+
+	/* ── 周期切换行 ── */
+	.period-row {
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+		margin-bottom: 24rpx;
+	}
+
+	.pp-btn {
+		width: 80rpx;
+		height: 80rpx;
+		justify-content: center;
+		align-items: center;
+		background-color: $bai-canvas;
+		border-radius: $bai-rounded-pill;
+	}
+
+	.pp-btn-off {
+		opacity: 0.35;
+	}
+
+	/* 箭头：边框折角旋转绘制（文本字形受字体度量影响无法稳定居中，改用几何绘制） */
+	.pp-arrow {
+		width: 18rpx;
+		height: 18rpx;
+	}
+
+	/* 左箭头：左+下边框折角（指向左下）顺时针转 45° 指向左侧 */
+	.pp-arrow-left {
+		border-left-width: 4rpx;
+		border-left-style: solid;
+		border-left-color: $bai-ink;
+		border-bottom-width: 4rpx;
+		border-bottom-style: solid;
+		border-bottom-color: $bai-ink;
+		transform: rotate(45deg);
+		margin-left: 4rpx;
+	}
+
+	/* 右箭头：右+下边框折角（指向右下）逆时针转 45° 指向右侧 */
+	.pp-arrow-right {
+		border-right-width: 4rpx;
+		border-right-style: solid;
+		border-right-color: $bai-ink;
+		border-bottom-width: 4rpx;
+		border-bottom-style: solid;
+		border-bottom-color: $bai-ink;
+		transform: rotate(-45deg);
+		margin-right: 4rpx;
+	}
+
+	.pp-arrow-off {
+		opacity: 0.35;
+	}
+
+	.period-text {
+		color: $bai-ink;
+		font-size: 30rpx;
+		font-weight: 600;
+		margin-left: 32rpx;
+		margin-right: 32rpx;
+	}
+
+	/* ── 卡片通用（白底 xl 圆角） ── */
+	.card {
+		background-color: $bai-canvas;
+		border-radius: $bai-rounded-xl;
+		padding: 32rpx;
+		margin-bottom: 24rpx;
+		flex-direction: column;
+	}
+
+	.card-title {
+		color: $bai-ink;
+		font-size: 32rpx;
+		font-weight: 600;
+		margin-bottom: 16rpx;
+	}
+
+	/* ── 总览卡 ── */
+	.total-text {
+		color: $bai-ink;
+		font-size: 60rpx;
+		line-height: 76rpx;
+		font-weight: 700;
+	}
+
+	.avg-text {
+		color: $bai-mute;
+		font-size: 26rpx;
+		margin-top: 8rpx;
+	}
+
+	.metric-grid {
+		flex-direction: row;
+		flex-wrap: wrap;
+		margin-top: 28rpx;
+	}
+
+	.metric-cell {
+		width: 50%;
+		flex-direction: column;
+	}
+
+	.metric-label {
+		color: $bai-mute;
+		font-size: 26rpx;
+	}
+
+	.metric-value-row {
+		flex-direction: row;
+		align-items: baseline;
+		margin-top: 8rpx;
+	}
+
+	.metric-num {
+		color: $bai-ink;
+		font-size: 40rpx;
+		font-weight: 700;
+	}
+
+	.metric-unit {
+		color: $bai-body;
+		font-size: 26rpx;
+		margin-left: 8rpx;
+	}
+
+	/* ── 柱状图（纯 view：右侧纵坐标刻度 + 列 flex:1，柱底部对齐填充块） ── */
+	.chart-wrap {
+		flex-direction: row;
+	}
+
+	.y-axis {
+		width: 56rpx;
+		height: 280rpx;
+		flex-direction: column;
+		justify-content: space-between;
+		align-items: flex-start;
+		padding-left: 8rpx;
+	}
+
+	.y-axis-tick {
+		color: $bai-mute;
+		font-size: 18rpx;
+		line-height: 26rpx;
+	}
+
+	.chart {
+		flex: 1;
+		flex-direction: row;
+		align-items: flex-end;
+	}
+
+	/* ── 月历（周日起始七列，灰度色块日格） ── */
+	.calendar {
+		flex-direction: column;
+	}
+
+	.cal-head {
+		flex-direction: row;
+		margin-bottom: 8rpx;
+	}
+
+	.cal-head-text {
+		flex: 1;
+		text-align: center;
+		color: $bai-mute;
+		font-size: 22rpx;
+	}
+
+	.cal-grid {
+		flex-direction: row;
+		flex-wrap: wrap;
+	}
+
+	.cal-cell {
+		width: 14.28%;
+		height: 88rpx;
+		padding: 4rpx;
+	}
+
+	.cal-day {
+		flex: 1;
+		border-radius: $bai-rounded-sm;
+		justify-content: center;
+		align-items: center;
+	}
+
+	.cal-day-num {
+		color: $bai-ink;
+		font-size: 24rpx;
+	}
+
+	.cal-day-num-light {
+		color: $bai-canvas;
+		font-size: 24rpx;
+	}
+
+	.chart-col {
+		flex: 1;
+		flex-direction: column;
+		align-items: center;
+		justify-content: flex-end;
+	}
+
+	.chart-area {
+		width: 100%;
+		height: 280rpx;
+		flex-direction: column;
+		justify-content: flex-end;
+		align-items: center;
+	}
+
+	.chart-bar {
+		width: 55%;
+		background-color: $bai-ink;
+		border-radius: 6rpx;
+	}
+
+	/* 标签槽：固定高度，无标签列同样占位（空文本高度会塌陷导致柱基线下坠） */
+	.chart-label-slot {
+		width: 100%;
+		height: 34rpx;
+	}
+
+	.chart-label {
+		color: $bai-mute;
+		font-size: 18rpx;
+		line-height: 26rpx;
+		margin-top: 8rpx;
+		width: 100%;
+		text-align: center;
+	}
+
+	/* ── 峰值提示条 ── */
+	.peak-banner {
+		background-color: $bai-canvas-soft;
+		border-radius: $bai-rounded-sm;
+		padding: 16rpx 24rpx;
+		margin-top: 24rpx;
+	}
+
+	.peak-text {
+		color: $bai-body;
+		font-size: 26rpx;
+	}
+
+	/* ── 阅读最久书籍榜 ── */
+	.empty-row {
+		padding-top: 8rpx;
+		padding-bottom: 8rpx;
+	}
+
+	.empty-text {
+		color: $bai-mute;
+		font-size: 26rpx;
+	}
+
+	.book-item {
+		flex-direction: row;
+		align-items: center;
+	}
+
+	.book-item-gap {
+		margin-top: 24rpx;
+	}
+
+	.book-cover {
+		width: 80rpx;
+		height: 80rpx;
+		justify-content: center;
+		align-items: center;
+		background-color: $bai-canvas-soft;
+		border-radius: $bai-rounded-md;
+	}
+
+	.book-cover-text {
+		color: $bai-ink;
+		font-size: 36rpx;
+		font-weight: 600;
+	}
+
+	.book-info {
+		flex: 1;
+		flex-direction: column;
+		margin-left: 24rpx;
+		margin-right: 16rpx;
+	}
+
+	.book-name {
+		color: $bai-ink;
+		font-size: 28rpx;
+		font-weight: 500;
+	}
+
+	.book-mins {
+		color: $bai-ink;
+		font-size: 32rpx;
+		font-weight: 700;
+	}
+</style>

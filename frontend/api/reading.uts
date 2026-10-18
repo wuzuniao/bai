@@ -121,6 +121,15 @@ export function fetchReadingStats() : Promise<ApiResponse> {
 	return request(opts('/api/v1/reading/stats', 'GET', null))
 }
 
+/** 阅读统计报告（data: 周期指标/trend 趋势/peak 最久点位/books 书籍榜/hours 时段分布/peak_tag 偏好标签；anchor 为周期内锚点日期 YYYY-MM-DD，total 传空串） */
+export function fetchReadingReport(period: string, anchor: string) : Promise<ApiResponse> {
+	let url = '/api/v1/reading/report?period=' + period
+	if (anchor.length > 0) {
+		url += '&anchor=' + anchor
+	}
+	return request(opts(url, 'GET', null))
+}
+
 /**
  * 阅读会话流水批量上报（按书/时段明细账，在线直传与离线补传共用）
  * items 元素字段：book_id/source(txt|pdf)/started_at/ended_at(YYYY-MM-DD HH:mm:ss)/minutes

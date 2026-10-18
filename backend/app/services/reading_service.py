@@ -7,10 +7,10 @@
 """
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time as dtime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, desc, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -452,3 +452,154 @@ async def put_prefs(db: AsyncSession, user_id: int, data: PrefsPut) -> dict[str,
         row.prefs = data.prefs
     await db.commit()
     return dict(row.prefs)
+
+
+# ==================== 阅读报告（统计页） ====================
+
+REPORT_PERIODS = ("week", "month", "year", "total")
+
+# 时段偏好分段（按会话流水 started_at 小时归属，分钟和最大者作为偏好标签）
+_HOUR_SEGMENTS: list[tuple[str, int, int]] = [
+    ("凌晨", 0, 5),
+    ("上午", 6, 11),
+    ("下午", 12, 17),
+    ("夜间", 18, 23),
+]
+
+
+def _month_range(anchor: date) -> tuple[date, date]:
+    """锚点所在自然月的 (月初, 月末)"""
+    start = anchor.replace(day=1)
+    ny = start.year + (1 if start.month == 12 else 0)
+    nm = 1 if start.month == 12 else start.month + 1
+    return start, date(ny, nm, 1) - timedelta(days=1)
+
+
+async def get_report(db: AsyncSession, user_id: int, period: str, anchor: date) -> dict[str, Any]:
+    """
+    阅读统计报告（周期 = week 本周 / month 本月 / year 本年 / total 全部，anchor 为周期内锚点日期）
+    - 趋势与时长来自 reading_daily_stats（聚合真源）；书籍榜与时段分布来自 reading_sessions（明细账，两账不保证一致）
+    - 在读/完本为 user_books 累计状态（项目无按周期快照数据）；笔记数按 created_at 落区间统计
+    """
+    if period not in REPORT_PERIODS:
+        raise ValueError("无效的统计周期")
+    today = today_cn()
+
+    # 周期区间与趋势点位（date, 坐标轴标签, 完整标签）
+    points: list[tuple[date, str, str]] = []
+    if period == "week":
+        # 周日起始（轴序 日一二三四五六）
+        start = anchor - timedelta(days=(anchor.weekday() + 1) % 7)
+        end = start + timedelta(days=6)
+        for i in range(7):
+            d = start + timedelta(days=i)
+            points.append((d, "日一二三四五六"[i], f"{d.month}月{d.day}日"))
+    elif period == "month":
+        start, end = _month_range(anchor)
+        for i in range((end - start).days + 1):
+            d = start + timedelta(days=i)
+            points.append((d, str(d.day), f"{d.day}日"))
+    elif period == "year":
+        start = date(anchor.year, 1, 1)
+        end = date(anchor.year, 12, 31)
+        for m in range(1, 13):
+            points.append((date(anchor.year, m, 1), f"{m}月", f"{m}月"))
+    else:  # total
+        first = await db.execute(
+            select(func.min(ReadingDailyStat.stat_date)).where(ReadingDailyStat.user_id == user_id)
+        )
+        first_date = first.scalar_one_or_none()
+        start = first_date if first_date is not None else today
+        end = today
+        for y in range(start.year, end.year + 1):
+            points.append((date(y, 1, 1), str(y), f"{y}年"))
+    # 统计区间末裁剪到今天（未来日无数据，且避免日均被未到的天数稀释）；
+    # 自然周期终点单独保留用于展示（周粒度选择器显示完整一周而非截至今天）
+    natural_end = end
+    end = min(end, today)
+    day_start = datetime.combine(start, dtime.min)
+    day_end = datetime.combine(end + timedelta(days=1), dtime.min)
+
+    # 趋势：区间内每日分钟数按趋势点位聚合（week/month 逐日，year/total 按年）
+    rows = await db.execute(
+        select(ReadingDailyStat.stat_date, ReadingDailyStat.minutes).where(
+            ReadingDailyStat.user_id == user_id,
+            ReadingDailyStat.stat_date >= start,
+            ReadingDailyStat.stat_date <= end,
+        )
+    )
+    day_map = {r.stat_date: int(r.minutes) for r in rows.fetchall()}
+    trend: list[dict[str, Any]] = []
+    peak_minutes = 0
+    peak_label = points[0][2] if points else ""
+    for d, axis, full in points:
+        if period in ("week", "month"):
+            mins = day_map.get(d, 0)
+        elif period == "year":
+            # 年粒度按自然月分桶（点位为各月 1 日）
+            mins = sum(v for k, v in day_map.items() if k.year == d.year and k.month == d.month)
+        else:
+            # 总粒度按自然年分桶
+            mins = sum(v for k, v in day_map.items() if k.year == d.year)
+        trend.append({"label": axis, "minutes": mins})
+        if mins > peak_minutes:
+            peak_minutes = mins
+            peak_label = full
+    total_minutes = sum(day_map.values())
+    active_days = sum(1 for v in day_map.values() if v > 0)
+
+    notes_row = await db.execute(
+        select(func.count()).select_from(ReadingNote).where(
+            ReadingNote.user_id == user_id,
+            ReadingNote.created_at >= day_start,
+            ReadingNote.created_at < day_end,
+        )
+    )
+
+    # 书籍榜：周期内按书聚合时长 top3（book_title 快照支撑删书后展示）
+    sess_where = (
+        ReadingSession.user_id == user_id,
+        ReadingSession.started_at >= day_start,
+        ReadingSession.started_at < day_end,
+    )
+    total_rows = await db.execute(
+        select(ReadingSession.book_title, func.sum(ReadingSession.minutes))
+        .where(*sess_where)
+        .group_by(ReadingSession.book_title)
+        .order_by(desc(func.sum(ReadingSession.minutes)))
+        .limit(3)
+    )
+    books = [
+        {"book_title": t, "total_minutes": int(m)}
+        for t, m in total_rows.fetchall()
+    ]
+
+    # 时段分布：0-23 点逐时聚合会话分钟数 + 偏好分段标签
+    hour_rows = await db.execute(
+        select(func.hour(ReadingSession.started_at), func.sum(ReadingSession.minutes))
+        .where(*sess_where)
+        .group_by(func.hour(ReadingSession.started_at))
+    )
+    hour_map = {int(h): int(m) for h, m in hour_rows.fetchall()}
+    hours = [{"minutes": hour_map.get(h, 0)} for h in range(24)]
+    peak_tag = ""
+    best = 0
+    for name, lo, hi in _HOUR_SEGMENTS:
+        s = sum(hour_map.get(h, 0) for h in range(lo, hi + 1))
+        if s > best:
+            best = s
+            peak_tag = name
+
+    return {
+        "start_date": start.strftime("%Y-%m-%d"),
+        "end_date": natural_end.strftime("%Y-%m-%d"),
+        "total_minutes": total_minutes,
+        "avg_minutes": total_minutes // max((end - start).days + 1, 1),
+        "active_days": active_days,
+        "notes_count": int(notes_row.scalar_one()),
+        "trend": trend,
+        "peak": {"label": peak_label, "minutes": peak_minutes},
+        "books": books,
+        "hours": hours,
+        "peak_tag": peak_tag,
+    }

@@ -35,6 +35,13 @@
 				"navigationStyle": "custom",
 				"navigationBarTitleText": "活动"
 			}
+		},
+		{
+			"path": "pages/reading/stats",
+			"style": {
+				"navigationStyle": "custom",
+				"navigationBarTitleText": "阅读时间统计"
+			}
 		}
 	],
 	"subPackages": [

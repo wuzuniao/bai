@@ -42,8 +42,8 @@
 			</view>
 			<!-- 主内容 -->
 			<view class="main">
-				<!-- 阅读统计卡 -->
-				<view class="stats-card">
+				<!-- 阅读统计卡（点击跳转「我的阅读」统计页；胶囊领取点击阻止冒泡） -->
+				<view class="stats-card" @click="openStats">
 					<view class="stats-left">
 						<view class="stats-num-row">
 							<text class="stats-num">{{ todayMinutes }}</text>
@@ -51,7 +51,7 @@
 						</view>
 						<text class="stats-label">今日已读</text>
 					</view>
-					<view v-if="pillState != 'none'" class="stats-pill" @click="onPillTap">
+					<view v-if="pillState != 'none'" class="stats-pill" @click.stop="onPillTap">
 						<text class="stats-pill-text">{{ pillLeadText }}</text>
 						<view class="stats-pill-dot"></view>
 						<text class="stats-pill-coin">领 {{ pillReward }}</text>
@@ -832,6 +832,13 @@
 		}
 		uni.navigateTo({
 			url: '/pages/reading/reward'
+		})
+	}
+
+	/** 统计卡整体点击（胶囊外区域）：进入「我的阅读」统计页 */
+	function openStats() : void {
+		uni.navigateTo({
+			url: '/pages/reading/stats'
 		})
 	}
 

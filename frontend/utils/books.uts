@@ -867,6 +867,24 @@ export function addReadingSession(bookId : number, source : string, startedMs : 
 let sessionsFlushing = false
 
 /**
+ * 暂存会话流水只读快照（未登录统计页本地兜底用，plain 对象避免暴露内部类型）
+ * 返回元素字段：book_id / started_at（'YYYY-MM-DD HH:mm:ss'）/ minutes
+ */
+export function exportPendingSessionRows() : UTSJSONObject[] {
+	const list = loadPendingSessions()
+	const rows : UTSJSONObject[] = []
+	for (let i = 0; i < list.length; i++) {
+		const s = list[i]
+		const o = {} as UTSJSONObject
+		o['book_id'] = s.book_id
+		o['started_at'] = s.started_at
+		o['minutes'] = s.minutes
+		rows.push(o)
+	}
+	return rows
+}
+
+/**
  * 暂存会话补传（登录态调用；书架进入时机触发）：
  * 批量上报全部暂存条目——请求成功即清空（含后端跳过的无效条目，重试无意义），
  * 请求失败整体保留下次再试
