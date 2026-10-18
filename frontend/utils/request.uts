@@ -8,7 +8,7 @@
  *   仍失败才清态跳登录（并发 401 共享同一次刷新请求）
  */
 import { AUTH_BASE_URL, AUTH_CLIENT_ID, API_BASE_URL } from './config'
-import { syncAuthCookie, clearAuthCookie, SyncAuthCookieOptions } from './authCookie'
+import { syncAuthCookie, recoverAuthFromCookie, SyncAuthCookieOptions, RestoredAuthState } from './authCookie'
 
 /** 统一响应结构（code 非 0 表示业务错误，msg 面向用户） */
 export type ApiResponse = {
@@ -54,7 +54,7 @@ function clearAuthStorage() : void {
 	}
 }
 
-/** 401 统一处理：清除本地登录态，提示并跳转登录页 */
+/** 401 统一处理：清除本地登录态，提示并跳转登录页（不清父域 SSO Cookie：其生命周期由 authCookie 恢复链管理） */
 function handleUnauthorized() : void {
 	if (handling401) {
 		return
@@ -66,8 +66,6 @@ function handleUnauthorized() : void {
 		hadToken = true
 	}
 	clearAuthStorage()
-	// 同步清除父域 SSO Cookie（WEB 端），避免其他子域仍读取到已失效登录态
-	clearAuthCookie()
 	if (hadToken) {
 		uni.showToast({ title: '登录已过期，请重新登录', icon: 'none' })
 	}
@@ -142,6 +140,56 @@ function silentRefresh() : Promise<string> {
 		refreshPromise = null
 	})
 	return refreshPromise as Promise<string>
+}
+
+/**
+ * 401 兜底恢复（SSO 单点登录闭环）：本地 rt 链静默刷新失败后，再经父域 Cookie
+ * 的平台令牌交换恢复一次（跨子域「一处登录，处处通行」的关键链路——项目本地
+ * 令牌失效不等于登录态失效，Cookie 中的平台令牌可能仍有效）
+ * - 恢复成功：令牌已写本地（recoverAuthFromCookie 内部完成），重试原请求一次
+ *   （skipAuthRefresh 防递归；重试仍 401 则不再恢复，直接终态）
+ * - 恢复失败：Cookie 缺失或平台登录态已失效（恢复链已同步清 Cookie）；
+ *   非静默请求清态跳登录，静默请求仅拒绝由调用方容错
+ */
+function recoverAndRetry(options: RequestOptions, resolve: (res: ApiResponse) => void, reject: (err: Error) => void) : void {
+	const retry = () : void => {
+		const retryOptions: RequestOptions = {
+			url: options.url,
+			method: options.method,
+			data: options.data,
+			auth: options.auth,
+			timeout: options.timeout,
+			baseUrl: options.baseUrl,
+			silent: options.silent,
+			skipAuthRefresh: true
+		}
+		request(retryOptions).then((retryRes: ApiResponse) => {
+			resolve(retryRes)
+		}, (retryErr: Error) => {
+			reject(retryErr)
+		})
+	}
+	const recover = () : void => {
+		recoverAuthFromCookie().then((restored: RestoredAuthState | null) => {
+			if (restored != null && restored.access_token.length > 0) {
+				retry()
+				return
+			}
+			if (options.silent != true) {
+				handleUnauthorized()
+			}
+			reject(new Error('登录已过期，请重新登录'))
+		})
+	}
+	if (getRefreshToken() != '') {
+		silentRefresh().then((_token: string) => {
+			retry()
+		}, (_e) => {
+			recover()
+		})
+	} else {
+		recover()
+	}
 }
 
 /** 读取本地 access_token */
@@ -231,37 +279,16 @@ export function request(options: RequestOptions) : Promise<ApiResponse> {
 			success: (res) => {
 				// 401 未授权：token 失效或缺失
 				if (res.statusCode === 401) {
-					// 静默刷新重试：非刷新请求且本地存在 refreshToken 时先续期，成功后重试一次
-					if (options.skipAuthRefresh != true && getRefreshToken() != '') {
-						silentRefresh().then((_token: string) => {
-							const retryOptions: RequestOptions = {
-								url: options.url,
-								method: options.method,
-								data: options.data,
-								auth: options.auth,
-								timeout: options.timeout,
-								baseUrl: options.baseUrl,
-								silent: options.silent,
-								skipAuthRefresh: true
-							}
-							request(retryOptions).then((retryRes: ApiResponse) => {
-								resolve(retryRes)
-							}, (retryErr: Error) => {
-								reject(retryErr)
-							})
-						}, (_e: Error) => {
-							// 刷新失败（refresh_token 已失效/被撤销）：非静默请求清态跳登录
-							if (options.silent != true) {
-								handleUnauthorized()
-							}
-							reject(new Error('登录已过期，请重新登录'))
-						})
+					// 已是重试请求仍 401：本地与 Cookie 恢复链均已失效，直接终态
+					if (options.skipAuthRefresh == true) {
+						if (options.silent != true) {
+							handleUnauthorized()
+						}
+						reject(new Error('登录已过期，请重新登录'))
 						return
 					}
-					if (options.silent != true) {
-						handleUnauthorized()
-					}
-					reject(new Error('登录已过期，请重新登录'))
+					// 先本地 rt 静默刷新，失败再经父域 Cookie 平台令牌兜底恢复（SSO）
+					recoverAndRetry(options, resolve, reject)
 					return
 				}
 				// 429 限流：仅提示，不跳转登录页

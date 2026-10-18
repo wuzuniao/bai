@@ -9,7 +9,7 @@
  */
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { syncAuthCookie, clearAuthCookie, restoreAuthFromCookie, SyncAuthCookieOptions, RestoredAuthState } from '../utils/authCookie'
+import { syncAuthCookie, clearAuthCookie, restoreAuthFromCookie, onAuthRestored, SyncAuthCookieOptions, RestoredAuthState } from '../utils/authCookie'
 
 /** 用户信息结构 */
 export type UserInfo = {
@@ -38,6 +38,20 @@ export const useUserStore = defineStore('user', () => {
 	const refreshToken = ref('')
 
 	/** 从本地存储恢复用户信息与双 token（页面刷新/重启后恢复状态） */
+	// 注册恢复监听：启动恢复与请求 401 后的 Cookie 兜底恢复成功时同步本 store 响应式状态
+	onAuthRestored((restored: RestoredAuthState) => {
+		if (restored.userInfoJson.length > 0) {
+			const parsed = JSON.parse<UserInfo>(restored.userInfoJson)
+			if (parsed != null && parsed.id > 0) {
+				userInfo.value = parsed
+			}
+		}
+		accessToken.value = restored.access_token
+		if (restored.refresh_token.length > 0) {
+			refreshToken.value = restored.refresh_token
+		}
+	})
+
 	const loadUserFromStorage = () : void => {
 		try {
 			// WEB 端：本地已有项目令牌则维持（N34 本地有效不交换）；本地无令牌时经父域

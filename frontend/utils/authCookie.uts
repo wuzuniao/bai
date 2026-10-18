@@ -75,6 +75,14 @@ export type RestoredAuthState = {
 	userInfoJson: string
 }
 
+// 共享恢复链 Promise（启动恢复与 401 兜底恢复共用，防并发重复交换/触发平台 rt 轮换重放）
+let restoreChain: Promise<RestoredAuthState | null> | null = null
+// 恢复完成监听（单槽）：store 初始化时经 onAuthRestored 注册，恢复成功后同步响应式状态
+let restoredListener: ((res: RestoredAuthState) => void) | null = null
+// 恢复链期间是否收到过 auth 服务 HTTP 响应（区分「平台登录态被服务端拒绝」与「网络不可达」，
+// 仅前者才清 Cookie，避免离线/瞬时网络故障误毁仍有效的跨站登录态）
+let authServerSeen = false
+
 // #ifdef WEB
 
 /** 当前是否生产跨子域场景（wuzuniao.com 的子域）——决定是否设置 Domain 属性 */
@@ -171,6 +179,7 @@ async function exchangeToken(bearerToken: string, targetClientId: string): Promi
 			data: body,
 			timeout: 10000,
 			success: (res) => {
+				authServerSeen = true
 				const data = res.data
 				const at = data == null ? null : data.getString('access_token')
 				if (res.statusCode >= 200 && res.statusCode < 300 && at != null && at.length > 0) {
@@ -215,6 +224,7 @@ async function refreshPlatformToken(platformRefreshToken: string): Promise<Excha
 			data: body,
 			timeout: 10000,
 			success: (res) => {
+				authServerSeen = true
 				const data = res.data
 				const at = data == null ? null : data.getString('access_token')
 				if (res.statusCode >= 200 && res.statusCode < 300 && at != null && at.length > 0) {
@@ -279,12 +289,141 @@ export function syncAuthCookie(opts: SyncAuthCookieOptions): void {
 }
 
 /**
+ * 注册恢复完成监听（单槽，store 初始化时调用）：启动恢复与 401 兜底恢复
+ * 成功后回调，同步 store 响应式状态（重复注册覆盖前次）
+ */
+export function onAuthRestored(cb: (res: RestoredAuthState) => void): void {
+	restoredListener = cb
+}
+
+/** 平台令牌组回写父域 Cookie（恢复链中平台 rt 轮换后调用，防旧 rt 留存触发重放检测） */
+function writePlatformCookie(platformSet: ExchangedTokenSet, prevUserInfo: UTSJSONObject | null): void {
+	// #ifdef WEB
+	try {
+		const prev = readAuthCookie()
+		let ui: UTSJSONObject | null = prevUserInfo
+		if (ui == null && prev != null) {
+			ui = prev.userInfo
+		}
+		const ttlSeconds = platformSet.expires_in > 0 ? platformSet.expires_in : DEFAULT_ACCESS_TTL_SECONDS
+		const payload = {} as UTSJSONObject
+		payload['at'] = platformSet.access_token
+		payload['rt'] = platformSet.refresh_token
+		payload['exp'] = Date.now() + ttlSeconds * 1000
+		if (ui != null) {
+			payload['ui'] = ui
+		}
+		writeCookie(encodeURIComponent(JSON.stringify(payload)), SSO_COOKIE_MAX_AGE)
+	} catch (e) {
+		// Cookie 写入失败不影响主流程
+	}
+	// #endif
+}
+
+/**
+ * 共享恢复链核心：读 Cookie 平台令牌 → 交换项目令牌（平台 access 失效时经平台
+ * rt 刷新后重试，P39）→ 项目令牌与资料写本地 → 通知监听方
+ * - 平台 rt 轮换后回写 Cookie（否则 Cookie 留存已撤销旧 rt，下次使用触发
+ *   服务端重放检测撤销该用户全部平台令牌，全端强制重新登录）
+ * - 仅服务端明确拒绝（有 HTTP 响应）才清 Cookie；网络不可达时保留待下次重试
+ * @returns 项目令牌与资料；失败返回 null
+ */
+function startRestoreChain(): Promise<RestoredAuthState | null> {
+	if (restoreChain != null) {
+		return restoreChain as Promise<RestoredAuthState | null>
+	}
+	authServerSeen = false
+	const chain = (async (): Promise<RestoredAuthState | null> => {
+		try {
+			const saved = readAuthCookie()
+			if (saved == null || saved.access_token.length == 0) {
+				return null
+			}
+			let platformSet: ExchangedTokenSet = {
+				access_token: saved.access_token,
+				refresh_token: saved.refresh_token,
+				expires_in: 0
+			}
+			let project = await exchangeToken(platformSet.access_token, AUTH_CLIENT_ID)
+			if (project == null && saved.refresh_token.length > 0) {
+				// 平台 access 失效：平台 rt 独立刷新链（P39）
+				const refreshed = await refreshPlatformToken(saved.refresh_token)
+				if (refreshed != null) {
+					platformSet = refreshed
+					project = await exchangeToken(refreshed.access_token, AUTH_CLIENT_ID)
+				}
+			}
+			if (project == null) {
+				if (authServerSeen) {
+					// 平台登录态已被服务端拒绝：清 Cookie（与各站「Cookie 缺失即退出」语义一致）
+					clearAuthCookie()
+				}
+				return null
+			}
+			if (platformSet.refresh_token.length > 0 && platformSet.refresh_token != saved.refresh_token) {
+				writePlatformCookie(platformSet, saved.userInfo)
+			}
+			// 拉取本项目身份资料（资料缺失时仅恢复令牌）
+			let userInfoJson = ''
+			const info = await fetchProjectUserInfo(project.access_token)
+			if (info != null && info.getNumber('id') != null) {
+				userInfoJson = JSON.stringify(info)
+				uni.setStorageSync('userInfo', userInfoJson)
+			}
+			try {
+				uni.setStorageSync('accessToken', project.access_token)
+				if (project.refresh_token.length > 0) {
+					uni.setStorageSync('refreshToken', project.refresh_token)
+				}
+			} catch (e) {
+				// 本地存储不可用：放弃本次恢复
+				return null
+			}
+			const restored: RestoredAuthState = {
+				access_token: project.access_token,
+				refresh_token: project.refresh_token,
+				userInfoJson: userInfoJson
+			}
+			const listener = restoredListener
+			if (listener != null) {
+				try {
+					listener(restored)
+				} catch (e) {
+					// 监听方异常不影响恢复结果
+				}
+			}
+			return restored
+		} catch (e) {
+			return null
+		}
+	})()
+	restoreChain = chain
+	// 结束后重置共享标记（不使用 finally，兼容旧引擎）
+	chain.then((_res: RestoredAuthState | null) => {
+		restoreChain = null
+	}, (_e) => {
+		restoreChain = null
+	})
+	return chain as Promise<RestoredAuthState | null>
+}
+
+/**
+ * 401 终态兜底：项目本地令牌链路（access + rt 刷新）已失效时，经父域 Cookie 的
+ * 平台令牌重新交换项目令牌（SSO 单点恢复；与启动恢复共享同一链，去重并发）
+ * @returns 成功返回项目令牌与资料（已写本地并通知监听方），失败返回 null
+ */
+export async function recoverAuthFromCookie(): Promise<RestoredAuthState | null> {
+	return startRestoreChain()
+}
+
+/**
  * 启动时从父域 Cookie 恢复登录态（N34/P39 恢复语义）
  * 1. 本地已有项目 access_token：本地有效不交换（N34，各项目本地身份独立维持），直接返回
- * 2. 本地无令牌 + Cookie 有平台令牌：交换 → 项目令牌写本地（资料经 /users/info 另拉），
- *    成功后经 onRestored 回调通知调用方写响应式状态
+ *    （本地令牌失效场景由请求 401 链经 recoverAuthFromCookie 兜底恢复）
+ * 2. 本地无令牌 + Cookie 有平台令牌：经共享恢复链交换 → 项目令牌 + 资料写本地，
+ *    成功后经 onRestored 回调与 onAuthRestored 监听通知 store 写响应式状态
  * 3. 平台 access 失效：用 Cookie 内平台 refresh_token 刷新后重试交换（P39）；
- *    平台刷新也失败（Cookie 登录态已失效）→ 清 Cookie 保持跨站一致
+ *    服务端明确拒绝平台登录态 → 清 Cookie 保持跨站一致（网络不可达时保留）
  * 4. Cookie 缺失：无事可做（本地身份独立维持；登出经 auth 全端撤销后由 401 链收敛）
  * @param onRestored 恢复成功回调（可空）
  * @returns 是否立即判断为无需恢复（异步恢复不改变返回值语义）
@@ -295,55 +434,21 @@ export function restoreAuthFromCookie(onRestored: ((res: RestoredAuthState) => v
 	// #endif
 	// #ifdef WEB
 	try {
-		const saved = readAuthCookie()
 		const localTokenRaw = uni.getStorageSync('accessToken')
 		const localToken = localTokenRaw == null ? '' : localTokenRaw as string
 		// N34：本地已有项目令牌（无论与 Cookie 是否一致），本地身份独立维持不交换
 		if (localToken.length > 0) {
 			return false
 		}
+		const saved = readAuthCookie()
 		if (saved == null || saved.access_token.length == 0) {
 			return false
 		}
-		// 异步恢复：平台令牌 → 交换 → 项目令牌 + 资料 → 写本地 → 回调
-		(async () => {
-			let platformAt = saved.access_token
-			let platformRt = saved.refresh_token
-			let project = await exchangeToken(platformAt, AUTH_CLIENT_ID)
-			if (project == null && platformRt.length > 0) {
-				// 平台 access 失效：平台 rt 独立刷新链（P39）
-				const refreshed = await refreshPlatformToken(platformRt)
-				if (refreshed != null) {
-					platformAt = refreshed.access_token
-					platformRt = refreshed.refresh_token
-					project = await exchangeToken(platformAt, AUTH_CLIENT_ID)
-				}
-			}
-			if (project == null) {
-				// 平台登录态已失效：清 Cookie（与各站「Cookie 缺失即退出」语义一致）
-				clearAuthCookie()
-				return
-			}
-			uni.setStorageSync('accessToken', project.access_token)
-			if (project.refresh_token.length > 0) {
-				uni.setStorageSync('refreshToken', project.refresh_token)
-			}
-			// 拉取本项目身份资料（资料缺失时仅恢复令牌）
-			let userInfoJson = ''
-			const info = await fetchProjectUserInfo(project.access_token)
-			if (info != null && info.getNumber('id') != null) {
-				userInfoJson = JSON.stringify(info)
-				uni.setStorageSync('userInfo', userInfoJson)
-			}
-			if (onRestored != null) {
-				const restored: RestoredAuthState = {
-					access_token: project.access_token,
-					refresh_token: project.refresh_token,
-					userInfoJson: userInfoJson
-				}
+		startRestoreChain().then((restored: RestoredAuthState | null) => {
+			if (restored != null && onRestored != null) {
 				onRestored(restored)
 			}
-		})()
+		})
 		return false
 	} catch (e) {
 		return false
