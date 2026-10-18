@@ -429,22 +429,29 @@
 
 	/** 手柄拖动（跨段）：触点映射到段落与字符并更新被拖端点；越过另一端时端点互换（原生选择交互）；拖动中手柄视觉跟随手指，松手后由锚点实测吸附真实边界 */
 	function applyHandleDrag(e : UniTouchEvent, isEnd : boolean) : void {
+		if (e.touches.length == 0) {
+			return
+		}
+		applyHandleDragAt(e.touches[0].clientX, e.touches[0].clientY, isEnd)
+	}
+
+	/** 手柄拖动核心（触摸与 Web 鼠标桥接共用；x/y 为触点视口坐标） */
+	function applyHandleDragAt(x : number, y : number, isEnd : boolean) : void {
 		const span = selSpan.value
-		if (e.touches.length == 0 || span == null || dragRects.length == 0) {
+		if (span == null || dragRects.length == 0) {
 			return
 		}
 		const m = props.metrics
-		const touch = e.touches[0]
 		// 触点命中段落（纵向区间，未命中钳制首末段）
 		let idx = -1
 		for (let i = 0; i < dragRects.length; i++) {
-			if (touch.clientY >= dragRects[i].top && touch.clientY <= dragRects[i].bottom) {
+			if (y >= dragRects[i].top && y <= dragRects[i].bottom) {
 				idx = i
 				break
 			}
 		}
 		if (idx < 0) {
-			idx = touch.clientY < dragRects[0].top ? 0 : dragRects.length - 1
+			idx = y < dragRects[0].top ? 0 : dragRects.length - 1
 		}
 		const pr = dragRects[idx]
 		// 拖动到的段落长度：以段序列口径不可用（跨章/跨段展开顺序≠rect 顺序），由宿主随矩形回传段长
@@ -460,12 +467,12 @@
 		} else {
 			maxRow = Math.max(0, Math.ceil(len / m.perLine) - 1)
 		}
-		let row = Math.floor((touch.clientY - pr.top) / m.lineH)
+		let row = Math.floor((y - pr.top) / m.lineH)
 		row = Math.max(0, Math.min(row, maxRow))
 		// 首行触点先扣除缩进宽（两个全角空格），字距：首行与末行未拉伸用自然字距，中间满行用拉伸字距
 		const indent = (pr.from == 0 && row == 0) ? m.indentPx : 0
 		const spacing = row == 0 ? m.charW : (row < maxRow ? m.fullCharW : m.charW)
-		let col = Math.floor((touch.clientX - pr.left - indent) / spacing)
+		let col = Math.floor((x - pr.left - indent) / spacing)
 		col = Math.max(0, Math.min(col, m.perLine - 1))
 		// 切片内字符索引（首行容量 perLine-2）加切片偏移 = 整段坐标（流式分页段落跨页时 pr.from 非 0）
 		const sliceIdx = row == 0 ? col : (m.perLine - 2) + (row - 1) * m.perLine + col
@@ -501,13 +508,13 @@
 		}
 		const hotH = uni.upx2px(HANDLE_HOT_RPX)
 		// 箭头焦点跟随触点（跨段拖动时气泡随手指移动，避免停留在旧位置无法点击）
-		selFocusX.value = touch.clientX
+		selFocusX.value = x
 		if (isEnd) {
-			handleEndLeft.value = touch.clientX - hotH / 2
-			handleEndTop.value = touch.clientY - hotH / 2
+			handleEndLeft.value = x - hotH / 2
+			handleEndTop.value = y - hotH / 2
 		} else {
-			handleStartLeft.value = touch.clientX - hotH / 2
-			handleStartTop.value = touch.clientY - hotH / 2
+			handleStartLeft.value = x - hotH / 2
+			handleStartTop.value = y - hotH / 2
 		}
 		// 选区端点变化上行（宿主渲染高亮与派生上下文）
 		emit('spanChanged', span)
@@ -546,6 +553,62 @@
 		dragEndActive.value = false
 		emit('queryAnchors')
 	}
+
+	// #ifdef WEB
+	/** 桌面端无 touch 事件：鼠标桥接手柄拖动（mousedown 命中手柄 → move 跟手映射选区 → up 落定实测），
+	 *  与触摸共用 applyHandleDragAt / onStart·EndHandleTouchStart·End；组件常挂载，监听挂 document/window 一次 */
+	let webHandleDragging = -1
+
+	function onWebHandleMouseDown(e : MouseEvent) : void {
+		if (e.button != 0) {
+			return
+		}
+		const target = e.target as Element
+		if (target.closest == null) {
+			return
+		}
+		if (target.closest('#sel-handle-end') != null) {
+			e.preventDefault()
+			webHandleDragging = 1
+			onEndHandleTouchStart()
+		} else if (target.closest('#sel-handle-start') != null) {
+			e.preventDefault()
+			webHandleDragging = 0
+			onStartHandleTouchStart()
+		}
+	}
+
+	function onWebHandleMouseMove(e : MouseEvent) : void {
+		if (webHandleDragging < 0) {
+			return
+		}
+		applyHandleDragAt(e.clientX, e.clientY, webHandleDragging == 1)
+	}
+
+	function onWebHandleMouseUp(_e : MouseEvent) : void {
+		if (webHandleDragging < 0) {
+			return
+		}
+		webHandleDragging = -1
+		if (dragStartActive.value) {
+			onStartHandleTouchEnd()
+		} else if (dragEndActive.value) {
+			onEndHandleTouchEnd()
+		}
+	}
+
+	onMounted(() => {
+		document.addEventListener('mousedown', onWebHandleMouseDown)
+		window.addEventListener('mousemove', onWebHandleMouseMove)
+		window.addEventListener('mouseup', onWebHandleMouseUp)
+	})
+
+	onUnmounted(() => {
+		document.removeEventListener('mousedown', onWebHandleMouseDown)
+		window.removeEventListener('mousemove', onWebHandleMouseMove)
+		window.removeEventListener('mouseup', onWebHandleMouseUp)
+	})
+	// #endif
 
 	/** 建立选区（宿主长按正文完成 rect 查询/字符换算/想法恢复/句界计算后调用）：状态建立、手柄估算、请求锚点实测；
 	 *  sliceFrom 为长按切片在整段中的起始偏移（流式分页段落跨页时非 0），手柄估算的行列换算需按切片口径 */

@@ -32,6 +32,15 @@
 	"uniStatistics": {
 		"enable": false
 	},
+	/* Web 端（H5）子目录部署：站点发布于域名 /h5/ 路径下（如 bai.wuzuniao.com/h5/），
+	 * 域名根路径保留给 Web 端。nginx 侧以 rewrite 去前缀复用原有静态规则（见 scripts/deploy.sh）。
+	 * 注意：仅影响 Web 构建，小程序/App 端不读取本节点。 */
+	"web": {
+		"router": {
+			"mode": "history",
+			"base": "/h5/"
+		}
+	},
 	"vueVersion": "3",
 	"app": {
 		"distribute": {

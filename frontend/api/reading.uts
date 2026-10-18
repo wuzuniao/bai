@@ -163,6 +163,10 @@ export function syncQuiet(p: Promise<ApiResponse>) : void {
 	p.then((_res: ApiResponse) => {
 		// 成功静默
 	}, (e: Error | null) => {
+		// 未登录属常态（本地缓存为准），不告警
+		if (e != null && e.message == '未登录') {
+			return
+		}
 		console.warn('云端同步失败', e)
 	})
 }

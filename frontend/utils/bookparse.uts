@@ -13,6 +13,9 @@ import { openPdfSession } from './pdfrender'
 // #ifdef APP-ANDROID
 import Charset from 'java.nio.charset.Charset'
 // #endif
+// #ifdef WEB
+import { webFsCopy, webFsDelete, webReadTextFile } from './webfs'
+// #endif
 
 /** 解析后的章（目录标题 + 正文页眉/大标题拆分 + 该章段落） */
 export type ParsedChapter = {
@@ -326,7 +329,10 @@ export function readTextFile(path : string) : Promise<string> {
 		reject(new Error('该文件编码暂不支持'))
 	})
 	// #endif
-	// #ifndef MP-WEIXIN || APP
+	// #ifdef WEB
+	return webReadTextFile(path)
+	// #endif
+	// #ifndef MP-WEIXIN || APP || WEB
 	return new Promise<string>((_resolve, reject) => {
 		reject(new Error('该文件编码暂不支持'))
 	})
@@ -436,6 +442,13 @@ function collectParagraphs(lines : string[], from : number, to : number) : strin
 
 /** 确保沙盒书籍目录存在（mkdir 的「已存在」错误码各端不一致不可靠，失败后以 access 复验目录实际可达为准） */
 function ensureBooksDir(dir : string) : Promise<void> {
+	// #ifdef WEB
+	// IndexedDB 键命名空间无需建目录
+	return new Promise<void>((resolve) => {
+		resolve()
+	})
+	// #endif
+	// #ifndef WEB
 	return new Promise<void>((resolve, reject) => {
 		uni.getFileSystemManager().mkdir({
 			dirPath: dir,
@@ -451,10 +464,17 @@ function ensureBooksDir(dir : string) : Promise<void> {
 			}
 		})
 	})
+	// #endif
 }
 
-/** 复制选中的文件到沙盒（临时路径会被系统回收，必须先落盘；目标已存在时先删除，支持同名书覆盖导入） */
-function copyToSandbox(srcPath : string, destPath : string) : Promise<void> {
+/** 复制选中的文件到沙盒（临时路径会被系统回收，必须先落盘；目标已存在时覆盖，支持同名书覆盖导入） */
+async function copyToSandbox(srcPath : string, destPath : string) : Promise<void> {
+	// #ifdef WEB
+	// webpick:// 暂存引用 → IndexedDB 入库；键到键复制由 webFsCopy 统一处理
+	await webFsCopy(srcPath, destPath)
+	return
+	// #endif
+	// #ifndef WEB
 	return new Promise<void>((resolve, reject) => {
 		try {
 			// 同名书重导入时目标正文已存在，部分端 copyFile 对已存在目标直接失败，先删后拷
@@ -469,6 +489,7 @@ function copyToSandbox(srcPath : string, destPath : string) : Promise<void> {
 			fail: (_err) => { reject(new Error('文件保存失败')) }
 		})
 	})
+	// #endif
 }
 
 /** 从文件名提取书名（去扩展名，去首尾空白） */
@@ -479,13 +500,19 @@ function titleFromFileName(fileName : string) : string {
 	return title.length > 0 ? title : '未命名书籍'
 }
 
-/** 清理导入中途落盘的文件（失败路径回收） */
+/** 清理导入中途落盘的文件（失败路径回收；Web 端为 IndexedDB 键删除，容错忽略） */
 function discardFile(path : string) : void {
+	// #ifdef WEB
+	webFsDelete(path)
+	return
+	// #endif
+	// #ifndef WEB
 	try {
 		uni.getFileSystemManager().unlinkSync(path)
 	} catch (e) {
 		// 忽略
 	}
+	// #endif
 }
 
 /** 导入一本书：复制落盘解析 → 登录态云端登记（后端分配 id，同名书复用）/ 未登录本地负数 id 落地（登录后同步云端）→ 以 id 命名入库 */
@@ -500,7 +527,13 @@ export async function importBook(fileName : string, tempPath : string, size : nu
 		// 与后端登记校验对齐：离线导入无服务端校验，超限会导致登录后同步永久失败
 		throw new Error('书名过长（超 200 字），请重命名文件后重试')
 	}
+	// #ifdef WEB
+	// Web 端无文件系统沙盒：dir 为 IndexedDB 键命名空间（虚拟路径，末段文件名语义与沙盒一致）
+	const dir = 'webbooks'
+	// #endif
+	// #ifndef WEB
 	const dir = uni.env.USER_DATA_PATH + '/books'
+	// #endif
 	await ensureBooksDir(dir)
 	// 先以临时名落盘（正文解析需真实文件），id 分配后再改名；随机后缀防批量导入同毫秒自撞
 	const workPath = dir + '/_import_' + Date.now().toString() + '_' + Math.floor(Math.random() * 100000).toString() + '.' + ext

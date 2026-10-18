@@ -522,21 +522,45 @@ server {
         proxy_redirect off;
     }
 
-    # 带内容 hash 的构建产物（Vite 产物文件名即指纹）：可永久缓存，
-    # 内容更新时文件名变化，旧缓存自然失效
-    location ^~ /assets/ {
+    # ===== H5 子目录部署（/h5/ 前缀，根路径保留给 Web 端）=====
+    # 前端以 web.router.base=/h5/ 构建（frontend/manifest.json），产物仍挂载 /var/www/bai，
+    # 以下 location 以 alias 去前缀映射到挂载点，产物零拷贝。
+    # 注意：H5 页面内存在 /static 绝对路径引用（reader 图标等为运行时拼接，构建无法重写），
+    # 故下方根路径 /static/ 规则保留兜底——Web 端上线时不得占用 /static 路径。
+
+    # 带 hash 的构建产物（Vite 产物文件名即指纹）：永久缓存，内容更新时旧缓存自然失效
+    location ^~ /h5/assets/ {
+        alias /var/www/bai/assets/;
         add_header Cache-Control "public, max-age=31536000, immutable" always;
         # 单连接限速：防爬虫（bingbot 等）并发抓取挤占带宽与 nginx worker，拖慢真实用户请求
         limit_rate 512k;
         try_files $uri =404;
     }
 
-    # uni-app static 目录（主题图标等，文件名固定无 hash）：浏览器缓存 7 天，
-    # 重复访问不再请求服务器；同名图片更新最多延迟 7 天可见（图标低频变更可接受），
-    # 过期后经 ETag/Last-Modified 协商返回 304
+    # 入口页协商缓存（防发版后继续引用已清空的旧 bundle）；/h5/ 直接命中 index.html 时
+    # 经 index 指令内部跳转到本块生效
+    location = /h5/index.html {
+        alias /var/www/bai/index.html;
+        add_header Cache-Control "no-cache" always;
+    }
+
+    # 其余 /h5/ 路径（含 history 路由 /h5/pages/...）：静态命中，未命中回退入口页
+    location ^~ /h5/ {
+        alias /var/www/bai/;
+        try_files $uri $uri/ /h5/index.html;
+    }
+
+    # 无尾斜杠补全，避免落入根路径 404 → 302 链
+    location = /h5 {
+        return 301 /h5/;
+    }
+
+    # uni-app static 目录兜底（页面内 /static 绝对引用打到域名根）：缓存 7 天，
+    # 同名图片更新最多延迟 7 天可见（图标低频变更可接受），过期后经 ETag/Last-Modified
+    # 协商返回 304
     location ^~ /static/ {
         add_header Cache-Control "public, max-age=604800" always;
-        # 单连接限速：同 /assets/，降低爬虫与恶意流量对出口带宽的挤占
+        # 单连接限速：降低爬虫与恶意流量对出口带宽的挤占
         limit_rate 256k;
         try_files $uri =404;
     }
@@ -548,9 +572,9 @@ server {
         add_header Cache-Control "no-cache" always;
     }
 
-    # /pages/ 下为 uni-app H5 合法页面路由（history 模式），回退 index.html 交由前端路由处理
-    location ^~ /pages/ {
-        try_files $uri $uri/ /index.html;
+    # 过渡期：域名根路径 302 至 /h5/（Web 端上线后以 Web 端站点配置替换本块）
+    location = / {
+        return 302 /h5/;
     }
 
     # 其余路径：静态资源优先命中，不存在的路径 302 跳转首页
@@ -960,8 +984,8 @@ verify_deployment() {
   else
     log_warn "未在 nginx 容器中找到 H5 首页，请检查前端构建与卷挂载"
   fi
-  if curl -sk -o /dev/null -w '%{http_code}' -H "Host: $DOMAIN" "https://127.0.0.1/" 2>/dev/null | grep -q 200; then
-    log_ok "H5 首页可访问（HTTPS 200）"
+  if curl -sk -o /dev/null -w '%{http_code}' -H "Host: $DOMAIN" "https://127.0.0.1/h5/" 2>/dev/null | grep -q 200; then
+    log_ok "H5 首页可访问（HTTPS 200，/h5/）"
   else
     log_warn "H5 首页访问异常，请查看 docker logs nginx"
   fi
@@ -993,11 +1017,11 @@ print_summary() {
   容器服务：
     MariaDB  →  mariadb  (共享，内部 3306，仅本机可访问)
     Backend  →  bai-backend  (本项目专属，内部 11001，经 app-net 网络互通)
-    H5 前端  →  共享 Nginx 静态托管（构建产物 frontend/dist/build/h5 → /var/www/bai）
+    H5 前端  →  共享 Nginx 静态托管（构建产物 frontend/dist/build/h5 → /var/www/bai，经 /h5/ 前缀访问，根路径保留给 Web 端）
     Nginx    →  nginx  (共享，对外 80/443，反代 /api/、/health 至后端)
 
   访问地址：
-    H5 前端：        https://$DOMAIN/
+    H5 前端：        https://$DOMAIN/h5/
     健康检查：        https://$DOMAIN/health
     API 入口：        https://$DOMAIN/api/v1
 

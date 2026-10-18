@@ -449,8 +449,29 @@
 		}
 	}
 
-	/** 导出画布为临时图并保存到相册（单次） */
-	function exportShareCanvas(canvas : CanvasNode) : void {
+	/** 导出画布为临时图并保存到相册（单次；Web 端为 toDataURL 触发浏览器下载） */
+	function exportShareCanvas(canvas : any) : void {
+		// #ifdef WEB
+		// Web 端无相册能力：画布导出 PNG 数据，经临时 <a download> 触发浏览器下载；文件名=应用名_日期_时间到秒
+		try {
+			const url = (canvas as any).toDataURL('image/png')
+			const now = new Date()
+			const pad2 = (n : number) : string => (n < 10 ? '0' + n.toString() : n.toString())
+			const dateStr = now.getFullYear().toString() + pad2(now.getMonth() + 1) + pad2(now.getDate()) +
+				'_' + pad2(now.getHours()) + pad2(now.getMinutes()) + pad2(now.getSeconds())
+			const a = document.createElement('a') as HTMLAnchorElement
+			a.href = url
+			a.download = '无足鸟古诗词学习助手_' + dateStr + '.png'
+			document.body.appendChild(a)
+			a.click()
+			a.remove()
+			emit('toast', '已保存到下载')
+		} catch (e) {
+			emit('toast', '保存失败，请重试')
+		}
+		return
+		// #endif
+		// #ifndef WEB
 		uni.canvasToTempFilePath({
 			canvas: canvas,
 			success: (res2) => {
@@ -468,10 +489,25 @@
 				emit('toast', '保存失败，请重试')
 			}
 		})
+		// #endif
 	}
 
 	/** 绘制分享卡片到隐藏 canvas 并保存为长图（排版与预览 CSS 换算一致；头像半出卡片顶部白环包裹；想法全量渲染不截断） */
 	function saveShareImage() : void {
+		// #ifdef WEB
+		// Web 端跳过选择器查询（fields node 语义不可靠）：直接取 uni-canvas 内的原生画布绘制
+		let canvas : any = document.querySelector('#share-canvas canvas')
+		if (canvas == null) {
+			canvas = document.querySelector('#share-canvas')
+		}
+		if (canvas == null) {
+			emit('toast', '保存失败，请重试')
+			return
+		}
+		drawAndExport(canvas)
+		return
+		// #endif
+		// #ifndef WEB
 		const proxy = self == null ? null : self.proxy
 		if (proxy == null) {
 			emit('toast', '保存失败，请重试')
@@ -482,59 +518,70 @@
 				emit('toast', '保存失败，请重试')
 				return
 			}
-			const canvas = res.node as CanvasNode
-			const dpr = uni.getWindowInfo().pixelRatio
-			const ctx = canvas.getContext('2d')
-			if (ctx == null) {
-				emit('toast', '保存失败，请重试')
+			drawAndExport(res.node)
+		}).exec()
+	}
+
+	/** 绘制并导出（canvas 为画布节点：小程序/App 为 node 模式画布，Web 为原生 HTMLCanvasElement） */
+	function drawAndExport(canvas : any) : void {
+		const dpr = uni.getWindowInfo().pixelRatio
+		const ctx = canvas.getContext('2d')
+		if (ctx == null) {
+			emit('toast', '保存失败，请重试')
+			return
+		}
+		// 排版：引文分段折行（\n 拆段、段首缩进、段间距与预览一致）+ 想法折行 + 各块位置（测量在画布尺寸设定前完成，赋值后重新 scale）
+		const quoteParas = layoutShareParas(ctx, buildShareQuoteRuns(), SHARE_TEXT_W, quoteStartsAtParaStart())
+		const thL = shareData.value.thoughtText.length > 0 ? wrapCanvasLines(ctx, shareData.value.thoughtText, SHARE_TEXT_W, '12.5px sans-serif') : ([] as string[])
+		const L = layoutShareCard(quoteParas, thL)
+		canvas.width = SHARE_CARD_W * dpr
+		canvas.height = L.H * dpr
+		ctx.scale(dpr, dpr)
+		drawShareCardBase(ctx, L.cardH)
+		drawShareQuoteBlock(ctx, quoteParas, quoteStartsAtParaStart())
+		if (thL.length > 0) {
+			drawShareThoughtBlock(ctx, thL, L.thoughtTop)
+		}
+		drawShareSource(ctx, L.sourceTop)
+		// 头像（异步加载，完成后导出；加载失败/超时以浅色圆替代）
+		let headerDrawn = false
+		let exported = false
+		const drawLogo = (withLogo : boolean) : void => {
+			if (headerDrawn) {
 				return
 			}
-			// 排版：引文分段折行（\n 拆段、段首缩进、段间距与预览一致）+ 想法折行 + 各块位置（测量在画布尺寸设定前完成，赋值后重新 scale）
-			const quoteParas = layoutShareParas(ctx, buildShareQuoteRuns(), SHARE_TEXT_W, quoteStartsAtParaStart())
-			const thL = shareData.value.thoughtText.length > 0 ? wrapCanvasLines(ctx, shareData.value.thoughtText, SHARE_TEXT_W, '12.5px sans-serif') : ([] as string[])
-			const L = layoutShareCard(quoteParas, thL)
-			canvas.width = SHARE_CARD_W * dpr
-			canvas.height = L.H * dpr
-			ctx.scale(dpr, dpr)
-			drawShareCardBase(ctx, L.cardH)
-			drawShareQuoteBlock(ctx, quoteParas, quoteStartsAtParaStart())
-			if (thL.length > 0) {
-				drawShareThoughtBlock(ctx, thL, L.thoughtTop)
+			headerDrawn = true
+			drawShareLogo(ctx, logo, withLogo)
+		}
+		const exportCanvas = () : void => {
+			if (exported) {
+				return
 			}
-			drawShareSource(ctx, L.sourceTop)
-			// 头像（异步加载，完成后导出；加载失败/超时以浅色圆替代）
-			let headerDrawn = false
-			let exported = false
-			const drawLogo = (withLogo : boolean) : void => {
-				if (headerDrawn) {
-					return
-				}
-				headerDrawn = true
-				drawShareLogo(ctx, logo, withLogo)
-			}
-			const exportCanvas = () : void => {
-				if (exported) {
-					return
-				}
-				exported = true
-				exportShareCanvas(canvas)
-			}
-			const logo = canvas.createImage()
-			logo.src = props.logoSrc
-			logo.onload = () => {
-				drawLogo(true)
-				exportCanvas()
-			}
-			logo.onerror = () => {
-				drawLogo(false)
-				exportCanvas()
-			}
-			// 加载异常兜底：超时后按浅色圆导出
-			setTimeout(() => {
-				drawLogo(false)
-				exportCanvas()
-			}, 1500)
-		}).exec()
+			exported = true
+			exportShareCanvas(canvas)
+		}
+		// 头像图像对象：Web 为 DOM Image，小程序/App 为画布 node 的 createImage（同函数内条件赋值，避免解析期重名）
+		let logo : any = null
+		// #ifdef WEB
+		logo = new Image()
+		// #endif
+		// #ifndef WEB
+		logo = canvas.createImage()
+		// #endif
+		logo.src = props.logoSrc
+		logo.onload = () => {
+			drawLogo(true)
+			exportCanvas()
+		}
+		logo.onerror = () => {
+			drawLogo(false)
+			exportCanvas()
+		}
+		// 加载异常兜底：超时后按浅色圆导出
+		setTimeout(() => {
+			drawLogo(false)
+			exportCanvas()
+		}, 1500)
 	}
 
 	defineExpose({

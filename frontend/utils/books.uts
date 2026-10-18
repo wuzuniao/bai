@@ -1,5 +1,6 @@
 // 书籍数据层：云端元数据为准，本地存储仅做缓存（书架/阅读页共享收口）
-// 正文文件保存于应用沙盒 uni.env.USER_DATA_PATH/books/ 下不上传云端（path 为本机字段，path='' 表示本设备无正文）；
+// 正文保存于本机不上传云端（path 为本机字段，path='' 表示本设备无正文）：
+// 小程序/App 为沙盒文件 uni.env.USER_DATA_PATH/books/，Web 端为 IndexedDB 虚拟键 'webbooks/<id>.<ext>'（见 webfs.uts，键路径与沙盒同构）；
 // 云端按 (用户, 书名) 唯一：重导入同名书复用同一 id，换设备重新导入后进度与笔记按书名自动关联；
 // 进度/时长均为「本地即时写缓存 + 云端静默跟随」，页面进入时以云端数据覆盖本地缓存
 
@@ -17,6 +18,9 @@ import {
 } from '../api/reading.uts'
 import { hasAccessToken } from './request.uts'
 import { relocateBookNotes, repushBookNotes, thoughtFromCloud, Thought } from './readerTypes.uts'
+// #ifdef WEB
+import { webFsDelete, webFsRename } from './webfs'
+// #endif
 
 /** 书架书籍（书架页展示与排序的唯一数据源；云端字段 + 本机 path 合并结果） */
 export type LocalBook = {
@@ -403,6 +407,17 @@ export function updateBookReading(bookId : number, chapterId : number, percent :
 
 /** 删除书籍：本地正文与页图缓存清理；deleteCloud 且为云端书籍（id>0）时一并删云端（笔记/书签后端级联）；缓存列表由调用方过滤后 saveBooks */
 export function removeBookData(book : LocalBook, deleteCloud : boolean) : void {
+	// #ifdef WEB
+	if (book.path.length > 0) {
+		// IndexedDB 键删除（容错忽略），无 PDF 页图缓存目录
+		webFsDelete(book.path)
+	}
+	if (deleteCloud && book.id > 0) {
+		syncQuiet(deleteBook(book.id))
+	}
+	return
+	// #endif
+	// #ifndef WEB
 	if (book.path.length > 0) {
 		try {
 			uni.getFileSystemManager().unlinkSync(book.path)
@@ -418,6 +433,7 @@ export function removeBookData(book : LocalBook, deleteCloud : boolean) : void {
 	if (deleteCloud && book.id > 0) {
 		syncQuiet(deleteBook(book.id))
 	}
+	// #endif
 }
 
 /** 本机新增/覆盖一本书的缓存记录（按 id 去重，追加到末尾） */
@@ -522,13 +538,19 @@ export function applyPendingImport(title : string, format : string, size : numbe
 	saveBooks(list)
 }
 
-/** 沙盒文件删除（容错忽略） */
+/** 沙盒文件删除（容错忽略；Web 端为 IndexedDB 键删除） */
 function discardSandboxFile(path : string) : void {
+	// #ifdef WEB
+	webFsDelete(path)
+	return
+	// #endif
+	// #ifndef WEB
 	try {
 		uni.getFileSystemManager().unlinkSync(path)
 	} catch (e) {
 		// 忽略
 	}
+	// #endif
 }
 
 /**
@@ -540,6 +562,12 @@ async function renameSandboxFile(from : string, to : string) : Promise<void> {
 	if (from == to) {
 		return
 	}
+	// #ifdef WEB
+	// IndexedDB 键改名（幂等语义在 webFsRename 内对齐：源失+目标在=已完成直接成功）
+	await webFsRename(from, to)
+	return
+	// #endif
+	// #ifndef WEB
 	const fs = uni.getFileSystemManager()
 	try {
 		fs.accessSync(from)
@@ -569,6 +597,7 @@ async function renameSandboxFile(from : string, to : string) : Promise<void> {
 	} catch (e) {
 		throw new Error('正文文件迁移失败')
 	}
+	// #endif
 }
 
 /** 单本离线书籍迁移：登记响应落地为云端记录（id 迁移 + 离线数据回补）；失败抛出保留待同步态 */
@@ -606,11 +635,13 @@ async function migratePendingBook(book : LocalBook, data : UTSJSONObject) : Prom
 		newPath = dirPrefix + newId + '.' + ext
 		await renameSandboxFile(book.path, newPath)
 		discardSandboxFile(dirPrefix + newId + '.' + (ext == 'txt' ? 'pdf' : 'txt'))
+		// #ifndef WEB
 		try {
 			uni.getFileSystemManager().rmdirSync(uni.env.USER_DATA_PATH + '/pdf_cache/' + book.id, true)
 		} catch (e) {
 			// txt 书或目录不存在忽略
 		}
+		// #endif
 	}
 	// 本地记录替换为云端记录（本地进度较新时保留本地值）
 	const cloudBook = bookFromCloud(data)
@@ -1004,11 +1035,13 @@ export function cleanupLegacyBooks() : void {
 			for (let i = 0; i < arr.length; i++) {
 				const path = arr[i].getString('path')
 				if (path != null && path.length > 0) {
+					// #ifndef WEB
 					try {
 						uni.getFileSystemManager().unlinkSync(path)
 					} catch (e) {
 						// 文件可能已被系统清理，忽略
 					}
+					// #endif
 				}
 				const id = arr[i].getString('id')
 				if (id != null && id.length > 0) {

@@ -361,7 +361,12 @@
 		if (e.touches.length == 0) {
 			return
 		}
-		const clientX = e.touches[0].clientX
+		onLineLongPressAt(li, e.touches[0].clientX)
+	}
+
+	/** 长按核心（触摸与 Web 鼠标桥接共用；pressX 为按点视口横坐标，列命中换算用） */
+	function onLineLongPressAt(li : number, pressX : number) : void {
+		const clientX = pressX
 		uni.createSelectorQuery().selectAll('.poem-line').boundingClientRect((rects : NodeInfo[]) : void => {
 			if (rects == null || li >= rects.length) {
 				return
@@ -440,9 +445,81 @@
 		popoverRef.value?.hideSelection()
 	}
 
+	// #ifdef WEB
+	/** 桌面端无 touch 事件：鼠标桥接诗行长按（按下诗行 350ms 未移动即触发，对齐 uni-app longpress 时长） */
+	let webLinePressTimer = -1
+	let webLinePressX = 0
+	let webLinePressY = 0
+	/** 长按命中后抑制随后的合成 click（防止气泡出现即被行点击清除选区） */
+	let webLineTapSuppressed = false
+
+	function clearLinePressTimer() : void {
+		if (webLinePressTimer >= 0) {
+			clearTimeout(webLinePressTimer)
+			webLinePressTimer = -1
+		}
+	}
+
+	function onWebLineMouseDown(e : MouseEvent) : void {
+		if (e.button != 0) {
+			return
+		}
+		clearLinePressTimer()
+		const target = e.target as Element
+		if (target.closest == null) {
+			return
+		}
+		const row = target.closest('.poem-line')
+		if (row == null) {
+			return
+		}
+		e.preventDefault()
+		const li = parseInt(row.id.substring('poem-line-'.length))
+		if (isNaN(li)) {
+			return
+		}
+		webLinePressX = e.clientX
+		webLinePressY = e.clientY
+		webLinePressTimer = setTimeout(() : void => {
+			webLinePressTimer = -1
+			webLineTapSuppressed = true
+			onLineLongPressAt(li, webLinePressX)
+		}, 350)
+	}
+
+	function onWebLineMouseMove(e : MouseEvent) : void {
+		if (webLinePressTimer >= 0 && (Math.abs(e.clientX - webLinePressX) > 10 || Math.abs(e.clientY - webLinePressY) > 10)) {
+			clearLinePressTimer()
+		}
+	}
+
+	function onWebLineMouseUp(_e : MouseEvent) : void {
+		clearLinePressTimer()
+	}
+
+	onReady(() => {
+		document.addEventListener('mousedown', onWebLineMouseDown)
+		window.addEventListener('mousemove', onWebLineMouseMove)
+		window.addEventListener('mouseup', onWebLineMouseUp)
+	})
+
+	onUnload(() => {
+		document.removeEventListener('mousedown', onWebLineMouseDown)
+		window.removeEventListener('mousemove', onWebLineMouseMove)
+		window.removeEventListener('mouseup', onWebLineMouseUp)
+	})
+	// #endif
+
 	/** 行点击：选区打开时清除（长按松手不触发 click，无冲突）；无选区时行级预筛想法后
 	 *  按点击字符列精判命中——弹查看卡片（锚定该行上下，与阅读页点击查看同语义） */
 	function onPoemTap(li : number, e : UniPointerEvent) : void {
+		// #ifdef WEB
+		// 鼠标长按命中时吞掉随后的合成 click（防止气泡出现即被行点击清除选区）
+		if (webLineTapSuppressed) {
+			webLineTapSuppressed = false
+			return
+		}
+		// #endif
 		if (selSpan.value != null) {
 			clearSelection()
 			return

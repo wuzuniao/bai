@@ -54,6 +54,7 @@
 											:key="si"
 											:id="seg.anchor == 1 ? anchorStartId : (seg.anchor == 2 ? anchorEndId : '')"
 											:class="segClass(seg)"
+											:style="'font-size:' + fontSize + 'px'"
 										>{{ seg.text }}</text>
 									</text>
 								</view>
@@ -1105,7 +1106,26 @@
 	/** 无操作超时阈值（超过则时长截断，下次操作重新起算） */
 	const IDLE_TIMEOUT_MS = 10 * 60 * 1000
 
+	// #ifdef WEB
+	/** PC 宽屏（H5 居中部署）：阅读页解除 body 480px 限宽全屏阅读；
+	 * onHide/onUnload 移除类名，恢复其他页面的居中限宽布局 */
+	function setBodyFull(full : boolean) : void {
+		try {
+			if (full) {
+				document.body.classList.add('reader-full')
+			} else {
+				document.body.classList.remove('reader-full')
+			}
+		} catch (e) {
+			// DOM 操作失败静默，不影响阅读主链路
+		}
+	}
+	// #endif
+
 	onShow(() => {
+		// #ifdef WEB
+		setBodyFull(true)
+		// #endif
 		enterAt = Date.now()
 		lastActiveAt = enterAt
 	})
@@ -1138,11 +1158,20 @@
 	}
 
 	onUnload(() => {
+		// #ifdef WEB
+		setBodyFull(false)
+		window.removeEventListener('mousemove', onWebMouseMove)
+		window.removeEventListener('mouseup', onWebMouseUp)
+		window.removeEventListener('wheel', onPageTouchStart)
+		// #endif
 		saveProgress()
 		recordReadingSession()
 	})
 
 	onHide(() => {
+		// #ifdef WEB
+		setBodyFull(false)
+		// #endif
 		saveProgress()
 		recordReadingSession()
 	})
@@ -1421,6 +1450,12 @@
 
 	/** 系统侧滑/返回键（pages.json swipeBackAsBackPress 把侧滑手势转为本事件）：任一浮层展开时先收浮层回正文，不退出页面 */
 	onBackPress((options : OnBackPressOptions) : boolean => {
+		// #ifdef WEB
+		// Web 端直接放行：navigateBack 触发本事件的 from 值与原生不同，浮层展开态的「收浮层不退出」
+		// 拦截会吞掉控制栏返回（返回键出现时菜单必为展开态）；浏览器返回键退出页面属预期行为
+		return false
+		// #endif
+		// #ifndef WEB
 		if (options.from == 'navigateBack') {
 			return false
 		}
@@ -1431,6 +1466,7 @@
 			return true
 		}
 		return false
+		// #endif
 	})
 
 	/** 顶部导航内容行（px）：与小程序胶囊同行对齐（同子页 BackButton 口径：状态栏高度起、行高 40px） */
@@ -2078,15 +2114,27 @@
 	let touchStartX = 0
 	let touchStartY = 0
 
-	function onContentTouchStart(e: UniTouchEvent) : void {
+	function handleGestureStart(x : number, y : number) : void {
 		pullSettling.value = false
 		flipSettling.value = false
-		touchStartX = e.touches[0].clientX
-		touchStartY = e.touches[0].clientY
+		touchStartX = x
+		touchStartY = y
+	}
+
+	function onContentTouchStart(e: UniTouchEvent) : void {
+		handleGestureStart(e.touches[0].clientX, e.touches[0].clientY)
 	}
 
 	function onContentTouchMove(e: UniTouchEvent) : void {
-		if (e.touches.length == 0 || scrollMode.value) {
+		if (e.touches.length == 0) {
+			return
+		}
+		handleGestureMove(e.touches[0].clientX, e.touches[0].clientY)
+	}
+
+	/** 手势移动核心（触摸与 Web 鼠标桥接共用；x/y 为当前触点视口坐标） */
+	function handleGestureMove(x : number, y : number) : void {
+		if (scrollMode.value) {
 			// 上下滚动模式：滚动由 scroll-view 原生处理，不启用翻页/书签手势
 			return
 		}
@@ -2094,8 +2142,8 @@
 		if (selSpan.value != null) {
 			return
 		}
-		const dx = e.touches[0].clientX - touchStartX
-		const dy = e.touches[0].clientY - touchStartY
+		const dx = x - touchStartX
+		const dy = y - touchStartY
 		// 翻页跟手：按模式取主轴（上下模式取纵向，其余取横向）
 		const verticalMode = scrollMode.value
 		const primary = verticalMode ? dy : dx
@@ -2111,7 +2159,7 @@
 			// #ifdef APP
 			if (pageTurn.value == '仿真') {
 				// 仿真跟手：触点横向绝对位置即卷曲前缘（前翻自右缘向左卷、回翻自左缘向右展开）
-				const relX = Math.max(0, Math.min(pageW.value, e.touches[0].clientX - uni.upx2px(62)))
+				const relX = Math.max(0, Math.min(pageW.value, x - uni.upx2px(62)))
 				flipOffset.value = dir == 1 ? pageW.value - relX : relX
 			} else {
 				const span = verticalMode ? pageH.value : pageW.value
@@ -2150,8 +2198,13 @@
 		if (scrollMode.value) {
 			return
 		}
-		const dx = e.changedTouches[0].clientX - touchStartX
-		const dy = e.changedTouches[0].clientY - touchStartY
+		handleGestureEnd(e.changedTouches[0].clientX, e.changedTouches[0].clientY)
+	}
+
+	/** 手势收尾核心（触摸与 Web 鼠标桥接共用；x/y 为释放点视口坐标） */
+	function handleGestureEnd(x : number, y : number) : void {
+		const dx = x - touchStartX
+		const dy = y - touchStartY
 		// 翻页跟手收尾：位移过阈值（或快速轻扫）且有目标页时，先补间到满行程再切换内容；否则回弹归位
 		if (flipActive.value) {
 			const done = flipOffset.value > pageW.value * 0.35 || Math.abs(dx) > 80
@@ -2203,6 +2256,109 @@
 		}
 	}
 
+	// #ifdef WEB
+	/** PC 宽屏：触摸事件对鼠标不响应，桥接鼠标事件到统一手势核心，
+	 * 使覆盖/平移翻页与下拉书签手势在桌面浏览器与触屏同行为（滚轮/滚动模式不受影响） */
+	let webDragging = false
+	/** 手势位移已消费时抑制随后的合成 click（防止拖拽翻页/下拉后误触菜单显隐） */
+	let webClickSuppressed = false
+	/** 鼠标长按检测计时器（按下段落 350ms 未移动即触发，对齐 uni-app longpress 时长） */
+	let webPressTimer = -1
+
+	/** 清理长按计时器 */
+	function clearWebPressTimer() : void {
+		if (webPressTimer >= 0) {
+			clearTimeout(webPressTimer)
+			webPressTimer = -1
+		}
+	}
+
+	/** 鼠标长按触发：从段落 DOM id 反解段落身份（ppara-<origin>=翻页 / scroll-para-<cid>-<origin>=滚动），推导切片区间后走长按核心 */
+	function onWebLongPress(pid : string, x : number, y : number) : void {
+		if (pid.startsWith('scroll-para-')) {
+			const rest = pid.substring('scroll-para-'.length)
+			const dash = rest.indexOf('-')
+			const cid = parseInt(rest.substring(0, dash))
+			const pi = parseInt(rest.substring(dash + 1))
+			const paras = paragraphsOf(cid)
+			if (isNaN(cid) || isNaN(pi) || pi < 0 || pi >= paras.length) {
+				return
+			}
+			onLongPressAt(pi, cid, x, y, 0, paras[pi].text.length - 1)
+		} else if (pid.startsWith('ppara-')) {
+			const pi = parseInt(pid.substring('ppara-'.length))
+			const item = currentPageItems.value.find((it : PageItem) : boolean => it.origin == pi)
+			if (isNaN(pi) || item == null) {
+				return
+			}
+			onLongPressAt(pi, -1, x, y, item.from, item.to)
+		}
+	}
+
+	function onWebMouseDown(e : MouseEvent) : void {
+		if (e.button != 0) {
+			return
+		}
+		e.preventDefault()
+		webDragging = true
+		handleGestureStart(e.clientX, e.clientY)
+		// 长按检测：按在段落元素上才开始计时
+		clearWebPressTimer()
+		const target = e.target as Element
+		const paraEl = target.closest != null ? target.closest('.novel-paragraph') : null
+		if (paraEl != null) {
+			const pid = paraEl.id
+			const px = e.clientX
+			const py = e.clientY
+			webPressTimer = setTimeout(() => {
+				webPressTimer = -1
+				// 长按命中：抑制随后的合成 click（防止气泡出现后被点击收起）
+				webClickSuppressed = true
+				onWebLongPress(pid, px, py)
+			}, 350)
+		}
+	}
+
+	function onWebMouseMove(e : MouseEvent) : void {
+		// 桌面端无 touch 事件：鼠标移动/滚轮作为阅读活性信号驱动时长跟踪（含 10 分钟无操作截断与会话滚动）
+		onPageTouchStart()
+		// 位移超过容差取消长按检测（对齐 touch 长按的移动取消语义）
+		if (webPressTimer >= 0 && (Math.abs(e.clientX - touchStartX) > 10 || Math.abs(e.clientY - touchStartY) > 10)) {
+			clearWebPressTimer()
+		}
+		if (!webDragging) {
+			return
+		}
+		handleGestureMove(e.clientX, e.clientY)
+	}
+
+	function onWebMouseUp(e : MouseEvent) : void {
+		clearWebPressTimer()
+		if (!webDragging) {
+			return
+		}
+		webDragging = false
+		const moved = Math.abs(e.clientX - touchStartX) > 10 || Math.abs(e.clientY - touchStartY) > 10
+		handleGestureEnd(e.clientX, e.clientY)
+		if (moved) {
+			webClickSuppressed = true
+		}
+	}
+
+	onReady(() => {
+		// mousedown 仅挂正文区（菜单/控制框点击不受影响）；move/up 挂 window 防拖出区域后丢释放事件；
+		// 滚轮同为阅读活性信号（连续滚动阅读的时长统计依赖）
+		const el = document.querySelector('.content')
+		if (el != null) {
+			el.addEventListener('mousedown', onWebMouseDown)
+		}
+		window.addEventListener('mousemove', onWebMouseMove)
+		window.addEventListener('mouseup', onWebMouseUp)
+		window.addEventListener('wheel', onPageTouchStart)
+	})
+
+	// #endif
+
 	/** 回弹归位：内容位移与遮罩高度以过渡动画归零（松手后触发，触摸重新按下时立即恢复跟手） */
 	function settlePull() : void {
 		if (pullOffset.value == 0 && pullState.value == 'none') {
@@ -2248,6 +2404,14 @@
 		}
 		if (pageTurn.value == '滚动') {
 			applyChapterSwitch(id, atLastPage)
+			if (!atLastPage) {
+				// 滚动模式章跳定位：Web 端 scroll-view 内容替换后滚动位置残留且 scroll-top 同值绑定不再触发，
+				// 落点会停在前章内部；延迟至重置渲染落地后按章锚点定位保证落点为章首
+				//（同书签/划线跳转口径，对其他端为幂等冗余；atLastPage 仍走超大偏移沉底语义）
+				setTimeout(() : void => {
+					scrollIntoView.value = 'scroll-ch-' + id
+				}, 300)
+			}
 			return
 		}
 		ensureChaptersMeasured([id]).then(() => {
@@ -2294,6 +2458,13 @@
 
 	/** 点击正文空白（Stitch: 划线段点击已处理→跳过；想法查看卡片由其全屏遮罩自行拦截点击关闭；抽屉打开→收起；划词激活→清除；设置展开→收起；否则切换菜单显隐） */
 	function onContentTap() : void {
+		// #ifdef WEB
+		// 鼠标拖拽手势已消费时吞掉随后合成的 click（避免翻页/下拉后误触菜单显隐）
+		if (webClickSuppressed) {
+			webClickSuppressed = false
+			return
+		}
+		// #endif
 		// 正文划线段 click 已处理（含纯划线吞点击）：跳过本次父级点击
 		if (paragraphTapHandled) {
 			paragraphTapHandled = false
@@ -2319,6 +2490,19 @@
 	}
 
 	function onBackTap() : void {
+		// #ifdef WEB
+		// Web 端绕过 uni.navigateBack（其触发的 onBackPress from 值与原生不同，会被浮层展开态拦截吞掉，
+		// 且 fail 回调不可靠）：先收起全部浮层，再按历史深度决定 DOM 回退或重定向书架
+		drawerOpen.value = false
+		settingsOpen.value = false
+		menuVisible.value = false
+		if (window.history.length <= 1) {
+			uni.redirectTo({ url: '/pages/reading/bookshelf' })
+			return
+		}
+		window.history.back()
+		return
+		// #endif
 		uni.navigateBack()
 	}
 
@@ -2510,10 +2694,15 @@
 		if (e.touches.length == 0) {
 			return
 		}
+		onLongPressAt(pi, cid, e.touches[0].clientX, e.touches[0].clientY, from, to)
+	}
+
+	/** 长按核心（触摸与 Web 鼠标桥接共用；pressX/Y 为按点视口坐标） */
+	function onLongPressAt(pi : number, cid : number, pressX : number, pressY : number, from : number, to : number) : void {
 		menuVisible.value = false
 		settingsOpen.value = false
-		const clientX = e.touches[0].clientX
-		const clientY = e.touches[0].clientY
+		const clientX = pressX
+		const clientY = pressY
 		// 滚动模式自动加载相邻章后 currentChapterId 可能跳变，而视口停留内容仍属原章：
 		// 长按段落时把当前章同步为被长按段落所在章，保证选区渲染的章匹配条件成立（用户在哪里操作，哪里即当前阅读章）
 		const spanCid = cid >= 0 ? cid : currentChapterId.value

@@ -624,7 +624,7 @@
 		calendarCells.value = cells
 	}
 
-	/** 刻度值文案（英文单位）：满 60 分钟按小时（最多 1 位小数），否则按分钟 */
+	/** 刻度值文案（英文单位）：满 60 分钟按小时（最多 1 位小数），否则按分钟整数 */
 	function yTickText(v : number) : string {
 		if (v >= 60) {
 			const h = Math.round(v / 6) / 10
@@ -633,14 +633,17 @@
 		return Math.round(v) + 'm'
 	}
 
-	/** 纵坐标刻度（顶=最大值，四等分；不展示 0，底部留空位保持刻度与柱高对位；本期无时长全空） */
+	/** 纵坐标刻度（顶=最大值，四等分；不展示 0，底部留空位保持刻度与柱高对位；本期无时长全空）。
+	 *  最大值向上取整为 4 的倍数：四等分刻度恒为整数分钟，杜绝小数刻度四舍五入后相邻重名
+	 *（如 max=2 分钟时刻度 1.5/0.5 会与 2/1 撞名，取整后为 4/3/2/1） */
 	function buildYTicks(max : number) : string[] {
-		const list: string[] = []
 		if (max <= 0) {
 			return ['', '', '', '', '']
 		}
+		const niceMax = max % 4 == 0 ? max : (Math.floor(max / 4) + 1) * 4
+		const list: string[] = []
 		for (let i = 4; i >= 1; i--) {
-			list.push(yTickText(max * i / 4))
+			list.push(yTickText(niceMax * i / 4))
 		}
 		list.push('')
 		return list

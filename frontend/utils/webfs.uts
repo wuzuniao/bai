@@ -1,0 +1,260 @@
+// #ifdef WEB
+/**
+ * Web 端书籍正文存储层（IndexedDB）—— 仅 WEB 编译（uts2js），其他端不参与构建
+ * --------------------------------------------------------------------------
+ * 路径约定：所有 path 为虚拟键（如 'webbooks/3.txt'），与沙盒路径同构
+ *（'/' 分隔、末段为文件名、前缀段为命名空间），使 books.uts 依据 book.path
+ * 做的 dirPrefix / 扩展名字符串运算在 Web 端同样成立。
+ *
+ * 容量：IndexedDB 无实用大小限制，满足「导入不限制大小」；File → ArrayBuffer
+ * 整体入库（与其他端「整文件入内存解析」同口径）。
+ *
+ * 读取：分块流式 TextDecoder 解码（stream 选项跨块续解多字节字符，无块边界截断），
+ * utf-8 优先、检出替换符 U+FFFD 后按 GBK 重解码（浏览器原生 GBK 解码器）。
+ */
+
+/** IndexedDB 库名 / 对象仓库名 */
+const WEBFS_DB_NAME = 'bai_webfs'
+const WEBFS_STORE = 'files'
+/** 解码块大小（字节）：对齐其他端 1MB 分块口径 */
+const WEB_DECODE_CHUNK = 1024 * 1024
+/** 文件选择器暂存前缀（importBook 经 copyToSandbox 消费） */
+const PICK_PREFIX = 'webpick://'
+
+/** 导入期暂存：选择器 token → 文件字节（copyToSandbox 消费后即删） */
+const pickedBuffers = new Map<string, ArrayBuffer>()
+
+/** 文件选择结果（字段与原生 ChooseFileTempFile 对齐，path 为暂存引用） */
+export type WebPickedFile = {
+	name : string
+	path : string
+	size : number
+}
+
+/** 打开库（惰性；库/仓库不存在时创建） */
+function openDb() : Promise<any> {
+	return new Promise<any>((resolve, reject) => {
+		const req = indexedDB.open(WEBFS_DB_NAME, 1)
+		req.onupgradeneeded = (_e) => {
+			const db = req.result
+			if (!db.objectStoreNames.contains(WEBFS_STORE)) {
+				db.createObjectStore(WEBFS_STORE)
+			}
+		}
+		req.onsuccess = () => {
+			resolve(req.result)
+		}
+		req.onerror = () => {
+			reject(new Error('本地存储打开失败'))
+		}
+	})
+}
+
+/** 单请求事务封装：run 内发起请求，事务 complete 兑现（get 类请求请在 onsuccess 兜结果） */
+function withStore(mode : string, run : (store : any) => void) : Promise<void> {
+	return new Promise<void>((resolve, reject) => {
+		openDb().then((db) => {
+			let settled = false
+			const tx = db.transaction(WEBFS_STORE, mode)
+			tx.oncomplete = () => {
+				if (!settled) {
+					settled = true
+					resolve()
+				}
+			}
+			tx.onerror = () => {
+				if (!settled) {
+					settled = true
+					reject(new Error('本地存储读写失败'))
+				}
+			}
+			tx.onabort = () => {
+				if (!settled) {
+					settled = true
+					reject(new Error('本地存储读写失败'))
+				}
+			}
+			run(tx.objectStore(WEBFS_STORE))
+		}, (e) => {
+			reject(e)
+		})
+	})
+}
+
+/** 写入键值（覆盖语义） */
+export function webFsPut(key : string, data : ArrayBuffer) : Promise<void> {
+	return withStore('readwrite', (store) => {
+		store.put(data, key)
+	})
+}
+
+/** 读取键值（不存在返回 null） */
+export function webFsGet(key : string) : Promise<ArrayBuffer | null> {
+	return new Promise<ArrayBuffer | null>((resolve, reject) => {
+		openDb().then((db) => {
+			const req = db.transaction(WEBFS_STORE, 'readonly').objectStore(WEBFS_STORE).get(key)
+			req.onsuccess = () => {
+				resolve(req.result == null ? null : req.result as ArrayBuffer)
+			}
+			req.onerror = () => {
+				reject(new Error('本地存储读取失败'))
+			}
+		}, (e) => {
+			reject(e)
+		})
+	})
+}
+
+/** 删除键（容错：键不存在或读写失败均静默成功，对齐沙盒 unlinkSync 的 try/catch 忽略语义） */
+export function webFsDelete(key : string) : Promise<void> {
+	return withStore('readwrite', (store) => {
+		store.delete(key)
+	}).catch(() => {
+		// 忽略
+	})
+}
+
+/**
+ * 键改名（先拷贝后删源；拷贝失败源仍有效可整体重试）。
+ * 幂等语义对齐 books.uts renameSandboxFile：源已不存在且目标已就位视为上次迁移已完成
+ * 直接成功，目标也不存在才报错
+ */
+export async function webFsRename(from : string, to : string) : Promise<void> {
+	if (from == to) {
+		return
+	}
+	const data = await webFsGet(from)
+	if (data == null) {
+		if (await webFsGet(to) != null) {
+			return
+		}
+		throw new Error('正文文件迁移失败')
+	}
+	await webFsPut(to, data)
+	await webFsDelete(from)
+}
+
+/**
+ * 复制到沙盒（对应沙盒 copyToSandbox）：
+ * - webpick:// 暂存引用 → 字节入库（消费后即删暂存）
+ * - 其余视为键到键复制（get → put）
+ */
+export async function webFsCopy(srcPath : string, destPath : string) : Promise<void> {
+	if (srcPath.startsWith(PICK_PREFIX)) {
+		const token = srcPath.substring(PICK_PREFIX.length)
+		const buf = pickedBuffers.get(token)
+		if (buf == null) {
+			throw new Error('导入文件已失效，请重新选择')
+		}
+		await webFsPut(destPath, buf)
+		pickedBuffers.delete(token)
+		return
+	}
+	const data = await webFsGet(srcPath)
+	if (data == null) {
+		throw new Error('文件读取失败')
+	}
+	await webFsPut(destPath, data)
+}
+
+/** 弹起系统文件选择器（仅 .txt：PDF 阅读仅 App 端支持，与 iOS 同口径）；取消返回空数组 */
+export function webPickBooks() : Promise<WebPickedFile[]> {
+	return new Promise<WebPickedFile[]>((resolve, reject) => {
+		const input = document.createElement('input') as HTMLInputElement
+		input.type = 'file'
+		input.accept = '.txt'
+		input.multiple = true
+		input.style.display = 'none'
+		document.body.appendChild(input)
+		let settled = false
+		const finish = (files : WebPickedFile[]) => {
+			if (settled) {
+				return
+			}
+			settled = true
+			input.remove()
+			resolve(files)
+		}
+		input.addEventListener('change', () => {
+			const list = input.files
+			if (list == null || list.length == 0) {
+				finish([])
+				return
+			}
+			const items : WebPickedFile[] = []
+			// 逐个读字节入暂存（不限制大小；读取失败整体失败，用户可重选）
+			const readAt = (i : number) => {
+				if (settled) {
+					return
+				}
+				if (i >= list.length) {
+					finish(items)
+					return
+				}
+				const f = list[i]
+				f.arrayBuffer().then((buf) => {
+					if (settled) {
+						return
+					}
+					const token = Date.now().toString() + '_' + i.toString() + '_' + Math.floor(Math.random() * 100000).toString()
+					pickedBuffers.set(token, buf)
+					items.push({
+						name: f.name,
+						path: PICK_PREFIX + token,
+						size: f.size
+					} as WebPickedFile)
+					readAt(i + 1)
+				}, (_e) => {
+					reject(new Error('文件读取失败，请重试'))
+				})
+			}
+			readAt(0)
+		})
+		input.addEventListener('cancel', () => {
+			finish([])
+		})
+		input.click()
+	})
+}
+
+/** 采样检测替换符 U+FFFD（对齐 bookparse.looksMisencoded 语义：采样前 2 万字符，>5 处判为非 UTF-8） */
+function hasReplacementChar(text : string) : boolean {
+	const sampleLen = text.length < 20000 ? text.length : 20000
+	let bad = 0
+	for (let i = 0; i < sampleLen; i++) {
+		if (text.charCodeAt(i) == 0xFFFD) {
+			bad++
+			if (bad > 5) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+/** 分块流式解码（stream 选项跨块续解多字节字符，末块 flush 兜尾） */
+function decodeAll(bytes : Uint8Array, encoding : string) : string {
+	const dec = new TextDecoder(encoding)
+	let out = ''
+	for (let off = 0; off < bytes.length; off += WEB_DECODE_CHUNK) {
+		const end = Math.min(off + WEB_DECODE_CHUNK, bytes.length)
+		const last = end >= bytes.length
+		out += dec.decode(bytes.subarray(off, end), { stream: !last })
+	}
+	return out
+}
+
+/** 读取正文文本（utf-8 优先，检出替换符按 GBK 重解码；键不存在抛读取失败） */
+export async function webReadTextFile(path : string) : Promise<string> {
+	const buf = await webFsGet(path)
+	if (buf == null) {
+		throw new Error('文件读取失败')
+	}
+	const bytes = new Uint8Array(buf)
+	let text = decodeAll(bytes, 'utf-8')
+	if (hasReplacementChar(text)) {
+		text = decodeAll(bytes, 'gbk')
+	}
+	return text
+}
+// #endif

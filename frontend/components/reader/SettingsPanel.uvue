@@ -416,6 +416,8 @@
 
 	.page-turn-btn {
 		flex: 1;
+		/* 最大宽度封顶：按钮不再随行宽占满整行（Web 全屏行宽下尤其夸张），组内左对齐留白于右 */
+		max-width: 160rpx;
 		height: 62rpx;
 		border-radius: $bai-rounded-pill;
 		flex-direction: row;

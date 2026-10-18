@@ -172,7 +172,7 @@
 			</view>
 		</view>
 		<!-- 加号浮动菜单（Stitch: 导入书籍 / 编辑书架，右对齐悬浮） -->
-		<view v-if="plusMenuOpen" class="plus-menu" :style="'left:' + plusMenuLeft + 'px;top:' + (navTop + navHeight + 8) + 'px'">
+		<view v-if="plusMenuOpen" class="plus-menu" :style="'right:' + plusMenuRight + 'px;top:' + (navTop + navHeight + 8) + 'px'">
 			<view class="plus-menu-item" @click="onImportTap">
 				<text class="plus-menu-item-text">导入书籍</text>
 			</view>
@@ -217,6 +217,9 @@
 	import { mpCapsuleRect } from '@/utils/layout.uts'
 	import { REWARD_TIERS, fmtRemainMinutes } from '@/utils/rewards.uts'
 	import { fetchActivitySummary, claimReadingReward } from '@/api/activity.uts'
+	// #ifdef WEB
+	import { webPickBooks } from '@/utils/webfs'
+	// #endif
 
 	/** 书架书籍（云端元数据 + 本机正文缓存合并列表，顺序即云端手动排序结果；未导入时仅显示添加格） */
 	const books = ref<LocalBook[]>([])
@@ -421,11 +424,10 @@
 	/** 右侧胶囊避让边距（px）：操作按钮右缘置于胶囊左侧 8px；非小程序端 0（沿用样式默认 38rpx） */
 	const navRight = ref(0)
 
-	/** 加号弹窗左缘（px）：与 + 号按钮左缘齐平——+ 号为按钮组末位元素，左缘即行右缘（避让后）减按钮自身宽 77rpx */
-	const plusMenuLeft = computed(() : number => {
-		const win = uni.getWindowInfo()
-		const rowRight = navRight.value > 0 ? win.windowWidth - navRight.value : win.windowWidth - uni.upx2px(38)
-		return rowRight - uni.upx2px(77)
+	/** 加号弹层右缘（px）：right 锚定 .page 右缘（菜单向左伸展，不依赖单位换算 API，Web 端 upx2px 行为不可靠）。
+	 * 小程序端随胶囊避让（navRight=右缘距视口右距离）；其余端固定列右缘内距（38rpx≈20px，390 设计稿） */
+	const plusMenuRight = computed(() : number => {
+		return navRight.value > 0 ? navRight.value : 20
 	})
 
 	/** 编辑模式：卡片可勾选删除、可拖拽调序 */
@@ -715,7 +717,8 @@
 	/** 导入进行中（防重复触发） */
 	const importing = ref(false)
 
-	/** 按当前端唤起文件选择：微信小程序=聊天会话文件（wx.chooseMessageFile），App=系统文件选择器；选择后统一落盘解析入库 */
+	/** 按当前端唤起文件选择：微信小程序=聊天会话文件（wx.chooseMessageFile），App=系统文件选择器，
+	 * Web=系统文件选择器（IndexedDB 暂存字节）；选择后统一解析入库 */
 	function startImport() : void {
 		if (importing.value) {
 			return
@@ -726,17 +729,38 @@
 		uni.chooseFile({
 			count: 9,
 			success: (res : ChooseFileSuccess) => {
-				handlePickedFiles(res.tempFiles)
+				const items : PickedFileItem[] = []
+				for (let i = 0; i < res.tempFiles.length; i++) {
+					const f = res.tempFiles[i]
+					items.push({ name: f.name, path: f.path, size: f.size } as PickedFileItem)
+				}
+				handlePickedFiles(items)
 			},
 			fail: (_e) => {
 				// 用户取消静默
 			}
 		})
 		// #endif
+		// #ifdef WEB
+		webPickBooks().then((files) => {
+			if (files.length > 0) {
+				handlePickedFiles(files)
+			}
+		}, (e) => {
+			uni.showToast({ title: e instanceof Error ? e.message : '文件选择失败', icon: 'none', duration: 2500 })
+		})
+		// #endif
+	}
+
+	/** 各端统一的已选文件描述（字段对齐原生 ChooseFileTempFile；Web 端 path 为 webpick:// 暂存引用） */
+	type PickedFileItem = {
+		name : string
+		path : string
+		size : number
 	}
 
 	/** 逐本导入所选文件并汇总结果（扩展名过滤与格式提示在 importBook 内统一处理） */
-	async function handlePickedFiles(files : ChooseFileTempFile[]) : Promise<void> {
+	async function handlePickedFiles(files : PickedFileItem[]) : Promise<void> {
 		if (files.length == 0) {
 			return
 		}
@@ -982,7 +1006,7 @@
 	/* 加号浮动菜单（Stitch: 宽 128px 白底 圆角 16px 边框 #E9E9E6 阴影 0 12 32 @12%，右对齐悬浮） */
 	.plus-menu {
 		position: absolute;
-		/* left 由内联绑定（+ 号左缘），宽度随菜单文字自适应 */
+		/* right 由内联绑定（+ 号右缘对齐，列右缘内距），宽度随菜单文字自适应并向左伸展 */
 		padding: 12rpx;
 		background-color: $bai-canvas;
 		border-radius: $bai-rounded-lg;
