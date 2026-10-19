@@ -210,6 +210,7 @@
 			@span-changed="onSpanChanged"
 			@drag-started="onDragStarted"
 			@query-anchors="measureAnchors"
+			@share-image="onCardShareImage"
 		/>
 
 		<!-- 上下控制框（组件化：顶栏/目录抽屉/设置面板/听书球/三项导航与设置/书签功能内聚 ReaderControl；设置变更经 change 应用渲染，书签变更经 bookmarksChanged 重读） -->
@@ -314,6 +315,12 @@
 	const controlRef = ref<ReaderControl | null>(null)
 	const footerRef = ref<ReaderFooterBar | null>(null)
 	const toastRef = ref<ReaderToast | null>(null)
+
+	/** 气泡分享卡片预生成的封面图（引文长图临时文件路径；''=无，转发回落默认封面图） */
+	const cardShareImage = ref('')
+	function onCardShareImage(path : string) : void {
+		cardShareImage.value = path
+	}
 
 	/** 想法查看卡片关闭通知：复位划线段点击协调标志（卡片遮罩期间标志残留会吞掉关闭后首次点击） */
 	function onThoughtViewClosed() : void {
@@ -1928,7 +1935,12 @@
 
 	// #ifdef MP-WEIXIN
 	onShareAppMessage(() => {
-		return { title: '《' + bookTitle.value + '》' + chapterAt(currentChapterId.value).title, path: '/pages/reading/reader' }
+		// 气泡分享卡片预生成的 5:4 引文封面优先作为封面（卡片预览打开期间有效），否则用默认封面
+		const imageUrl = cardShareImage.value.length > 0 ? cardShareImage.value : '/static/share-cover.png'
+		return { title: '《' + bookTitle.value + '》' + chapterAt(currentChapterId.value).title, path: '/pages/reading/reader', imageUrl: imageUrl }
+	})
+	onShareTimeline(() => {
+		return { title: '无足鸟古诗词学习助手', imageUrl: '/static/share-cover.png' }
 	})
 	// #endif
 

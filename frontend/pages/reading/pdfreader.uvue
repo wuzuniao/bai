@@ -97,6 +97,16 @@
 		return uni.env.USER_DATA_PATH + '/pdf_cache/' + bid
 	}
 
+	// 微信小程序分享：转发好友与朋友圈（封面统一 /static/share-cover.png，复制自 yao 项目）
+	// #ifdef MP-WEIXIN
+	onShareAppMessage(() => {
+		return { title: 'PDF 阅读', imageUrl: '/static/share-cover.png' }
+	})
+	onShareTimeline(() => {
+		return { title: 'PDF 阅读', imageUrl: '/static/share-cover.png' }
+	})
+	// #endif
+
 	onLoad((options : OnLoadOptions) : void => {
 		const win = uni.getWindowInfo()
 		winW = win.windowWidth

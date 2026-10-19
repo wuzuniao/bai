@@ -109,6 +109,16 @@
 	// #endif
 	const loginMode = ref(defaultLoginMode)
 
+	// 微信小程序分享：转发好友与朋友圈（封面统一 /static/share-cover.png，复制自 yao 项目）
+	// #ifdef MP-WEIXIN
+	onShareAppMessage(() => {
+		return { title: '登录', imageUrl: '/static/share-cover.png' }
+	})
+	onShareTimeline(() => {
+		return { title: '登录', imageUrl: '/static/share-cover.png' }
+	})
+	// #endif
+
 	onLoad((options) => {
 		if (options != null && options['mode'] == 'normal') {
 			loginMode.value = 'normal'

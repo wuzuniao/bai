@@ -688,6 +688,16 @@
 		}
 	})
 
+	// 微信小程序分享：转发好友与朋友圈（封面统一 /static/share-cover.png，复制自 yao 项目）
+	// #ifdef MP-WEIXIN
+	onShareAppMessage(() => {
+		return { title: '书架', imageUrl: '/static/share-cover.png' }
+	})
+	onShareTimeline(() => {
+		return { title: '书架', imageUrl: '/static/share-cover.png' }
+	})
+	// #endif
+
 	onShow(() => {
 		refreshShelf()
 	})

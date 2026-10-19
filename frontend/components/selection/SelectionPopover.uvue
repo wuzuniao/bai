@@ -132,6 +132,7 @@
 			:logo-src="logoSrc"
 			:page-h="pageH"
 			@toast="emit('toast', $event)"
+			@share-image="emit('shareImage', $event)"
 		/>
 	</view>
 </template>
@@ -195,7 +196,7 @@
 		shadow: string
 	}>()
 
-	const emit = defineEmits(['sync', 'dismiss', 'toast', 'thoughtViewClosed', 'spanChanged', 'dragStarted', 'queryAnchors'])
+	const emit = defineEmits(['sync', 'dismiss', 'toast', 'thoughtViewClosed', 'spanChanged', 'dragStarted', 'queryAnchors', 'shareImage'])
 
 	/** ===== 想法/分享子组件引用（浮层功能内聚子组件，本组件经 ref 接线转发） ===== */
 	const thoughtPanelRef = ref<ThoughtPanel | null>(null)

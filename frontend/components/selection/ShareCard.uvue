@@ -54,7 +54,9 @@
 	 * 打开时按宿主下行的分享快照（shareCtx）渲染预览；保存为图片时查询组件内
 	 * 隐藏 canvas（.in 自身实例）按排版常量绘制全量长图（与预览 CSS 逐项换算）并
 	 * 存相册；微信端经 button open-type=share 转发（触发宿主页面 onShareAppMessage）。
-	 * 打开经 ref 调 open()（无选区快照时忽略），提示经 emit('toast') 上行。
+	 * 打开经 ref 调 open()（无选区快照时忽略），提示经 emit('toast') 上行；
+	 * 微信端打开预览时即预生成引文长图临时文件，经 emit('shareImage') 上行供
+	 * 宿主页面 onShareAppMessage 作为转发封面（关闭预览时上行空串清除）。
 	 */
 	/** 组件实例（setup 同步期捕获：getCurrentInstance 仅 setup 同步期可用，异步回调中调用返回 null） */
 	const self = getCurrentInstance()
@@ -66,7 +68,7 @@
 		/** 页面高度（px，预览滚动区最大高度换算） */
 		pageH: number
 	}>()
-	const emit = defineEmits(['toast'])
+	const emit = defineEmits(['toast', 'shareImage'])
 
 	/** 分享预览展开态 */
 	const shareOpen = ref(false)
@@ -164,10 +166,17 @@
 			bookTitle: c.bookTitle
 		} as ShareQuoteCtx
 		shareOpen.value = true
+		// #ifdef MP-WEIXIN
+		// 打开预览即后台预生成分享封面图（用户点击分享按钮时已就绪；先生清空旧图防上一次选区残留）
+		emit('shareImage', '')
+		preGenerateShareImage()
+		// #endif
 	}
 
 	function closeShare() : void {
 		shareOpen.value = false
+		// 关闭预览即清除待用封面（避免后续右上角菜单转发误用本次引文图）
+		emit('shareImage', '')
 	}
 
 	/** 绘制排版常量（与预览 CSS 逐项换算：rpx 值减半为 px） */
@@ -449,8 +458,9 @@
 		}
 	}
 
-	/** 导出画布为临时图并保存到相册（单次；Web 端为 toDataURL 触发浏览器下载） */
-	function exportShareCanvas(canvas : any) : void {
+	/** 导出画布（单次；Web 端为 toDataURL 触发浏览器下载）。forShare=false 保存到相册；
+	 *  forShare=true 仅导出临时图并经 emit('shareImage') 上行（供页面转发封面，Web 端无此场景） */
+	function exportShareCanvas(canvas : any, forShare : boolean) : void {
 		// #ifdef WEB
 		// Web 端无相册能力：画布导出 PNG 数据，经临时 <a download> 触发浏览器下载；文件名=应用名_日期_时间到秒
 		try {
@@ -475,6 +485,10 @@
 		uni.canvasToTempFilePath({
 			canvas: canvas,
 			success: (res2) => {
+				if (forShare) {
+					emit('shareImage', res2.tempFilePath)
+					return
+				}
 				uni.saveImageToPhotosAlbum({
 					filePath: res2.tempFilePath,
 					success: () => {
@@ -486,6 +500,10 @@
 				})
 			},
 			fail: () => {
+				if (forShare) {
+					emit('shareImage', '')
+					return
+				}
 				emit('toast', '保存失败，请重试')
 			}
 		})
@@ -504,7 +522,7 @@
 			emit('toast', '保存失败，请重试')
 			return
 		}
-		drawAndExport(canvas)
+		drawAndExport(canvas, false)
 		return
 		// #endif
 		// #ifndef WEB
@@ -518,16 +536,135 @@
 				emit('toast', '保存失败，请重试')
 				return
 			}
-			drawAndExport(res.node)
+			drawAndExport(res.node, false)
 		}).exec()
 	}
 
+	/** 预生成分享封面图（仅微信端，打开预览时调用）：画布绘制后导出临时图经
+	 *  emit('shareImage') 上行，供宿主页面 onShareAppMessage 作为转发封面；
+	 *  失败时上行空串，宿主回落默认封面 */
+	// #ifdef MP-WEIXIN
+	function preGenerateShareImage() : void {
+		const proxy = self == null ? null : self.proxy
+		if (proxy == null) {
+			return
+		}
+		uni.createSelectorQuery().in(proxy).select('#share-canvas').fields({ node: true, size: true }, (res : any) : void => {
+			if (res == null || res.node == null) {
+				return
+			}
+			drawAndExport(res.node, true)
+		}).exec()
+	}
+	// #endif
+
+	/** 转发封面构图常量（官方要求转发封面显示长宽比 5:4）：专用构图替代全量长图——
+	 *  长图作封面会被微信按 5:4 裁剪，展示区域不可控 */
+	const COVER_W = 500.0
+	const COVER_H = 400.0
+	const COVER_PAD = 30.0
+	const COVER_BAND_H = 70.0
+	const COVER_RING_R = 30.0
+	const COVER_LOGO_R = 26.0
+	const COVER_NAME_Y = 122.0
+	const COVER_QUOTE_TOP = 170.0
+	const COVER_QUOTE_MAX_BOTTOM = 336.0
+	const COVER_LINE_H = 26.0
+
+	/** 绘制转发封面主体（背景/顶带/产品名/引文主体折行截断/出处；头像由 drawCoverLogo 补画） */
+	function drawCoverComposition(ctx : CanvasRenderingContext2D) : void {
+		ctx.fillStyle = '#ffffff'
+		ctx.fillRect(0, 0, COVER_W, COVER_H)
+		ctx.fillStyle = '#efefec'
+		ctx.fillRect(0, 0, COVER_W, COVER_BAND_H)
+		ctx.fillStyle = 'rgba(14, 15, 12, 0.45)'
+		ctx.font = '11px sans-serif'
+		ctx.textAlign = 'center'
+		ctx.fillText('无足鸟古诗词学习助手', COVER_W / 2, COVER_NAME_Y)
+		ctx.textAlign = 'left'
+		// 引文主体（仅选中文本含引号；折行后按可用高度截断，截断行以省略号收尾）
+		const lines = wrapCanvasLines(ctx, '“' + shareData.value.quote + '”', COVER_W - COVER_PAD * 2, 'bold 16px sans-serif')
+		const maxLines = Math.floor((COVER_QUOTE_MAX_BOTTOM - COVER_QUOTE_TOP) / COVER_LINE_H)
+		const truncated = lines.length > maxLines
+		const shown = truncated ? lines.slice(0, maxLines) : lines
+		ctx.fillStyle = '#0e0f0c'
+		ctx.font = 'bold 16px sans-serif'
+		let top = COVER_QUOTE_TOP
+		for (let i = 0; i < shown.length; i++) {
+			ctx.fillText(shown[i] + (truncated && i == shown.length - 1 ? '…' : ''), COVER_PAD, top)
+			top += COVER_LINE_H
+		}
+		ctx.fillStyle = 'rgba(14, 15, 12, 0.4)'
+		ctx.font = '11px sans-serif'
+		ctx.fillText('《' + shareData.value.bookTitle + '》 · ' + shareData.value.source, COVER_PAD, COVER_H - 24.0)
+	}
+
+	/** 绘制转发封面头像（白环包裹跨顶带底边；withLogo=false 时以浅色圆替代） */
+	function drawCoverLogo(ctx : CanvasRenderingContext2D, logo : any, withLogo : boolean) : void {
+		ctx.fillStyle = '#ffffff'
+		ctx.beginPath()
+		ctx.arc(COVER_W / 2, COVER_BAND_H, COVER_RING_R, 0, Math.PI * 2)
+		ctx.fill()
+		if (withLogo) {
+			ctx.save()
+			ctx.beginPath()
+			ctx.arc(COVER_W / 2, COVER_BAND_H, COVER_LOGO_R, 0, Math.PI * 2)
+			ctx.clip()
+			ctx.drawImage(logo, COVER_W / 2 - COVER_LOGO_R, COVER_BAND_H - COVER_LOGO_R, COVER_LOGO_R * 2, COVER_LOGO_R * 2)
+			ctx.restore()
+		} else {
+			ctx.fillStyle = '#d9d9d5'
+			ctx.beginPath()
+			ctx.arc(COVER_W / 2, COVER_BAND_H, COVER_LOGO_R, 0, Math.PI * 2)
+			ctx.fill()
+		}
+	}
+
 	/** 绘制并导出（canvas 为画布节点：小程序/App 为 node 模式画布，Web 为原生 HTMLCanvasElement） */
-	function drawAndExport(canvas : any) : void {
+	function drawAndExport(canvas : any, forShare : boolean) : void {
 		const dpr = uni.getWindowInfo().pixelRatio
 		const ctx = canvas.getContext('2d')
 		if (ctx == null) {
 			emit('toast', '保存失败，请重试')
+			return
+		}
+		// 转发封面（仅微信端）：5:4 专用构图 + 头像按加载结果补画（失败/超时以浅色圆替代）
+		if (forShare) {
+			canvas.width = COVER_W * dpr
+			canvas.height = COVER_H * dpr
+			ctx.scale(dpr, dpr)
+			drawCoverComposition(ctx)
+			let logoDrawn = false
+			let coverExported = false
+			let coverLogo : any = null
+			const finishLogo = (withLogo : boolean) : void => {
+				if (logoDrawn) {
+					return
+				}
+				logoDrawn = true
+				drawCoverLogo(ctx, coverLogo, withLogo)
+			}
+			const doExport = () : void => {
+				if (coverExported) {
+					return
+				}
+				coverExported = true
+				exportShareCanvas(canvas, true)
+			}
+			coverLogo = canvas.createImage()
+			coverLogo.src = props.logoSrc
+			coverLogo.onload = () => {
+				finishLogo(true)
+				doExport()
+			}
+			coverLogo.onerror = () => {
+				finishLogo(false)
+				doExport()
+			}
+			setTimeout(() => {
+				finishLogo(false)
+				doExport()
+			}, 1500)
 			return
 		}
 		// 排版：引文分段折行（\n 拆段、段首缩进、段间距与预览一致）+ 想法折行 + 各块位置（测量在画布尺寸设定前完成，赋值后重新 scale）
@@ -558,7 +695,7 @@
 				return
 			}
 			exported = true
-			exportShareCanvas(canvas)
+			exportShareCanvas(canvas, forShare)
 		}
 		// 头像图像对象：Web 为 DOM Image，小程序/App 为画布 node 的 createImage（同函数内条件赋值，避免解析期重名）
 		let logo : any = null

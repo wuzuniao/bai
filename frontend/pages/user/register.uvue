@@ -196,6 +196,16 @@
 	function goLogin() : void {
 		uni.navigateTo({ url: '/pages/user/login?mode=normal' })
 	}
+
+	// 微信小程序分享：转发好友与朋友圈（封面统一 /static/share-cover.png，复制自 yao 项目）
+	// #ifdef MP-WEIXIN
+	onShareAppMessage(() => {
+		return { title: '注册账号', imageUrl: '/static/share-cover.png' }
+	})
+	onShareTimeline(() => {
+		return { title: '注册账号', imageUrl: '/static/share-cover.png' }
+	})
+	// #endif
 </script>
 
 <style lang="scss">

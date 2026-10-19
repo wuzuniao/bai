@@ -87,6 +87,16 @@
 	const noticeRef = ref<NoticeButton | null>(null)
 
 	/** 顶部留白：内容区避让状态栏（小程序端胶囊在右侧，不冲突） */
+	// 微信小程序分享：转发好友与朋友圈（封面统一 /static/share-cover.png，复制自 yao 项目）
+	// #ifdef MP-WEIXIN
+	onShareAppMessage(() => {
+		return { title: '设置', imageUrl: '/static/share-cover.png' }
+	})
+	onShareTimeline(() => {
+		return { title: '设置', imageUrl: '/static/share-cover.png' }
+	})
+	// #endif
+
 	// 页面显示：刷新登录态与通知未读状态
 	onShow(() => {
 		noticeRef.value?.refresh()

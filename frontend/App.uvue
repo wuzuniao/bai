@@ -15,7 +15,8 @@
 		if (hasAccessToken()) {
 			syncQuiet(fetchPreferences().then((res) => {
 				if (res.code == 0) {
-					applyCloudPreferences(res.data == null ? null : res.data!.getUTSJSONObject('prefs'))
+					// uts2js（小程序/H5）的 UTSJSONObject 无 getUTSJSONObject 方法，嵌套对象索引访问（与 request.uts 解析约定一致）
+					applyCloudPreferences(res.data == null ? null : (res.data!['prefs'] as UTSJSONObject | null))
 				}
 				return res
 			}))

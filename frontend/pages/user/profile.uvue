@@ -631,6 +631,16 @@
 	}
 	// #endif
 
+	// 微信小程序分享：转发好友与朋友圈（封面统一 /static/share-cover.png，复制自 yao 项目）
+	// #ifdef MP-WEIXIN
+	onShareAppMessage(() => {
+		return { title: '个人信息', imageUrl: '/static/share-cover.png' }
+	})
+	onShareTimeline(() => {
+		return { title: '个人信息', imageUrl: '/static/share-cover.png' }
+	})
+	// #endif
+
 	// ===== 页面加载：刷新最新用户信息（含 status/role） =====
 	onLoad(() => {
 		// App 端：检测指纹能力并读取本地开关状态

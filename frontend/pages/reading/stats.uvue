@@ -779,6 +779,16 @@
 		hoursTitle.value = tag.length > 0 ? '偏好' + tag + '阅读' : '阅读时段分布'
 	}
 
+	// 微信小程序分享：转发好友与朋友圈（封面统一 /static/share-cover.png，复制自 yao 项目）
+	// #ifdef MP-WEIXIN
+	onShareAppMessage(() => {
+		return { title: '阅读统计', imageUrl: '/static/share-cover.png' }
+	})
+	onShareTimeline(() => {
+		return { title: '阅读统计', imageUrl: '/static/share-cover.png' }
+	})
+	// #endif
+
 	onShow(() => {
 		loadReport()
 	})

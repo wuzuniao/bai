@@ -12,6 +12,16 @@
 
 <script setup lang="uts">
 	import PageShell from '@/components/common/PageShell.uvue'
+
+	// 微信小程序分享：转发好友与朋友圈（封面统一 /static/share-cover.png，复制自 yao 项目）
+	// #ifdef MP-WEIXIN
+	onShareAppMessage(() => {
+		return { title: '帮助中心', imageUrl: '/static/share-cover.png' }
+	})
+	onShareTimeline(() => {
+		return { title: '帮助中心', imageUrl: '/static/share-cover.png' }
+	})
+	// #endif
 </script>
 
 <style lang="scss">
