@@ -9,6 +9,9 @@
  */
 import { request, ApiResponse, RequestOptions } from '@/utils/request.uts'
 import { API_BASE_URL } from '@/utils/config.uts'
+import { t } from '@/utils/i18n.uts'
+// 词典注册（复用请求层文案段）
+import '@/utils/locales/request.uts'
 
 /** 构造请求选项（固定业务后端地址、带认证头、10s 超时、401 静默） */
 function opts(url: string, method: RequestMethod, data: UTSJSONObject | null) : RequestOptions {
@@ -163,8 +166,8 @@ export function syncQuiet(p: Promise<ApiResponse>) : void {
 	p.then((_res: ApiResponse) => {
 		// 成功静默
 	}, (e: Error | null) => {
-		// 未登录属常态（本地缓存为准），不告警
-		if (e != null && e.message == '未登录') {
+		// 未登录属常态（本地缓存为准），不告警（文案与 request.uts 同源，跨语言一致）
+		if (e != null && e.message == t('request.notLoggedIn')) {
 			return
 		}
 		console.warn('云端同步失败', e)

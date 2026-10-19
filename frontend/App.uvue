@@ -2,12 +2,17 @@
 	import { fetchPreferences, syncQuiet } from '@/api/reading.uts'
 	import { applyCloudPreferences } from '@/utils/books.uts'
 	import { hasAccessToken } from '@/utils/request.uts'
+	import { initLocale, t } from '@/utils/i18n.uts'
+	// 词典注册（公共段：导航/验证码/通用按钮）
+	import '@/utils/locales/common.uts'
 	// #ifdef APP-ANDROID || APP-HARMONY
 	let firstBackTime = 0
 	// #endif
 
 	onLaunch(() => {
 		console.log('App Launch')
+		// 恢复上次语言选择（profile 语言开关持久化于 app_locale）
+		initLocale()
 		// WEB 端 SSO 恢复已收敛至 store 初始化（stores/user.uts loadUserFromStorage：
 		// 本地无令牌时经父域 Cookie 平台令牌异步交换恢复，N34）
 		// 云端偏好预取：落本地缓存（reader_settings/reader_font/bookshelf_style），
@@ -36,7 +41,7 @@
 		console.log('App LastPageBackPress')
 		if (firstBackTime == 0) {
 			uni.showToast({
-				title: '再按一次退出应用',
+				title: t('common.exitHint'),
 				position: 'bottom',
 			})
 			firstBackTime = Date.now()

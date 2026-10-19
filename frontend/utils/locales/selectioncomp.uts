@@ -1,0 +1,47 @@
+/**
+ * 划词子系统词典段（components/selection/*：SelectionPopover/ThoughtPanel/ShareCard）
+ * 模块载入时注册进 i18n 全局词典；相关组件引入本文件即完成注册。
+ */
+import { registerDict, Dict } from '../i18n'
+
+const zh: Dict = new Map<string, string>([
+	['sel.copy', '复制'],
+	['sel.thought', '写想法'],
+	['sel.underline', '划线'],
+	['sel.query', '查询'],
+	['sel.share', '分享'],
+	['sel.thoughtTitle', '写想法'],
+	['sel.thoughtPh', '写下你的想法…'],
+	['sel.thoughtEmpty', '请输入想法内容'],
+	['sel.appName', '无足鸟古诗词学习助手'],
+	['sel.saveImage', '保存为图片'],
+	['sel.savedDownloads', '已保存到下载'],
+	['sel.savedAlbum', '已保存到相册'],
+	['sel.saveFail', '保存失败，请重试'],
+	['sel.saveFailPerm', '保存失败，请检查相册权限'],
+	['sel.queryTodo', '查询功能即将上线'],
+	['sel.copyFail', '复制失败，请重试'],
+	['sel.copied', '已复制到剪贴板']
+])
+
+const en: Dict = new Map<string, string>([
+	['sel.copy', 'Copy'],
+	['sel.thought', 'Note'],
+	['sel.underline', 'Underline'],
+	['sel.query', 'Lookup'],
+	['sel.share', 'Share'],
+	['sel.thoughtTitle', 'Write a Note'],
+	['sel.thoughtPh', 'Write your thought...'],
+	['sel.thoughtEmpty', 'Please write something first'],
+	['sel.appName', 'Wuzuniao Poetry Learning Assistant'],
+	['sel.saveImage', 'Save Image'],
+	['sel.savedDownloads', 'Saved to Downloads'],
+	['sel.savedAlbum', 'Saved to album'],
+	['sel.saveFail', 'Save failed, try again'],
+	['sel.saveFailPerm', 'Save failed, check album permission'],
+	['sel.queryTodo', 'Lookup coming soon'],
+	['sel.copyFail', 'Copy failed, try again'],
+	['sel.copied', 'Copied to clipboard']
+])
+
+registerDict(zh, en)

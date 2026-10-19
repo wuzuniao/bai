@@ -3,7 +3,7 @@
 				<!-- 微信一键登录卡片（仅微信小程序端展示） -->
 				<!-- #ifdef MP-WEIXIN -->
 				<view v-if="loginMode === 'wechat'" class="login-page__card">
-					<text class="login-page__title">一键登录</text>
+					<text class="login-page__title">{{ t('login.title') }}</text>
 					<view class="login-page__wechat-btn" @click="handleWechatLogin">
 						<image class="login-page__wechat-icon" src="/static/icons/wechat-login.png" mode="aspectFit" />
 					</view>
@@ -13,7 +13,7 @@
 					</view>
 					<!-- 切换到账号密码登录引导 -->
 					<view class="login-page__switch" @click="switchMode('normal')">
-						<text class="login-page__switch-text">账号密码登录</text>
+						<text class="login-page__switch-text">{{ t('login.switchPassword') }}</text>
 					</view>
 				</view>
 				<!-- #endif -->
@@ -21,7 +21,7 @@
 				<!-- App 端指纹一键登录卡片（仅 App 端：设备支持指纹 + 本地存在凭证 + 已开启开关时展示） -->
 				<!-- #ifdef APP -->
 				<view v-if="loginMode === 'fingerprint' && biometricVisible" class="login-page__card">
-					<text class="login-page__title">一键登录</text>
+					<text class="login-page__title">{{ t('login.title') }}</text>
 					<view class="login-page__wechat-btn" @click="handleFingerprintLogin">
 						<image class="login-page__wechat-icon" src="/static/icons/dl_fingerprint.png" mode="aspectFit" />
 					</view>
@@ -31,26 +31,26 @@
 					</view>
 					<!-- 切换到账号密码登录引导 -->
 					<view class="login-page__switch" @click="switchMode('normal')">
-						<text class="login-page__switch-text">账号密码登录</text>
+						<text class="login-page__switch-text">{{ t('login.switchPassword') }}</text>
 					</view>
 				</view>
 				<!-- #endif -->
 
 				<!-- 主登录卡片（账号密码登录；微信端切换或注册页跳转时展示） -->
 				<view v-if="loginMode === 'normal'" class="login-page__card">
-					<text class="login-page__title">欢迎回来</text>
+					<text class="login-page__title">{{ t('login.welcome') }}</text>
 
 					<view class="login-page__form">
 						<!-- 用户名或邮箱 -->
 						<view class="login-page__field">
-							<FormInput v-model="usernameValue" label="用户名或邮箱" placeholder="请输入用户名或邮箱" :maxlength="254" :error="usernameError" @blur="onUsernameBlur" />
+							<FormInput v-model="usernameValue" :label="t('login.usernameLabel')" :placeholder="t('login.usernamePh')" :maxlength="254" :error="usernameError" @blur="onUsernameBlur" />
 						</view>
 
 						<!-- 密码 -->
 						<view class="login-page__field login-page__field--password">
-							<PasswordInput v-model="passwordValue" label="密码" placeholder="请输入密码" :maxlength="20" :error="passwordError" @blur="onPasswordBlur" />
+							<PasswordInput v-model="passwordValue" :label="t('login.passwordLabel')" :placeholder="t('login.passwordPh')" :maxlength="20" :error="passwordError" @blur="onPasswordBlur" />
 							<view class="login-page__forgot-row">
-								<text class="login-page__forgot" @click="handleForgot">忘记密码？</text>
+								<text class="login-page__forgot" @click="handleForgot">{{ t('login.forgot') }}</text>
 							</view>
 						</view>
 
@@ -60,7 +60,7 @@
 								<AgreementCheckbox v-model="remember" />
 							</view>
 							<view class="login-page__submit" @click="handleLogin">
-								<text class="login-page__submit-text">登录</text>
+								<text class="login-page__submit-text">{{ t('login.submit') }}</text>
 							</view>
 						</view>
 					</view>
@@ -68,15 +68,15 @@
 					<!-- 切换到微信一键登录引导（仅微信小程序端展示） -->
 					<!-- #ifdef MP-WEIXIN -->
 					<view class="login-page__switch" @click="switchMode('wechat')">
-						<text class="login-page__switch-text">一键登录</text>
+						<text class="login-page__switch-text">{{ t('login.title') }}</text>
 					</view>
 					<!-- #endif -->
 				</view>
 
 				<!-- 底部注册链接 -->
 				<view v-if="loginMode === 'normal'" class="login-page__footer">
-					<text class="login-page__footer-text">还没有账号？</text>
-					<text class="login-page__footer-link" @click="goRegister">立即注册</text>
+					<text class="login-page__footer-text">{{ t('login.noAccount') }}</text>
+					<text class="login-page__footer-link" @click="goRegister">{{ t('login.goRegister') }}</text>
 			</view>
 	</PageShell>
 </template>
@@ -88,6 +88,10 @@
 	import AgreementCheckbox from '@/components/form/AgreementCheckbox.uvue'
 	import { useUserStore } from '@/stores/user.uts'
 	import { ApiResponse } from '@/utils/request.uts'
+	import { t } from '@/utils/i18n.uts'
+	// 词典注册（login 页文案 + 公共段）
+	import '@/utils/locales/login.uts'
+	import '@/utils/locales/common.uts'
 	import { loginUser } from './api/user.uts'
 
 	// #ifdef MP-WEIXIN
@@ -112,10 +116,10 @@
 	// 微信小程序分享：转发好友与朋友圈（封面统一 /static/share-cover.png，复制自 yao 项目）
 	// #ifdef MP-WEIXIN
 	onShareAppMessage(() => {
-		return { title: '登录', imageUrl: '/static/share-cover.png' }
+		return { title: t('login.shareTitle'), imageUrl: '/static/share-cover.png' }
 	})
 	onShareTimeline(() => {
-		return { title: '登录', imageUrl: '/static/share-cover.png' }
+		return { title: t('login.shareTitle'), imageUrl: '/static/share-cover.png' }
 	})
 	// #endif
 
@@ -157,14 +161,14 @@
 
 	function validateUsername(v: string) : string {
 		if (v.length == 0) {
-			return '请输入用户名'
+			return t('login.usernameEmpty')
 		}
 		return ''
 	}
 
 	function validatePasswordValue(v: string) : string {
 		if (v.length == 0) {
-			return '请输入密码'
+			return t('login.passwordEmpty')
 		}
 		return ''
 	}
@@ -174,7 +178,7 @@
 	}
 
 	function onPasswordBlur() : void {
-		passwordError.value = passwordValue.value.length == 0 ? '请输入密码' : ''
+		passwordError.value = passwordValue.value.length == 0 ? t('login.passwordEmpty') : ''
 	}
 
 	/** 登录提交：前端校验 → 隐私协议确认 → 调用 auth 服务 → 写入状态 → 跳转 */
@@ -195,10 +199,10 @@
 		// 隐私协议勾选校验：未勾选时显示确认弹窗
 		if (!remember.value) {
 			uni.showModal({
-				title: '提示',
-				content: '查看并同意《服务协议》和《隐私政策》',
-				confirmText: '确定',
-				cancelText: '取消',
+				title: t('common.tip'),
+				content: t('login.agreeContent'),
+				confirmText: t('common.ok'),
+				cancelText: t('common.cancel'),
 				success: (res) => {
 					if (res.confirm) {
 						remember.value = true
@@ -225,7 +229,7 @@
 				}
 				// #endif
 			}
-			uni.showToast({ title: '登录成功', icon: 'success' })
+			uni.showToast({ title: t('login.success'), icon: 'success' })
 			setTimeout(() => {
 				uni.redirectTo({ url: '/pages/user/settings' })
 			}, 1500)
@@ -241,7 +245,7 @@
 		uni.navigateTo({
 			url: '/pages/user/forgot-password',
 			fail: () => {
-				uni.showToast({ title: '页面跳转失败', icon: 'none' })
+				uni.showToast({ title: t('common.jumpFail'), icon: 'none' })
 			}
 		})
 	}
@@ -255,10 +259,10 @@
 		// 隐私协议勾选校验：未勾选时弹出确认对话框，确认后自动勾选并重入
 		if (!fingerprintAgree.value) {
 			uni.showModal({
-				title: '提示',
-				content: '查看并同意《服务协议》和《隐私政策》',
-				confirmText: '确定',
-				cancelText: '取消',
+				title: t('common.tip'),
+				content: t('login.agreeContent'),
+				confirmText: t('common.ok'),
+				cancelText: t('common.cancel'),
 				success: (res) => {
 					if (res.confirm) {
 						fingerprintAgree.value = true
@@ -275,7 +279,7 @@
 			return
 		}
 		submitting.value = true
-		uni.showLoading({ title: '指纹验证中...', mask: true })
+		uni.showLoading({ title: t('login.fingerprintVerifying'), mask: true })
 		try {
 			// 1. 系统级指纹验证（未通过不会返回成功）
 			await authenticate()
@@ -286,7 +290,7 @@
 			if (d != null) {
 				userStore.setUser(d)
 			}
-			uni.showToast({ title: '登录成功', icon: 'success' })
+			uni.showToast({ title: t('login.success'), icon: 'success' })
 			setTimeout(() => {
 				uni.redirectTo({ url: '/pages/user/settings' })
 			}, 1500)
@@ -297,7 +301,7 @@
 				const err = e as UniError
 				const msg = err.errMsg != null ? err.errMsg : ''
 				if (!msg.includes('cancel') && !msg.includes('authenticate fail')) {
-					uni.showToast({ title: '指纹登录失败，请使用账号密码登录', icon: 'none' })
+					uni.showToast({ title: t('login.fingerprintFail'), icon: 'none' })
 				}
 			}, 200)
 		} finally {
@@ -314,10 +318,10 @@
 		}
 		if (!wechatAgree.value) {
 			uni.showModal({
-				title: '提示',
-				content: '查看并同意《服务协议》和《隐私政策》',
-				confirmText: '确定',
-				cancelText: '取消',
+				title: t('common.tip'),
+				content: t('login.agreeContent'),
+				confirmText: t('common.ok'),
+				cancelText: t('common.cancel'),
 				success: (res) => {
 					if (res.confirm) {
 						wechatAgree.value = true
@@ -328,13 +332,13 @@
 			return
 		}
 		submitting.value = true
-		uni.showLoading({ title: '微信登录中...', mask: true })
+		uni.showLoading({ title: t('login.wechatLoading'), mask: true })
 		// 超时安全网：覆盖 uni.login + 后端请求整个流程
 		const timeoutId = setTimeout(() => {
 			submitting.value = false
 			uni.hideLoading()
 			setTimeout(() => {
-				uni.showToast({ title: '登录超时，请检查网络或认证服务', icon: 'none' })
+				uni.showToast({ title: t('login.timeout'), icon: 'none' })
 			}, 200)
 		}, 15000)
 		uni.login({
@@ -346,7 +350,7 @@
 					uni.hideLoading()
 					submitting.value = false
 					setTimeout(() => {
-						uni.showToast({ title: '获取微信登录凭证失败', icon: 'none' })
+						uni.showToast({ title: t('login.wechatCodeFail'), icon: 'none' })
 					}, 200)
 					return
 				}
@@ -357,7 +361,7 @@
 					if (d != null) {
 						userStore.setUser(d)
 					}
-					uni.showToast({ title: '登录成功', icon: 'success' })
+					uni.showToast({ title: t('login.success'), icon: 'success' })
 					setTimeout(() => {
 						uni.redirectTo({ url: '/pages/user/settings' })
 					}, 1500)
@@ -366,7 +370,7 @@
 					uni.hideLoading()
 					const err = e as Error
 					setTimeout(() => {
-						uni.showToast({ title: err.message.length > 0 ? err.message : '微信登录失败', icon: 'none' })
+						uni.showToast({ title: err.message.length > 0 ? err.message : t('login.wechatFail'), icon: 'none' })
 					}, 200)
 				}).finally(() => {
 					submitting.value = false
@@ -378,9 +382,9 @@
 				setTimeout(() => {
 					const msg = err.errMsg
 					if (msg.includes('cancel') || msg.includes('auth deny')) {
-						uni.showToast({ title: '已取消微信登录', icon: 'none' })
+						uni.showToast({ title: t('login.wechatCancelled'), icon: 'none' })
 					} else {
-						uni.showToast({ title: '微信登录失败', icon: 'none' })
+						uni.showToast({ title: t('login.wechatFail'), icon: 'none' })
 					}
 				}, 200)
 				submitting.value = false
@@ -393,7 +397,7 @@
 		uni.navigateTo({
 			url: '/pages/user/register',
 			fail: () => {
-				uni.showToast({ title: '页面跳转失败', icon: 'none' })
+				uni.showToast({ title: t('common.jumpFail'), icon: 'none' })
 			}
 		})
 	}

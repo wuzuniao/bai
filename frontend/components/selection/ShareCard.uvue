@@ -4,7 +4,7 @@
 		<view v-if="shareOpen" class="share-mask" @click="closeShare">
 			<view class="share-pop">
 				<view class="share-card">
-					<text class="share-card-app">无足鸟古诗词学习助手</text>
+					<text class="share-card-app">{{ t('sel.appName') }}</text>
 					<scroll-view direction="vertical" class="share-card-scroll" :style="'max-height:' + shareCardMaxH + 'px'">
 						<!-- 引文分段渲染：\n 拆段（段边界即原文段落边界）+ 段首两全角空格缩进 + 段间距，与正文段落排版同参；
 						     “ 恰在段首时（无上/下文渐出）悬挂于首段缩进区内（不占文字流宽度），各段文字左缘对齐 -->
@@ -28,11 +28,11 @@
 				</view>
 				<view class="share-actions">
 					<view class="share-action" @click="saveShareImage">
-						<text class="share-action-text">保存为图片</text>
+						<text class="share-action-text">{{ t('sel.saveImage') }}</text>
 					</view>
 					<!-- #ifdef MP-WEIXIN -->
 					<button class="share-action share-action-share" open-type="share">
-						<text class="share-action-text share-action-text-primary">分享</text>
+						<text class="share-action-text share-action-text-primary">{{ t('sel.share') }}</text>
 					</button>
 					<!-- #endif -->
 				</view>
@@ -47,6 +47,10 @@
 <script setup lang="uts">
 	import { getCurrentInstance } from 'vue'
 	import { ShareQuoteCtx } from '@/utils/readerTypes.uts'
+	import { t } from '@/utils/i18n.uts'
+	// 词典注册（划词子系统文案）
+	import '@/utils/locales/selectioncomp.uts'
+	import '@/utils/locales/common.uts'
 
 	/**
 	 * ShareCard —— 分享卡片子组件（预览浮层 + canvas 导出长图内聚）
@@ -403,7 +407,7 @@
 		ctx.fillStyle = 'rgba(14, 15, 12, 0.45)'
 		ctx.font = '12.5px sans-serif'
 		ctx.textAlign = 'center'
-		ctx.fillText('无足鸟古诗词学习助手', SHARE_CARD_W / 2, SHARE_CARD_TOP + SHARE_HEADER_H + SHARE_BASE12)
+		ctx.fillText(t('sel.appName'), SHARE_CARD_W / 2, SHARE_CARD_TOP + SHARE_HEADER_H + SHARE_BASE12)
 		ctx.textAlign = 'left'
 	}
 
@@ -471,13 +475,13 @@
 				'_' + pad2(now.getHours()) + pad2(now.getMinutes()) + pad2(now.getSeconds())
 			const a = document.createElement('a') as HTMLAnchorElement
 			a.href = url
-			a.download = '无足鸟古诗词学习助手_' + dateStr + '.png'
+			a.download = t('sel.appName') + '_' + dateStr + '.png'
 			document.body.appendChild(a)
 			a.click()
 			a.remove()
-			emit('toast', '已保存到下载')
+			emit('toast', t('sel.savedDownloads'))
 		} catch (e) {
-			emit('toast', '保存失败，请重试')
+			emit('toast', t('sel.saveFail'))
 		}
 		return
 		// #endif
@@ -492,10 +496,10 @@
 				uni.saveImageToPhotosAlbum({
 					filePath: res2.tempFilePath,
 					success: () => {
-						emit('toast', '已保存到相册')
+						emit('toast', t('sel.savedAlbum'))
 					},
 					fail: () => {
-						emit('toast', '保存失败，请检查相册权限')
+						emit('toast', t('sel.saveFailPerm'))
 					}
 				})
 			},
@@ -504,7 +508,7 @@
 					emit('shareImage', '')
 					return
 				}
-				emit('toast', '保存失败，请重试')
+				emit('toast', t('sel.saveFail'))
 			}
 		})
 		// #endif
@@ -519,7 +523,7 @@
 			canvas = document.querySelector('#share-canvas')
 		}
 		if (canvas == null) {
-			emit('toast', '保存失败，请重试')
+			emit('toast', t('sel.saveFail'))
 			return
 		}
 		drawAndExport(canvas, false)
@@ -528,12 +532,12 @@
 		// #ifndef WEB
 		const proxy = self == null ? null : self.proxy
 		if (proxy == null) {
-			emit('toast', '保存失败，请重试')
+			emit('toast', t('sel.saveFail'))
 			return
 		}
 		uni.createSelectorQuery().in(proxy).select('#share-canvas').fields({ node: true, size: true }, (res : any) : void => {
 			if (res == null || res.node == null) {
-				emit('toast', '保存失败，请重试')
+				emit('toast', t('sel.saveFail'))
 				return
 			}
 			drawAndExport(res.node, false)
@@ -580,7 +584,7 @@
 		ctx.fillStyle = 'rgba(14, 15, 12, 0.45)'
 		ctx.font = '11px sans-serif'
 		ctx.textAlign = 'center'
-		ctx.fillText('无足鸟古诗词学习助手', COVER_W / 2, COVER_NAME_Y)
+		ctx.fillText(t('sel.appName'), COVER_W / 2, COVER_NAME_Y)
 		ctx.textAlign = 'left'
 		// 引文主体（仅选中文本含引号；折行后按可用高度截断，截断行以省略号收尾）
 		const lines = wrapCanvasLines(ctx, '“' + shareData.value.quote + '”', COVER_W - COVER_PAD * 2, 'bold 16px sans-serif')
@@ -625,7 +629,7 @@
 		const dpr = uni.getWindowInfo().pixelRatio
 		const ctx = canvas.getContext('2d')
 		if (ctx == null) {
-			emit('toast', '保存失败，请重试')
+			emit('toast', t('sel.saveFail'))
 			return
 		}
 		// 转发封面（仅微信端）：5:4 专用构图 + 头像按加载结果补画（失败/超时以浅色圆替代）

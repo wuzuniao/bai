@@ -309,6 +309,11 @@
 	import ReaderControl from '@/components/reader/ReaderControl.uvue'
 	import ReaderFooterBar from '@/components/reader/ReaderFooterBar.uvue'
 	import ReaderToast from '@/components/reader/ReaderToast.uvue'
+	import { t } from '@/utils/i18n.uts'
+	// 词典注册（reader 页文案 + 公共段 + 阅读器组件段）
+	import '@/utils/locales/reader.uts'
+	import '@/utils/locales/readercomp.uts'
+	import '@/utils/locales/common.uts'
 
 	/** 组件引用：气泡（划词建立/清除与锚点、拖动矩形回传）、控制框（书签增删）、信息栏（滚动信号）、提示卡片 */
 	const popoverRef = ref<SelectionPopover | null>(null)
@@ -1192,7 +1197,7 @@
 			currentChapterId.value = next
 			saveProgress()
 		} else {
-			showToast('已经是最后一章')
+			showToast(t('reader.lastChapter'))
 		}
 	}
 
@@ -1208,7 +1213,7 @@
 				scrollIntoView.value = 'scroll-ch-' + first
 			}, 50)
 		} else {
-			showToast('已经是第一章')
+			showToast(t('reader.firstChapter'))
 		}
 	}
 
@@ -1619,9 +1624,9 @@
 	/** 遮罩提示文案（随添加/移除态切换） */
 	const maskText = computed(() : string => {
 		if (pullState.value == 'removing') {
-			return '↑ 松手移除书签'
+			return t('reader.pullRemove')
 		}
-		return '↓ 下拉添加书签'
+		return t('reader.pullAdd')
 	})
 
 	/** 遮罩内书签图标：夜间浅白遮罩上用墨色描边的日间版图标保证对比，其余用主题变体 */
@@ -1940,7 +1945,7 @@
 		return { title: '《' + bookTitle.value + '》' + chapterAt(currentChapterId.value).title, path: '/pages/reading/reader', imageUrl: imageUrl }
 	})
 	onShareTimeline(() => {
-		return { title: '无足鸟古诗词学习助手', imageUrl: '/static/share-cover.png' }
+		return { title: t('reader.shareTitle'), imageUrl: '/static/share-cover.png' }
 	})
 	// #endif
 
@@ -2035,7 +2040,7 @@
 		const bidNum = bid != null ? parseInt(bid) : 0
 		// 0/非法为异常入参；负数 id 为离线导入待同步书籍，正常打开
 		if (bidNum == 0 || isNaN(bidNum)) {
-			showToast('书籍不存在')
+			showToast(t('reader.bookMissing'))
 			return
 		}
 		openLocalBook(bidNum)
@@ -2058,14 +2063,14 @@
 	async function openLocalBook(bid : number) : Promise<void> {
 		const book : LocalBook | null = findBook(bid)
 		if (book == null) {
-			showToast('书籍不存在或已删除')
+			showToast(t('reader.bookMissingOrDeleted'))
 			setTimeout(() => {
 				uni.navigateBack()
 			}, 1200)
 			return
 		}
 		if (book.path.length == 0) {
-			showToast('本设备没有该书文件，请到书架重新导入')
+			showToast(t('reader.fileMissing'))
 			setTimeout(() => {
 				uni.navigateBack()
 			}, 1200)
@@ -2073,7 +2078,7 @@
 		}
 		bookTitle.value = book.title
 		bookHasPreface.value = book.hasPreface
-		uni.showLoading({ title: '正在打开', mask: true })
+		uni.showLoading({ title: t('reader.opening'), mask: true })
 		// 锁定当前书籍后拉取云端笔记（划线/想法/书签云端为准），落缓存后刷新镜像；
 		// bookId 赋值置于落缓存之后：书签面板 watch 该 prop 重载，避免先重载读到旧缓存
 		setActiveBookId(book.id)
@@ -2104,7 +2109,7 @@
 				fillScrollViewport()
 			}
 		} catch (e) {
-			showToast('书籍读取失败，文件可能已被清理')
+			showToast(t('reader.readFail'))
 		}
 		uni.hideLoading()
 	}
@@ -2389,7 +2394,7 @@
 		const next = pageIndex.value + delta
 		if (next < 0) {
 			if (currentChapterId.value === 0) {
-				showToast('已经是第一章')
+				showToast(t('reader.firstChapter'))
 				return
 			}
 			goToChapter(currentChapterId.value - 1, true)
@@ -2397,7 +2402,7 @@
 		}
 		if (next > pageBreaks.value.length - 1) {
 			if (currentChapterId.value === chapters.value.length - 1) {
-				showToast('已经是最后一章')
+				showToast(t('reader.lastChapter'))
 				return
 			}
 			goToChapter(currentChapterId.value + 1, false)
@@ -3046,7 +3051,7 @@
 
 	/** 听书悬浮球点击（ReaderControl 上行，功能占位） */
 	function onListenTap() : void {
-		showToast('听书模式即将上线')
+		showToast(t('reader.listenTodo'))
 	}
 
 	/** 控制框组件内部动作提示（如目录正/倒序切换） */

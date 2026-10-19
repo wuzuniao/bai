@@ -1,0 +1,57 @@
+/**
+ * 公共词典段：跨页复用文案（底部导航/验证码组件/通用按钮等）
+ * 模块载入时注册进 i18n 全局词典；页面引入本文件即完成注册。
+ */
+import { registerDict, Dict } from '../i18n'
+
+const zh: Dict = new Map<string, string>([
+	['nav.home', '首页'],
+	['nav.bookshelf', '书架'],
+	['nav.mine', '我的'],
+	['common.code.placeholder', '请输入验证码'],
+	['common.code.send', '获取验证码'],
+	['common.code.sending', '发送中...'],
+	['common.cancel', '取消'],
+	['common.submit', '提交'],
+	['common.save', '保存'],
+	['common.confirm', '确认'],
+	['common.back', '返回'],
+	['common.verify', '验证'],
+	['common.bind', '绑定'],
+	['common.modify', '修改'],
+	['common.tip', '提示'],
+	['common.ok', '确定'],
+	['common.exitHint', '再按一次退出应用'],
+	['common.jumpFail', '页面跳转失败'],
+	['agree.viewAndAgree', '查看并同意'],
+	['agree.service', '《服务协议》'],
+	['agree.and', '和'],
+	['agree.privacy', '《隐私政策》']
+])
+
+const en: Dict = new Map<string, string>([
+	['nav.home', 'Home'],
+	['nav.bookshelf', 'Bookshelf'],
+	['nav.mine', 'Mine'],
+	['common.code.placeholder', 'Enter code'],
+	['common.code.send', 'Get code'],
+	['common.code.sending', 'Sending...'],
+	['common.cancel', 'Cancel'],
+	['common.submit', 'Submit'],
+	['common.save', 'Save'],
+	['common.confirm', 'Confirm'],
+	['common.back', 'Back'],
+	['common.verify', 'Verify'],
+	['common.bind', 'Bind'],
+	['common.modify', 'Update'],
+	['common.tip', 'Notice'],
+	['common.ok', 'OK'],
+	['common.exitHint', 'Press again to exit'],
+	['common.jumpFail', 'Failed to open page'],
+	['agree.viewAndAgree', 'I agree to the'],
+	['agree.service', 'Terms of Service'],
+	['agree.and', 'and'],
+	['agree.privacy', 'Privacy Policy']
+])
+
+registerDict(zh, en)

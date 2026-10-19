@@ -1,0 +1,36 @@
+/**
+ * 导入管线词典段（utils/bookparse.uts）
+ * 注意：序章 title/label「序」为章节标签（展示值，随解析时语言），非持久化键。
+ * 模块载入时注册进 i18n 全局词典；bookparse.uts 引入本文件即完成注册。
+ */
+import { registerDict, Dict } from '../i18n'
+
+const zh: Dict = new Map<string, string>([
+	['bookparse.readFail', '文件读取失败'],
+	['bookparse.encodingUnsupported', '该文件编码暂不支持'],
+	['bookparse.preface', '序'],
+	['bookparse.dirCreateFail', '本地目录创建失败'],
+	['bookparse.saveFail', '文件保存失败'],
+	['bookparse.untitled', '未命名书籍'],
+	['bookparse.formatUnsupported', '暂不支持该格式，当前支持 TXT / PDF'],
+	['bookparse.titleTooLong', '书名过长（超 200 字），请重命名文件后重试'],
+	['bookparse.pdfUnsupported', '当前端暂不支持 PDF 导入，请使用 APP 端'],
+	['bookparse.tooManyChapters', '章节过多，无法导入'],
+	['bookparse.registerFail', '云端登记失败，请检查网络后重试']
+])
+
+const en: Dict = new Map<string, string>([
+	['bookparse.readFail', 'Failed to read file'],
+	['bookparse.encodingUnsupported', 'This file encoding is not supported yet'],
+	['bookparse.preface', 'Preface'],
+	['bookparse.dirCreateFail', 'Failed to create local directory'],
+	['bookparse.saveFail', 'Failed to save file'],
+	['bookparse.untitled', 'Untitled Book'],
+	['bookparse.formatUnsupported', 'Format not supported; TXT / PDF only'],
+	['bookparse.titleTooLong', 'Title too long (over 200 characters) — rename the file and retry'],
+	['bookparse.pdfUnsupported', 'PDF import is not supported on this platform — use the app'],
+	['bookparse.tooManyChapters', 'Too many chapters to import'],
+	['bookparse.registerFail', 'Cloud registration failed, check your network and retry']
+])
+
+registerDict(zh, en)

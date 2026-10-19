@@ -46,56 +46,56 @@
 					<view class="popover-row">
 						<view class="popover-btn" @click="onAction($event, 'copy')">
 							<image class="popover-icon" src="/static/icons/popover-copy.svg" />
-							<text class="popover-text">复制</text>
+							<text class="popover-text">{{ t('sel.copy') }}</text>
 						</view>
 						<view class="popover-divider"></view>
 						<view class="popover-btn" @click="onAction($event, 'idea')">
 							<image class="popover-icon" src="/static/icons/popover-idea.svg" />
-							<text class="popover-text">写想法</text>
+							<text class="popover-text">{{ t('sel.thought') }}</text>
 						</view>
 						<view class="popover-divider"></view>
 						<view class="popover-btn" @click="onAction($event, 'underline')">
 							<image class="popover-icon" src="/static/icons/popover-underline.svg" />
-							<text class="popover-text">划线</text>
+							<text class="popover-text">{{ t('sel.underline') }}</text>
 						</view>
 					</view>
 					<view class="popover-divider-h"></view>
 					<view class="popover-row">
 						<view class="popover-btn" @click="onAction($event, 'query')">
 							<image class="popover-icon" src="/static/icons/popover-query.svg" />
-							<text class="popover-text">查询</text>
+							<text class="popover-text">{{ t('sel.query') }}</text>
 						</view>
 						<view class="popover-divider"></view>
 						<view class="popover-btn" @click="onAction($event, 'share')">
 							<image class="popover-icon" src="/static/icons/popover-share.svg" />
-							<text class="popover-text">分享</text>
+							<text class="popover-text">{{ t('sel.share') }}</text>
 						</view>
 					</view>
 				</template>
 				<template v-else>
 					<view class="popover-btn" @click="onAction($event, 'copy')">
 						<image class="popover-icon" src="/static/icons/popover-copy.svg" />
-						<text class="popover-text">复制</text>
+						<text class="popover-text">{{ t('sel.copy') }}</text>
 					</view>
 					<view class="popover-divider"></view>
 					<view class="popover-btn" @click="onAction($event, 'idea')">
 						<image class="popover-icon" src="/static/icons/popover-idea.svg" />
-						<text class="popover-text">写想法</text>
+						<text class="popover-text">{{ t('sel.thought') }}</text>
 					</view>
 					<view class="popover-divider"></view>
 					<view class="popover-btn" @click="onAction($event, 'underline')">
 						<image class="popover-icon" src="/static/icons/popover-underline.svg" />
-						<text class="popover-text">划线</text>
+						<text class="popover-text">{{ t('sel.underline') }}</text>
 					</view>
 					<view class="popover-divider"></view>
 					<view class="popover-btn" @click="onAction($event, 'query')">
 						<image class="popover-icon" src="/static/icons/popover-query.svg" />
-						<text class="popover-text">查询</text>
+						<text class="popover-text">{{ t('sel.query') }}</text>
 					</view>
 					<view class="popover-divider"></view>
 					<view class="popover-btn" @click="onAction($event, 'share')">
 						<image class="popover-icon" src="/static/icons/popover-share.svg" />
-						<text class="popover-text">分享</text>
+						<text class="popover-text">{{ t('sel.share') }}</text>
 					</view>
 				</template>
 			</view>
@@ -142,6 +142,10 @@
 	import { SelSpan, SpanSeg, TextMetrics, ParaRect, ShareQuoteCtx, comparePos, normalizeSpan, applySpanUnderlineToStorage } from '@/utils/readerTypes.uts'
 	import ThoughtPanel from '@/components/selection/ThoughtPanel.uvue'
 	import ShareCard from '@/components/selection/ShareCard.uvue'
+	import { t } from '@/utils/i18n.uts'
+	// 词典注册（划词子系统文案）
+	import '@/utils/locales/selectioncomp.uts'
+	import '@/utils/locales/common.uts'
 
 	/**
 	 * SelectionPopover —— 阅读页划词气泡（可复用组件，框架层）
@@ -733,7 +737,7 @@
 		} else if (action === 'underline') {
 			doUnderline()
 		} else if (action === 'query') {
-			emit('toast', '查询功能即将上线')
+			emit('toast', t('sel.queryTodo'))
 			delayDismiss()
 		} else if (action === 'share') {
 			shareCardRef.value?.open()
@@ -750,7 +754,7 @@
 		uni.setClipboardData({
 			data: content,
 			fail: () => {
-				emit('toast', '复制失败，请重试')
+				emit('toast', t('sel.copyFail'))
 			}
 		})
 		// #endif
@@ -759,10 +763,10 @@
 			data: content,
 			showToast: false,
 			success: () => {
-				emit('toast', '已复制到剪贴板')
+				emit('toast', t('sel.copied'))
 			},
 			fail: () => {
-				emit('toast', '复制失败，请重试')
+				emit('toast', t('sel.copyFail'))
 			}
 		})
 		// #endif

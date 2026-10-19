@@ -1,17 +1,17 @@
 <template>
-	<PageShell title="联系我们" desc="如果您在使用过程中遇到任何问题，欢迎随时联系我们。" :center="false">
+	<PageShell :title="t('contact.title')" :desc="t('contact.desc')" :center="false">
 				<!-- 白色卡片：联系方式列表 -->
 				<view class="contact-page__card">
 					<view class="contact-page__list">
 						<!-- 客服邮箱 -->
 						<view class="contact-page__item">
-							<text class="contact-page__item-label">客服邮箱</text>
+							<text class="contact-page__item-label">{{ t('contact.email') }}</text>
 							<text class="contact-page__item-value">xpg@wuzuniao.com</text>
 						</view>
 
 						<!-- 微信公众号 -->
 						<view class="contact-page__item">
-							<text class="contact-page__item-label">微信公众号</text>
+							<text class="contact-page__item-label">{{ t('contact.wechat') }}</text>
 							<text class="contact-page__item-value">无足鸟ICT</text>
 							<view class="contact-page__qr-bg">
 								<image class="contact-page__qr-img" src="/static/contact/qr-wechat.png" mode="aspectFit" />
@@ -20,7 +20,7 @@
 
 						<!-- QQ群 -->
 						<view class="contact-page__item contact-page__item--last">
-							<text class="contact-page__item-label">QQ群</text>
+							<text class="contact-page__item-label">{{ t('contact.qq') }}</text>
 							<text class="contact-page__item-value">278634838</text>
 							<view class="contact-page__qr-bg">
 								<image class="contact-page__qr-img" src="/static/contact/qr-qq.png" mode="aspectFit" />
@@ -33,14 +33,18 @@
 
 <script setup lang="uts">
 	import PageShell from '@/components/common/PageShell.uvue'
+	import { t } from '@/utils/i18n.uts'
+	// 词典注册（contact/help/delete 页文案）
+	import '@/utils/locales/userinfo-pages.uts'
+	import '@/utils/locales/common.uts'
 
 	// 微信小程序分享：转发好友与朋友圈（封面统一 /static/share-cover.png，复制自 yao 项目）
 	// #ifdef MP-WEIXIN
 	onShareAppMessage(() => {
-		return { title: '联系我们', imageUrl: '/static/share-cover.png' }
+		return { title: t('contact.shareTitle'), imageUrl: '/static/share-cover.png' }
 	})
 	onShareTimeline(() => {
-		return { title: '联系我们', imageUrl: '/static/share-cover.png' }
+		return { title: t('contact.shareTitle'), imageUrl: '/static/share-cover.png' }
 	})
 	// #endif
 </script>

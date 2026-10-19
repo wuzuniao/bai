@@ -13,6 +13,11 @@
 </template>
 
 <script setup lang="uts">
+	import { tf } from '@/utils/i18n.uts'
+	// 词典注册（阅读器组件文案）
+	import '@/utils/locales/readercomp.uts'
+	import '@/utils/locales/common.uts'
+
 	/**
 	 * ReaderFooterBar —— 阅读页底部信息栏（可复用组件）
 	 * --------------------------------------------------------------
@@ -39,9 +44,9 @@
 	/** 进度文案（章节标签 / 共 N 章） */
 	const progress = computed(() : string => {
 		if (props.chapterLabel.length == 0) {
-			return '共 ' + props.chapterCount + ' 章'
+			return tf('readercomp.totalChapters', [props.chapterCount.toString()])
 		}
-		return props.chapterLabel + ' / 共 ' + props.chapterCount + ' 章'
+		return tf('readercomp.chapterOfTotal', [props.chapterLabel, props.chapterCount.toString()])
 	})
 
 	/** 全书百分比（章序/总章数，一位小数） */

@@ -31,7 +31,7 @@
 
 		<!-- 底部进度（与顶栏同呼出态） -->
 		<view class="footer" :class="menuVisible ? '' : 'footer-hidden'">
-			<text class="footer-text">第 {{ curPage }} 页 · {{ percentLabel }}</text>
+			<text class="footer-text">{{ tf('pdfreader.pageN', [curPage.toString(), percentLabel]) }}</text>
 		</view>
 	</view>
 </template>
@@ -40,6 +40,10 @@
 	import { mpCapsuleRect } from '@/utils/layout.uts'
 	import { findBook, loadPdfProgress, savePdfProgress, updateBookReading, addReadingSession } from '@/utils/books.uts'
 	import { openPdfSession } from '@/utils/pdfrender.uts'
+	import { t, tf } from '@/utils/i18n.uts'
+	// 词典注册（reader/pdfreader 页文案）
+	import '@/utils/locales/reader.uts'
+	import '@/utils/locales/common.uts'
 
 	/** 页渲染数据（渲染就绪后填充） */
 	type PageEntry = {
@@ -56,7 +60,7 @@
 	const pageItems = ref<PageEntry[]>([])
 	/** 渲染就绪（完成前内容区显示进度提示） */
 	const ready = ref(false)
-	const renderTip = ref('正在准备阅读')
+	const renderTip = ref(t('pdfreader.preparing'))
 	/** 当前阅读状态（onScroll 实时计算，onHide/onUnload 落库） */
 	const curPercent = ref(0)
 	const curPage = ref(1)
@@ -100,10 +104,10 @@
 	// 微信小程序分享：转发好友与朋友圈（封面统一 /static/share-cover.png，复制自 yao 项目）
 	// #ifdef MP-WEIXIN
 	onShareAppMessage(() => {
-		return { title: 'PDF 阅读', imageUrl: '/static/share-cover.png' }
+		return { title: t('pdfreader.title'), imageUrl: '/static/share-cover.png' }
 	})
 	onShareTimeline(() => {
-		return { title: 'PDF 阅读', imageUrl: '/static/share-cover.png' }
+		return { title: t('pdfreader.title'), imageUrl: '/static/share-cover.png' }
 	})
 	// #endif
 
@@ -123,7 +127,7 @@
 		const bidNum = bid != null ? parseInt(bid) : 0
 		// 0/非法为异常入参；负数 id 为离线导入待同步书籍，正常打开
 		if (bidNum == 0 || isNaN(bidNum)) {
-			uni.showToast({ title: '书籍不存在', icon: 'none' })
+			uni.showToast({ title: t('reader.bookMissing'), icon: 'none' })
 			setTimeout(() => {
 				uni.navigateBack()
 			}, 1200)
@@ -160,7 +164,7 @@
 	async function openPdfBook(bid : number) : Promise<void> {
 		const book = findBook(bid)
 		if (book == null || book.format != 'PDF') {
-			uni.showToast({ title: '书籍不存在或已删除', icon: 'none' })
+			uni.showToast({ title: t('reader.bookMissingOrDeleted'), icon: 'none' })
 			setTimeout(() => {
 				uni.navigateBack()
 			}, 1200)
@@ -170,7 +174,7 @@
 		bookTitle.value = book.title
 		pageCount.value = book.chapterCount
 		if (pageCount.value <= 0) {
-			renderTip.value = '书籍数据异常，请删除后重新导入'
+			renderTip.value = t('pdfreader.dataBroken')
 			return
 		}
 		// 恢复上次布局与进度（页比例在渲染前就绪，页高确定后才能准确定位）
@@ -184,7 +188,7 @@
 			const ok = await renderAll(book.path, dir)
 			if (!ok) {
 				if (!disposed) {
-					renderTip.value = '渲染失败，请重新打开'
+					renderTip.value = t('pdfreader.renderFail')
 				}
 				return
 			}
@@ -197,7 +201,7 @@
 				session.close()
 				pageRatio.value = dim.h / dim.w
 			} catch (e) {
-				renderTip.value = 'PDF 打开失败，文件可能已损坏'
+				renderTip.value = t('pdfreader.openFail')
 				return
 			}
 		}
@@ -265,7 +269,7 @@
 							resolve(true)
 							return
 						}
-						renderTip.value = '正在渲染 ' + (index + 1) + ' / ' + total
+						renderTip.value = tf('pdfreader.rendering', [(index + 1).toString(), total.toString()])
 						session.renderPage(index, dir + '/p' + (index + 1) + '.jpg', targetW).then(() => {
 							setTimeout(() => {
 								renderNext(index + 1)

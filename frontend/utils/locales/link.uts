@@ -1,0 +1,17 @@
+/**
+ * 外部链接提示词典段（utils/link.uts）
+ * 模块载入时注册进 i18n 全局词典；link.uts 引入本文件即完成注册。
+ */
+import { registerDict, Dict } from '../i18n'
+
+const zh: Dict = new Map<string, string>([
+	['link.copied', '链接已复制，请在浏览器中打开'],
+	['link.copyFail', '复制失败']
+])
+
+const en: Dict = new Map<string, string>([
+	['link.copied', 'Link copied — open it in your browser'],
+	['link.copyFail', 'Copy failed']
+])
+
+registerDict(zh, en)

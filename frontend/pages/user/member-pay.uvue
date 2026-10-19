@@ -8,18 +8,18 @@
 		<!-- 主内容：标题区 / 权益卡 / 价格区（单屏布局，无滚动） -->
 		<view class="pay-page__main" :style="'padding-top:' + mainTop + 'px'">
 			<view class="pay-page__heading">
-				<text class="pay-page__title">黑铁会员</text>
-				<text class="pay-page__subtitle">终极体验，即刻开启</text>
+				<text class="pay-page__title">{{ t('memberpay.planName') }}</text>
+				<text class="pay-page__subtitle">{{ t('memberpay.subtitle') }}</text>
 			</view>
 
 			<view class="pay-page__perks">
 				<view class="pay-page__perk">
-					<text class="pay-page__perk-title">随心补签</text>
-					<text class="pay-page__perk-text">漏签无需担忧，每月赠 3 次补签机会</text>
+					<text class="pay-page__perk-title">{{ t('memberpay.perk1Title') }}</text>
+					<text class="pay-page__perk-text">{{ t('memberpay.perk1Text') }}</text>
 				</view>
 				<view class="pay-page__perk pay-page__perk--second">
-					<text class="pay-page__perk-title">极致纯净</text>
-					<text class="pay-page__perk-text">永久移除所有广告，享受无干扰的流畅体验</text>
+					<text class="pay-page__perk-title">{{ t('memberpay.perk2Title') }}</text>
+					<text class="pay-page__perk-text">{{ t('memberpay.perk2Text') }}</text>
 				</view>
 			</view>
 
@@ -29,19 +29,19 @@
 					<text class="pay-page__price">¥6</text>
 					<!-- #endif -->
 					<!-- #ifdef MP-WEIXIN -->
-					<text class="pay-page__price">1 金币</text>
+					<text class="pay-page__price">1 {{ t('memberpay.coin') }}</text>
 					<!-- #endif -->
-					<text class="pay-page__price-unit">/ 月</text>
+					<text class="pay-page__price-unit">{{ t('memberpay.priceUnit') }}</text>
 				</view>
 				<view class="pay-page__price-meta">
 					<!-- #ifdef APP -->
-					<text class="pay-page__price-origin">原价 ¥36</text>
+					<text class="pay-page__price-origin">{{ t('memberpay.priceOriginApp') }}</text>
 					<!-- #endif -->
 					<!-- #ifdef MP-WEIXIN -->
-					<text class="pay-page__price-origin">原价 6 金币</text>
+					<text class="pay-page__price-origin">{{ t('memberpay.priceOriginMp') }}</text>
 					<!-- #endif -->
 					<view class="pay-page__pill">
-						<text class="pay-page__pill-text">限时节省 83%</text>
+						<text class="pay-page__pill-text">{{ t('memberpay.save') }}</text>
 					</view>
 				</view>
 			</view>
@@ -51,19 +51,19 @@
 		<view class="pay-page__action">
 			<!-- #ifdef APP -->
 			<view class="pay-page__btn" hover-class="pay-page__btn--hover" :hover-stay-time="70">
-				<text class="pay-page__btn-text">立即订阅</text>
+				<text class="pay-page__btn-text">{{ t('memberpay.subscribe') }}</text>
 			</view>
 			<!-- #endif -->
 			<!-- #ifdef MP-WEIXIN -->
 			<view class="pay-page__btn" hover-class="pay-page__btn--hover" :hover-stay-time="70" @click="openPaySheet">
-				<text class="pay-page__btn-text">立即订阅</text>
+				<text class="pay-page__btn-text">{{ t('memberpay.subscribe') }}</text>
 			</view>
 			<!-- #endif -->
 			<!-- #ifdef APP -->
-			<text class="pay-page__safe-tip">支付安全由应用商店提供极致保障</text>
+			<text class="pay-page__safe-tip">{{ t('memberpay.safeApp') }}</text>
 			<!-- #endif -->
 			<!-- #ifdef MP-WEIXIN -->
-			<text class="pay-page__safe-tip">支付将从金币余额中扣除</text>
+			<text class="pay-page__safe-tip">{{ t('memberpay.safeMp') }}</text>
 			<!-- #endif -->
 		</view>
 
@@ -72,40 +72,40 @@
 		<view v-if="paySheetOpen" class="pay-sheet__mask" @click="closePaySheet">
 			<view class="pay-sheet" @click.stop>
 				<view class="pay-sheet__header">
-					<text class="pay-sheet__title">确认支付</text>
+					<text class="pay-sheet__title">{{ t('memberpay.sheetTitle') }}</text>
 					<text class="pay-sheet__close" @click="closePaySheet">×</text>
 				</view>
 				<view class="pay-sheet__goods">
-					<text class="pay-sheet__goods-name">黑铁会员 · 月卡</text>
-					<text class="pay-sheet__goods-desc">按月开通，续费自动顺延</text>
+					<text class="pay-sheet__goods-name">{{ t('memberpay.goodsName') }}</text>
+					<text class="pay-sheet__goods-desc">{{ t('memberpay.goodsDesc') }}</text>
 				</view>
 				<view class="pay-sheet__row">
-					<text class="pay-sheet__label">购买时长</text>
+					<text class="pay-sheet__label">{{ t('memberpay.durationLabel') }}</text>
 					<view class="pay-sheet__stepper">
 						<view class="pay-sheet__step-btn" :class="months <= 1 ? 'pay-sheet__step-btn--disabled' : ''" @click="changeMonths(-1)">
 							<text class="pay-sheet__step-text">−</text>
 						</view>
-						<text class="pay-sheet__months">{{ months }} 个月</text>
+						<text class="pay-sheet__months">{{ tf('memberpay.monthsN', [months.toString()]) }}</text>
 						<view class="pay-sheet__step-btn" :class="months >= 12 ? 'pay-sheet__step-btn--disabled' : ''" @click="changeMonths(1)">
 							<text class="pay-sheet__step-text">+</text>
 						</view>
 					</view>
 				</view>
 				<view class="pay-sheet__row">
-					<text class="pay-sheet__label">支付金额</text>
+					<text class="pay-sheet__label">{{ t('memberpay.amountLabel') }}</text>
 					<view class="pay-sheet__amount">
 						<image class="pay-sheet__coin-icon" src="/static/icons/coin-gold.svg" mode="aspectFit" />
-						<text class="pay-sheet__amount-num">{{ months }} 金币</text>
+						<text class="pay-sheet__amount-num">{{ tf('memberpay.coinsN', [months.toString()]) }}</text>
 					</view>
 				</view>
 				<view class="pay-sheet__row">
-					<text class="pay-sheet__label">支付方式</text>
-					<text class="pay-sheet__value">金币余额（{{ balanceGold }} 金币）</text>
+					<text class="pay-sheet__label">{{ t('memberpay.methodLabel') }}</text>
+					<text class="pay-sheet__value">{{ tf('memberpay.balanceN', [balanceGold.toString()]) }}</text>
 				</view>
 				<view class="pay-sheet__btn" hover-class="pay-sheet__btn--hover" :hover-stay-time="70" @click="confirmPay">
 					<text class="pay-sheet__btn-text">{{ payBtnText }}</text>
 				</view>
-				<text class="pay-sheet__tip">支付将从金币余额中扣除 {{ months }} 金币，会员权益即时生效</text>
+				<text class="pay-sheet__tip">{{ tf('memberpay.sheetTip', [months.toString()]) }}</text>
 			</view>
 		</view>
 
@@ -115,24 +115,24 @@
 				<view class="pay-success__icon">
 					<text class="pay-success__icon-check">✓</text>
 				</view>
-				<text class="pay-success__title">支付成功</text>
+				<text class="pay-success__title">{{ t('memberpay.successTitle') }}</text>
 				<view class="pay-success__info">
 					<view class="pay-success__row">
-						<text class="pay-success__label">开通项目</text>
-						<text class="pay-success__value">黑铁会员 · {{ successMonths }} 个月</text>
+						<text class="pay-success__label">{{ t('memberpay.successItemLabel') }}</text>
+						<text class="pay-success__value">{{ tf('memberpay.successPlanN', [successMonths.toString()]) }}</text>
 					</view>
 					<view class="pay-success__row">
-						<text class="pay-success__label">支付金额</text>
-						<text class="pay-success__value pay-success__value-accent">{{ successGold }} 金币</text>
+						<text class="pay-success__label">{{ t('memberpay.successAmountLabel') }}</text>
+						<text class="pay-success__value pay-success__value-accent">{{ tf('memberpay.successCoinsN', [successGold.toString()]) }}</text>
 					</view>
 					<view class="pay-success__row">
-						<text class="pay-success__label">有效期至</text>
+						<text class="pay-success__label">{{ t('memberpay.successUntilLabel') }}</text>
 						<text class="pay-success__value">{{ successExpires }}</text>
 					</view>
 				</view>
 			</view>
 			<view class="pay-success__btn" hover-class="pay-success__btn--hover" :hover-stay-time="70" @click="confirmSuccess">
-				<text class="pay-success__btn-text">确认</text>
+				<text class="pay-success__btn-text">{{ t('common.confirm') }}</text>
 			</view>
 		</view>
 		<!-- #endif -->
@@ -155,6 +155,15 @@
 	import { fetchActivitySummary } from '@/api/activity.uts'
 	import { purchaseMembership } from './api/membership.uts'
 	import { ApiResponse, forceRefreshToken } from '@/utils/request.uts'
+	import { t, tf } from '@/utils/i18n.uts'
+	// 词典注册（memberpay 页文案 + 公共段）
+	import '@/utils/locales/memberpay.uts'
+	import '@/utils/locales/common.uts'
+
+	// 原生导航栏标题随语言切换（本页未启用自定义导航样式）
+	onShow(() => {
+		uni.setNavigationBarTitle({ title: t('memberpay.title') })
+	})
 
 	/** 顶部定位：返回按钮取状态栏高度，内容再避让 */
 	const backTop = ref(44)
@@ -191,9 +200,9 @@
 	/** 支付按钮文案：支付中 / 金币不足 / 可支付 */
 	const payBtnText = computed((): string => {
 		if (paying.value) {
-			return '支付中…'
+			return t('memberpay.paying')
 		}
-		return balanceGold.value >= months.value ? '确认支付' : '金币不足'
+		return balanceGold.value >= months.value ? t('memberpay.confirmPay') : t('memberpay.insufficient')
 	})
 
 	/** 调整购买月数（步进钳位 1~12；支付中不可调） */
@@ -251,7 +260,7 @@
 			return
 		}
 		if (balanceGold.value < months.value) {
-			uni.showToast({ title: '金币不足，先去活动页赚金币吧', icon: 'none' })
+			uni.showToast({ title: t('memberpay.insufficientToast'), icon: 'none' })
 			return
 		}
 		paying.value = true
@@ -306,10 +315,10 @@
 	// 微信小程序分享：转发好友与朋友圈（封面统一 /static/share-cover.png，复制自 yao 项目）
 	// #ifdef MP-WEIXIN
 	onShareAppMessage(() => {
-		return { title: '会员支付', imageUrl: '/static/share-cover.png' }
+		return { title: t('memberpay.title'), imageUrl: '/static/share-cover.png' }
 	})
 	onShareTimeline(() => {
-		return { title: '会员支付', imageUrl: '/static/share-cover.png' }
+		return { title: t('memberpay.title'), imageUrl: '/static/share-cover.png' }
 	})
 	// #endif
 </script>

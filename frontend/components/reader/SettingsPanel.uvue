@@ -4,7 +4,7 @@
 			<view class="settings-grip"></view>
 		</view>
 		<view class="settings-row">
-			<text class="settings-label" :style="'color:' + theme.mutedColor">字号</text>
+			<text class="settings-label" :style="'color:' + theme.mutedColor">{{ t('readercomp.fontSize') }}</text>
 			<view class="settings-row-body">
 				<view class="stepper-group">
 					<view class="stepper-btn" :style="'background-color:' + theme.controlBg + ';border-color:' + theme.controlBorder" @click="changeFontSize(-1)">
@@ -16,7 +16,7 @@
 					</view>
 				</view>
 				<view class="font-btn" :style="'background-color:' + theme.controlBg + ';border-color:' + theme.controlBorder" @click="toggleFontList">
-					<text class="font-btn-text" :style="'color:' + theme.controlText">{{ fontListOpen ? '请选择' : currentFontLabel }}</text>
+					<text class="font-btn-text" :style="'color:' + theme.controlText">{{ fontListOpen ? t('readercomp.fontPick') : currentFontLabel }}</text>
 				</view>
 			</view>
 		</view>
@@ -36,15 +36,15 @@
 			</view>
 			<view class="font-save-row">
 				<view class="font-cancel-btn" @click="cancelFontSelect">
-					<text class="font-cancel-btn-text">取消</text>
+					<text class="font-cancel-btn-text">{{ t('common.cancel') }}</text>
 				</view>
 				<view class="font-save-btn" :style="nightMode ? 'background-color:#f3f4f6' : ''" @click="saveFont">
-					<text class="font-save-btn-text" :style="nightMode ? 'color:#0e0f0c' : ''">保存</text>
+					<text class="font-save-btn-text" :style="nightMode ? 'color:#0e0f0c' : ''">{{ t('common.save') }}</text>
 				</view>
 			</view>
 		</view>
 		<view class="settings-row">
-			<text class="settings-label" :style="'color:' + theme.mutedColor">背景</text>
+			<text class="settings-label" :style="'color:' + theme.mutedColor">{{ t('readercomp.background') }}</text>
 			<view class="settings-row-body">
 				<view class="swatch-group">
 					<view
@@ -61,7 +61,7 @@
 			</view>
 		</view>
 		<view class="settings-row">
-			<text class="settings-label" :style="'color:' + theme.mutedColor">翻页</text>
+			<text class="settings-label" :style="'color:' + theme.mutedColor">{{ t('readercomp.pageTurn') }}</text>
 			<view class="page-turn-group">
 				<view
 					v-for="(m, mi) in pageTurnModes"
@@ -71,7 +71,7 @@
 					:style="pageTurn === m ? '' : 'background-color:' + theme.controlBg + ';border-color:' + theme.controlBorder"
 					@click="selectPageTurn(m)"
 				>
-					<text class="page-turn-text" :class="pageTurn === m ? 'page-turn-text-active' : ''" :style="pageTurn === m ? '' : 'color:' + theme.controlText">{{ m }}</text>
+					<text class="page-turn-text" :class="pageTurn === m ? 'page-turn-text-active' : ''" :style="pageTurn === m ? '' : 'color:' + theme.controlText">{{ modeLabel(m) }}</text>
 				</view>
 			</view>
 		</view>
@@ -81,6 +81,24 @@
 <script setup lang="uts">
 	import { READER_THEME_LIGHT, READER_THEME_NIGHT, READER_THEME_PAPER, ReaderTheme } from '@/utils/theme.uts'
 	import { ReaderSettings, FONT_OPTIONS, fontOptionOf, loadSettings, saveSettings } from '@/utils/readerTypes.uts'
+	import { t } from '@/utils/i18n.uts'
+	// 词典注册（阅读器组件文案 + 公共段）
+	import '@/utils/locales/readercomp.uts'
+	import '@/utils/locales/common.uts'
+
+	/** 翻页模式展示文案（内部值为中文持久化兼容，仅展示层取词） */
+	function modeLabel(mode: string) : string {
+		if (mode == '仿真') {
+			return t('readercomp.modeCurl')
+		}
+		if (mode == '覆盖') {
+			return t('readercomp.modeCover')
+		}
+		if (mode == '平移') {
+			return t('readercomp.modeSlide')
+		}
+		return t('readercomp.modeScroll')
+	}
 
 	/**
 	 * SettingsPanel —— 阅读设置面板子组件（设置真源）
@@ -183,7 +201,7 @@
 		fontKey.value = key
 		uni.setStorageSync('reader_font', key)
 		emitChange()
-		emit('toast', '字体已保存')
+		emit('toast', t('readercomp.fontSaved'))
 	}
 
 	/** 背景色板切换（正文与标题色随主题成组切换，由宿主应用） */
@@ -200,7 +218,7 @@
 		pageTurn.value = mode
 		saveSettings({ fontSize: fontSize.value, pageTurn: pageTurn.value, theme: themeKey.value, fontKey: fontKey.value } as ReaderSettings)
 		emitChange()
-		emit('toast', '已切换至【' + mode + '】模式')
+		emit('toast', t('readercomp.switchedMode').replace('{0}', modeLabel(mode)))
 	}
 
 	/** 日/夜切换（宿主三项导航经 ref 调用：真源唯一写入口，保证持久化与上行一致） */
@@ -209,7 +227,7 @@
 		selectedBg.value = key == 'paper' ? READER_THEME_PAPER.readerBg : (key == 'night' ? READER_THEME_NIGHT.readerBg : READER_THEME_LIGHT.readerBg)
 		saveSettings({ fontSize: fontSize.value, pageTurn: pageTurn.value, theme: themeKey.value, fontKey: fontKey.value } as ReaderSettings)
 		emitChange()
-		emit('toast', key == 'night' ? '已切换至夜晚模式' : '已切换至白天模式')
+		emit('toast', key == 'night' ? t('readercomp.nightOn') : t('readercomp.nightOff'))
 	}
 
 	/** ===== 字体列表（面板内 UI 状态，保存动作组件内持久化） ===== */

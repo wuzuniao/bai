@@ -4,35 +4,35 @@
 				<view class="register-page__card">
 					<!-- 标题区 -->
 					<view class="register-page__header">
-						<text class="register-page__title">注册账号</text>
-						<text class="register-page__subtitle">创建账号，开启您的阅读之旅。</text>
+						<text class="register-page__title">{{ t('register.title') }}</text>
+						<text class="register-page__subtitle">{{ t('register.subtitle') }}</text>
 					</view>
 
 					<!-- 注册表单 -->
 					<view class="register-page__form">
 						<!-- 用户名 -->
 						<view class="register-page__field">
-							<FormInput v-model="usernameValue" label="用户名" placeholder="请输入用户名（2-15 个字符，仅限中文、英文及数字）" :maxlength="15" :error="usernameError" @blur="onUsernameBlur" />
+							<FormInput v-model="usernameValue" :label="t('register.usernameLabel')" :placeholder="t('register.usernamePh')" :maxlength="15" :error="usernameError" @blur="onUsernameBlur" />
 						</view>
 
 						<!-- 密码 -->
 						<view class="register-page__field">
-							<PasswordInput v-model="passwordValue" label="密码" placeholder="请输入密码" :maxlength="20" :error="passwordError" @blur="onPasswordBlur" />
+							<PasswordInput v-model="passwordValue" :label="t('register.passwordLabel')" :placeholder="t('register.passwordPh')" :maxlength="20" :error="passwordError" @blur="onPasswordBlur" />
 						</view>
 
 						<!-- 确认密码 -->
 						<view class="register-page__field">
-							<PasswordInput v-model="confirmPasswordValue" label="确认密码" placeholder="请再次输入密码" :maxlength="20" :error="confirmPasswordError" @blur="onConfirmPasswordBlur" />
+							<PasswordInput v-model="confirmPasswordValue" :label="t('register.confirmLabel')" :placeholder="t('register.confirmPh')" :maxlength="20" :error="confirmPasswordError" @blur="onConfirmPasswordBlur" />
 						</view>
 
 						<!-- 电子邮箱 -->
 						<view class="register-page__field">
-							<FormInput v-model="emailValue" label="电子邮箱" placeholder="请输入邮箱地址" :maxlength="254" :error="emailError" @blur="onEmailBlur" />
+							<FormInput v-model="emailValue" :label="t('register.emailLabel')" :placeholder="t('register.emailPh')" :maxlength="254" :error="emailError" @blur="onEmailBlur" />
 						</view>
 
 						<!-- 验证码 -->
 						<view class="register-page__field">
-							<CodeInput ref="codeRef" v-model="codeValue" label="验证码" :error="codeError" :sending="isSending" @request-send="handleGetCode" />
+							<CodeInput ref="codeRef" v-model="codeValue" :label="t('register.codeLabel')" :error="codeError" :sending="isSending" @request-send="handleGetCode" />
 						</view>
 
 						<!-- 协议勾选（注册仅提示隐私政策） -->
@@ -42,15 +42,15 @@
 
 						<!-- 注册按钮 -->
 						<view class="register-page__submit" @click="handleRegister">
-							<text class="register-page__submit-text">注册</text>
+							<text class="register-page__submit-text">{{ t('register.submit') }}</text>
 						</view>
 					</view>
 				</view>
 
 				<!-- 底部登录链接 -->
 				<view class="register-page__footer">
-					<text class="register-page__footer-text">已有账号？</text>
-					<text class="register-page__footer-link" @click="goLogin">去登录</text>
+					<text class="register-page__footer-text">{{ t('register.hasAccount') }}</text>
+					<text class="register-page__footer-link" @click="goLogin">{{ t('register.goLogin') }}</text>
 			</view>
 	</PageShell>
 </template>
@@ -63,6 +63,10 @@
 	import AgreementCheckbox from '@/components/form/AgreementCheckbox.uvue'
 	import { sendRegisterCode, registerUser } from './api/user.uts'
 	import { validateUsername, validatePassword, validateConfirmPassword, validateEmail } from './utils/validators.uts'
+	import { t } from '@/utils/i18n.uts'
+	// 词典注册（register 页文案 + 公共段）
+	import '@/utils/locales/register.uts'
+	import '@/utils/locales/common.uts'
 
 	const usernameValue = ref('')
 	const passwordValue = ref('')
@@ -116,7 +120,7 @@
 		}
 		isSending.value = true
 		sendRegisterCode(emailValue.value).then((_res) => {
-			uni.showToast({ title: '验证码已发送', icon: 'none' })
+			uni.showToast({ title: t('register.codeSent'), icon: 'none' })
 			codeRef.value?.startCountdown()
 		}).catch((e) => {
 			const err = e as Error
@@ -137,7 +141,7 @@
 		passwordError.value = validatePassword(passwordValue.value)
 		confirmPasswordError.value = validateConfirmPassword(confirmPasswordValue.value, passwordValue.value)
 		emailError.value = validateEmail(emailValue.value)
-		codeError.value = codeValue.value.length == 0 ? '请输入验证码' : ''
+		codeError.value = codeValue.value.length == 0 ? t('register.codeEmpty') : ''
 		if (usernameError.value.length > 0) {
 			uni.showToast({ title: usernameError.value, icon: 'none' })
 			return
@@ -160,10 +164,10 @@
 		}
 		if (!agreed.value) {
 			uni.showModal({
-				title: '提示',
-				content: '查看并同意《服务协议》和《隐私政策》',
-				confirmText: '确定',
-				cancelText: '取消',
+				title: t('common.tip'),
+				content: t('register.agreeContent'),
+				confirmText: t('common.ok'),
+				cancelText: t('common.cancel'),
 				success: (res) => {
 					if (res.confirm) {
 						agreed.value = true
@@ -179,14 +183,14 @@
 	function submitForm() : void {
 		submitting.value = true
 		registerUser(usernameValue.value, passwordValue.value, emailValue.value, codeValue.value).then((_res) => {
-			uni.showToast({ title: '注册成功', icon: 'success' })
+			uni.showToast({ title: t('register.success'), icon: 'success' })
 			// 注册成功后跳转登录页（带 mode=normal 直接展示账号密码登录卡片）
 			setTimeout(() => {
 				uni.redirectTo({ url: '/pages/user/login?mode=normal' })
 			}, 1500)
 		}).catch((e) => {
 			const err = e as Error
-			const msg = err.message.includes('验证码') ? '请输入正确验证码' : err.message
+			const msg = err.message.includes('验证码') ? t('register.codeWrong') : err.message
 			uni.showToast({ title: msg, icon: 'none' })
 		}).finally(() => {
 			submitting.value = false
@@ -200,10 +204,10 @@
 	// 微信小程序分享：转发好友与朋友圈（封面统一 /static/share-cover.png，复制自 yao 项目）
 	// #ifdef MP-WEIXIN
 	onShareAppMessage(() => {
-		return { title: '注册账号', imageUrl: '/static/share-cover.png' }
+		return { title: t('register.shareTitle'), imageUrl: '/static/share-cover.png' }
 	})
 	onShareTimeline(() => {
-		return { title: '注册账号', imageUrl: '/static/share-cover.png' }
+		return { title: t('register.shareTitle'), imageUrl: '/static/share-cover.png' }
 	})
 	// #endif
 </script>

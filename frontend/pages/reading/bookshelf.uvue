@@ -6,7 +6,7 @@
 				<view class="nav-inner" :style="'height:' + navHeight + 'px'">
 					<!-- 书架标题（Stitch: 点击展开排序菜单，箭头旋转 180°） -->
 					<view class="nav-title-btn" @click="toggleMenu">
-						<text class="nav-title">书架</text>
+						<text class="nav-title">{{ t('bookshelf.title') }}</text>
 						<image class="nav-chevron" :class="menuOpen ? 'nav-chevron-open' : ''" src="/static/icons/chevron-down.svg" />
 					</view>
 					<!-- 内联搜索栏（Stitch: 点搜索图标展开于标题右侧，含清空与取消） -->
@@ -16,7 +16,7 @@
 							<input
 								class="search-input"
 								v-model="searchText"
-								placeholder="搜索书名..."
+								:placeholder="t('bookshelf.searchPh')"
 								:placeholder-style="PLACEHOLDER_STYLE"
 								:focus="true"
 								@focus="onSearchFocus"
@@ -24,11 +24,11 @@
 							/>
 							<image v-if="searchText.length > 0" class="search-clear" src="/static/icons/close.svg" @click="clearSearch" />
 						</view>
-						<text class="search-cancel" @click="closeSearch">取消</text>
+						<text class="search-cancel" @click="closeSearch">{{ t('common.cancel') }}</text>
 					</view>
 					<!-- 编辑模式：完成按钮；其余：搜索 / 添加按钮 -->
 					<view v-if="editMode" class="nav-finish" @click="finishEdit">
-						<text class="nav-finish-text">完成</text>
+						<text class="nav-finish-text">{{ t('bookshelf.finish') }}</text>
 					</view>
 					<view v-else class="nav-actions">
 						<view v-if="!searchOpen" class="nav-action-btn" @click="openSearch">
@@ -47,14 +47,14 @@
 					<view class="stats-left">
 						<view class="stats-num-row">
 							<text class="stats-num">{{ todayMinutes }}</text>
-							<text class="stats-unit">分钟</text>
+							<text class="stats-unit">{{ t('bookshelf.minutes') }}</text>
 						</view>
-						<text class="stats-label">今日已读</text>
+						<text class="stats-label">{{ t('bookshelf.todayRead') }}</text>
 					</view>
 					<view v-if="pillState != 'none'" class="stats-pill" @click.stop="onPillTap">
 						<text class="stats-pill-text">{{ pillLeadText }}</text>
 						<view class="stats-pill-dot"></view>
-						<text class="stats-pill-coin">领 {{ pillReward }}</text>
+						<text class="stats-pill-coin">{{ t('bookshelf.claim') }} {{ pillReward }}</text>
 						<image class="stats-pill-coin-icon" src="/static/icons/coin-copper.svg" />
 					</view>
 				</view>
@@ -63,15 +63,15 @@
 					<view class="edit-styles">
 						<view class="style-btn" :class="shelfStyle === 'plain' ? 'style-btn-on' : ''" @click="setStyle('plain')">
 							<view class="style-dot style-dot-light"></view>
-							<text class="style-btn-text" :class="shelfStyle === 'plain' ? 'style-btn-text-on' : ''">白卡</text>
+							<text class="style-btn-text" :class="shelfStyle === 'plain' ? 'style-btn-text-on' : ''">{{ t('bookshelf.stylePlain') }}</text>
 						</view>
 						<view class="style-btn" :class="shelfStyle === 'photo' ? 'style-btn-on' : ''" @click="setStyle('photo')">
 							<view class="style-dot style-dot-dark"></view>
-							<text class="style-btn-text" :class="shelfStyle === 'photo' ? 'style-btn-text-on' : ''">深灰</text>
+							<text class="style-btn-text" :class="shelfStyle === 'photo' ? 'style-btn-text-on' : ''">{{ t('bookshelf.stylePhoto') }}</text>
 						</view>
 					</view>
 					<view v-if="selectedKeys.length > 0" class="edit-delete" @click="deleteSelected">
-						<text class="edit-delete-text">删除 {{ selectedKeys.length }} 本</text>
+						<text class="edit-delete-text">{{ tf('bookshelf.deleteN', [selectedKeys.length.toString()]) }}</text>
 					</view>
 				</view>
 				<!-- 书架网格（3 列，编辑模式可选可拖拽；添加格独立于数据循环渲染，固定在网格末尾） -->
@@ -106,7 +106,7 @@
 								</view>
 								<!-- 云端角标（本设备无正文文件时展示：水印式低对比小字；plain 右下与格式水印对位（编辑模式避让勾选点隐藏）、photo 左上避让右上水印） -->
 								<view v-if="book.path.length == 0 && (shelfStyle !== 'plain' || !editMode)" class="cloud-badge" :class="shelfStyle === 'plain' ? 'cloud-badge-plain' : 'cloud-badge-photo'">
-									<text class="cloud-badge-text" :class="shelfStyle === 'plain' ? 'cloud-badge-text-plain' : 'cloud-badge-text-photo'">云端</text>
+									<text class="cloud-badge-text" :class="shelfStyle === 'plain' ? 'cloud-badge-text-plain' : 'cloud-badge-text-photo'">{{ t('bookshelf.cloud') }}</text>
 								</view>
 								<!-- 编辑勾选点（封面右下角） -->
 								<view
@@ -153,7 +153,7 @@
 				</view>
 				<!-- 搜索空态：有关键字但无匹配书籍 -->
 				<view v-if="searchEmpty" class="search-empty">
-					<text class="search-empty-text">未找到相关书籍</text>
+					<text class="search-empty-text">{{ t('bookshelf.notFound') }}</text>
 				</view>
 			</view>
 		</scroll-view>
@@ -168,36 +168,36 @@
 				class="menu-item"
 				@click="onSelectSort(opt)"
 			>
-				<text class="menu-item-text" :class="currentSort === opt ? 'menu-item-text-active' : ''">{{ opt }}</text>
+				<text class="menu-item-text" :class="currentSort === opt ? 'menu-item-text-active' : ''">{{ sortLabel(opt) }}</text>
 			</view>
 		</view>
 		<!-- 加号浮动菜单（Stitch: 导入书籍 / 编辑书架，右对齐悬浮） -->
 		<view v-if="plusMenuOpen" class="plus-menu" :style="'right:' + plusMenuRight + 'px;top:' + (navTop + navHeight + 8) + 'px'">
 			<view class="plus-menu-item" @click="onImportTap">
-				<text class="plus-menu-item-text">导入书籍</text>
+				<text class="plus-menu-item-text">{{ t('bookshelf.import') }}</text>
 			</view>
 			<view class="plus-menu-item" @click="enterEdit">
-				<text class="plus-menu-item-text">编辑书架</text>
+				<text class="plus-menu-item-text">{{ t('bookshelf.edit') }}</text>
 			</view>
 		</view>
 
 		<!-- 删除确认弹窗（ex-modal-card：白卡 圆角 xl 提升阴影；勾选「同时删除云端数据」才一并删云端，仅所选含云端书籍且已登录时显示勾选行） -->
 		<view v-if="deleteConfirmOpen" class="delete-mask" @click="closeDeleteConfirm">
 			<view class="delete-card" @click.stop>
-				<text class="delete-title">删除 {{ selectedKeys.length }} 本书籍？</text>
+				<text class="delete-title">{{ tf('bookshelf.deleteConfirmN', [selectedKeys.length.toString()]) }}</text>
 				<text class="delete-desc" :class="hasCloudSelected && deleteCloudToo ? 'delete-desc-warn' : ''">{{ deleteDescText }}</text>
 				<view v-if="hasCloudSelected" class="delete-cloud" @click="toggleDeleteCloud">
 					<view class="delete-checkbox" :class="deleteCloudToo ? 'delete-checkbox-on' : ''">
 						<text v-if="deleteCloudToo" class="delete-checkbox-icon">✓</text>
 					</view>
-					<text class="delete-cloud-text">同时删除云端数据</text>
+					<text class="delete-cloud-text">{{ t('bookshelf.deleteCloudToo') }}</text>
 				</view>
 				<view class="delete-actions">
 					<view class="delete-cancel" @click="closeDeleteConfirm">
-						<text class="delete-cancel-text">取消</text>
+						<text class="delete-cancel-text">{{ t('common.cancel') }}</text>
 					</view>
 					<view class="delete-confirm" @click="confirmDelete">
-						<text class="delete-confirm-text">删除</text>
+						<text class="delete-confirm-text">{{ t('bookshelf.delete') }}</text>
 					</view>
 				</view>
 			</view>
@@ -217,15 +217,30 @@
 	import { mpCapsuleRect } from '@/utils/layout.uts'
 	import { REWARD_TIERS, fmtRemainMinutes } from '@/utils/rewards.uts'
 	import { fetchActivitySummary, claimReadingReward } from '@/api/activity.uts'
+	import { t, tf } from '@/utils/i18n.uts'
+	// 词典注册（bookshelf 页文案 + 公共段）
+	import '@/utils/locales/bookshelf.uts'
+	import '@/utils/locales/common.uts'
 	// #ifdef WEB
 	import { webPickBooks } from '@/utils/webfs'
 	// #endif
 
 	/** 书架书籍（云端元数据 + 本机正文缓存合并列表，顺序即云端手动排序结果；未导入时仅显示添加格） */
 	const books = ref<LocalBook[]>([])
-	/** 排序下拉选项与当前模式（置于 books 之后：排序视图 computed 依赖此声明） */
-	const sortOptions = ref<string[]>(['手动顺序', '最近阅读', '添加时间'])
-	const currentSort = ref('手动顺序')
+	/** 排序下拉选项与当前模式（内部键：manual/recent/added，文案经 sortLabel 取词；置于 books 之后：排序视图 computed 依赖此声明） */
+	const sortOptions = ref<string[]>(['manual', 'recent', 'added'])
+	const currentSort = ref('manual')
+
+	/** 排序选项文案（渲染期取词，随语言切换刷新） */
+	function sortLabel(key: string) : string {
+		if (key == 'recent') {
+			return t('bookshelf.sortRecent')
+		}
+		if (key == 'added') {
+			return t('bookshelf.sortAdded')
+		}
+		return t('bookshelf.sortManual')
+	}
 	/** 今日已读分钟数（阅读页结算，onShow 刷新） */
 	const todayMinutes = ref(0)
 	/** 阅读档位领取状态（locked/claimable/claimed，与后端一致；登录后 summary 覆盖，未登录按本地分钟推算） */
@@ -269,9 +284,9 @@
 			return ''
 		}
 		if (tierStates.value[i] == 'claimable') {
-			return '已达成'
+			return t('bookshelf.achieved')
 		}
-		return '再读 ' + fmtRemainMinutes(REWARD_TIERS[i].minutes - todayMinutes.value)
+		return tf('bookshelf.readMore', [fmtRemainMinutes(REWARD_TIERS[i].minutes - todayMinutes.value)])
 	})
 	/** 书架卡片统一样式：plain 白卡 / photo 深灰卡 */
 	const shelfStyle = ref('plain')
@@ -291,10 +306,10 @@
 		if (kw.length > 0) {
 			list = list.filter((b : LocalBook) : boolean => b.title.toLowerCase().indexOf(kw) >= 0)
 		}
-		if (currentSort.value == '最近阅读') {
+		if (currentSort.value == 'recent') {
 			return list.slice().sort((a : LocalBook, b : LocalBook) : number => b.lastReadAt - a.lastReadAt)
 		}
-		if (currentSort.value == '添加时间') {
+		if (currentSort.value == 'added') {
 			return list.slice().sort((a : LocalBook, b : LocalBook) : number => b.addedAt - a.addedAt)
 		}
 		return list
@@ -390,22 +405,22 @@
 	function metaOf(book : LocalBook) : string {
 		if (book.format == 'PDF') {
 			if (book.lastReadAt > 0 && book.lastPercent > 0) {
-				return '已读 ' + Math.round(book.lastPercent) + '% · 共 ' + book.chapterCount + ' 页'
+				return tf('bookshelf.metaPdfRead', [Math.round(book.lastPercent).toString(), book.chapterCount.toString()])
 			}
-			return '共 ' + book.chapterCount + ' 页'
+			return tf('bookshelf.metaPdfTotal', [book.chapterCount.toString()])
 		}
 		// 序章不计入章号与总数：有序书 cid=0 为序（展示「序」），正文号=cid、总数减一；无序书正文号=cid+1。
 		// chapterCount 存储含序（存量数据一致），仅展示层按 hasPreface 换算，向后兼容
 		const hasPref = book.hasPreface
 		const total = book.chapterCount - (hasPref ? 1 : 0)
 		if (book.lastReadAt <= 0 || book.lastChapter < 0) {
-			return '未读'
+			return t('bookshelf.metaUnread')
 		}
 		if (hasPref && book.lastChapter == 0) {
-			return '序 / 共 ' + total + ' 章'
+			return tf('bookshelf.metaPreface', [total.toString()])
 		}
 		const num = hasPref ? book.lastChapter : book.lastChapter + 1
-		return '第 ' + num + ' 章 / 共 ' + total + ' 章'
+		return tf('bookshelf.metaChapterN', [num.toString(), total.toString()])
 	}
 
 	/** 切换书架卡片统一样式（缓存 + 云端偏好跟随） */
@@ -485,12 +500,12 @@
 	/** 删除提示文案随「同时删除云端数据」勾选切换（所选无云端书籍时仅本设备口径） */
 	const deleteDescText = computed(() : string => {
 		if (hasCloudSelected.value && deleteCloudToo.value) {
-			return '将删除本设备的书籍文件与阅读数据，并同步删除云端书籍及其划线、想法与书签'
+			return t('bookshelf.descWithCloud')
 		}
 		if (hasCloudSelected.value) {
-			return '仅删除本设备的书籍文件与阅读数据，云端数据不受影响'
+			return t('bookshelf.descLocalKeepCloud')
 		}
-		return '仅删除本设备的书籍文件与阅读数据'
+		return t('bookshelf.descLocalOnly')
 	})
 
 	/** 删除按钮：弹出确认框（勾选「同时删除云端数据」才一并删云端） */
@@ -576,7 +591,7 @@
 
 	function onCardTouchStart(e : UniTouchEvent, gi : number) : void {
 		// 仅手动顺序模式可拖拽调序（最近阅读/添加时间为视图排序，拖拽不改变其语义）
-		if (!editMode.value || currentSort.value != '手动顺序' || dragIndex.value != -1 || e.touches.length == 0) {
+		if (!editMode.value || currentSort.value != 'manual' || dragIndex.value != -1 || e.touches.length == 0) {
 			return
 		}
 		if (gi >= books.value.length) {
@@ -691,10 +706,10 @@
 	// 微信小程序分享：转发好友与朋友圈（封面统一 /static/share-cover.png，复制自 yao 项目）
 	// #ifdef MP-WEIXIN
 	onShareAppMessage(() => {
-		return { title: '书架', imageUrl: '/static/share-cover.png' }
+		return { title: t('bookshelf.shareTitle'), imageUrl: '/static/share-cover.png' }
 	})
 	onShareTimeline(() => {
-		return { title: '书架', imageUrl: '/static/share-cover.png' }
+		return { title: t('bookshelf.shareTitle'), imageUrl: '/static/share-cover.png' }
 	})
 	// #endif
 
@@ -757,7 +772,7 @@
 				handlePickedFiles(files)
 			}
 		}, (e) => {
-			uni.showToast({ title: e instanceof Error ? e.message : '文件选择失败', icon: 'none', duration: 2500 })
+			uni.showToast({ title: e instanceof Error ? e.message : t('bookshelf.pickFail'), icon: 'none', duration: 2500 })
 		})
 		// #endif
 	}
@@ -775,7 +790,7 @@
 			return
 		}
 		importing.value = true
-		uni.showLoading({ title: '正在导入', mask: true })
+		uni.showLoading({ title: t('bookshelf.importing'), mask: true })
 		let okCount = 0
 		let firstErr = ''
 		let failedNames : string[] = []
@@ -786,7 +801,7 @@
 				okCount++
 			} catch (e) {
 				if (firstErr.length == 0) {
-					firstErr = e instanceof Error ? e.message : '导入失败'
+					firstErr = e instanceof Error ? e.message : t('bookshelf.importFail')
 				}
 				failedNames.push(f.name)
 			}
@@ -797,7 +812,7 @@
 		if (files.length == 1) {
 			// 单本：不量化本数，成功/失败各一句（失败沿用格式错误信息定位原因）
 			if (okCount > 0) {
-				uni.showToast({ title: '已导入成功', icon: 'none' })
+				uni.showToast({ title: t('bookshelf.importedOne'), icon: 'none' })
 			} else {
 				uni.showToast({ title: firstErr, icon: 'none', duration: 2500 })
 			}
@@ -805,11 +820,11 @@
 		}
 		// 多本：报成功本数，失败的逐书名提示（控制台同步完整打印，不受 toast 截断限制）
 		if (okCount == files.length) {
-			uni.showToast({ title: '已导入 ' + okCount + ' 本', icon: 'none' })
+			uni.showToast({ title: tf('bookshelf.importedN', [okCount.toString()]), icon: 'none' })
 		} else if (okCount > 0) {
-			uni.showToast({ title: '已导入 ' + okCount + ' 本，失败：' + failedNames.join('、'), icon: 'none', duration: 2500 })
+			uni.showToast({ title: tf('bookshelf.importedNFails', [okCount.toString(), failedNames.join('、')]), icon: 'none', duration: 2500 })
 		} else {
-			uni.showToast({ title: '导入失败：' + failedNames.join('、'), icon: 'none', duration: 2500 })
+			uni.showToast({ title: tf('bookshelf.importFailedN', [failedNames.join('、')]), icon: 'none', duration: 2500 })
 		}
 		console.log('导入失败书籍：' + failedNames.join('、'))
 	}
@@ -845,7 +860,7 @@
 	/** 点击书籍进入阅读：txt 进文本阅读器，PDF 进原文件渲染页（携带书籍 id）；本设备无正文时提示重导 */
 	function openBook(book: LocalBook) : void {
 		if (book.path.length == 0) {
-			uni.showToast({ title: '本设备没有该书文件，重新导入同名文件即可同步进度', icon: 'none', duration: 2500 })
+			uni.showToast({ title: t('bookshelf.fileMissing'), icon: 'none', duration: 2500 })
 			return
 		}
 		if (book.format == 'PDF') {
@@ -903,7 +918,7 @@
 			claimBusy.value = false
 			if (res.code == 0 && res.data != null) {
 				const reward = res.data!.getNumber('reward') ?? (tier.base + tier.bonus)
-				uni.showToast({ title: '领取成功，+' + reward + ' 铜币', icon: 'none' })
+				uni.showToast({ title: tf('toast.claimOkN', [reward.toString()]), icon: 'none' })
 				markTierClaimed(i)
 			}
 		}, (e: Error) => {

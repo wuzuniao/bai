@@ -3,10 +3,10 @@
 		<view :class="modelValue ? 'agree-check__box agree-check__box--on' : 'agree-check__box'">
 			<view v-if="modelValue" class="agree-check__mark"></view>
 		</view>
-		<text class="agree-check__text">查看并同意</text>
-		<text class="agree-check__text" @click.stop="goAgreement">《服务协议》</text>
-		<text class="agree-check__text">和</text>
-		<text class="agree-check__text" @click.stop="goPrivacy">《隐私政策》</text>
+		<text class="agree-check__text">{{ t('agree.viewAndAgree') }}</text>
+		<text class="agree-check__text" @click.stop="goAgreement">{{ t('agree.service') }}</text>
+		<text class="agree-check__text">{{ t('agree.and') }}</text>
+		<text class="agree-check__text" @click.stop="goPrivacy">{{ t('agree.privacy') }}</text>
 	</view>
 </template>
 
@@ -19,6 +19,9 @@
 	 */
 	import { AGREEMENT_URL, PRIVACY_URL } from '@/utils/config.uts'
 	import { openExternalLink } from '@/utils/link.uts'
+	import { t } from '@/utils/i18n.uts'
+	// 词典注册（协议文案）
+	import '@/utils/locales/common.uts'
 
 	const props = defineProps<{
 		/** 是否已勾选（v-model） */

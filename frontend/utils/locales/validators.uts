@@ -1,0 +1,37 @@
+/**
+ * 表单校验文案词典段（pages/user/utils/validators.uts）
+ * 模块载入时注册进 i18n 全局词典；validators.uts 引入本文件即完成注册。
+ */
+import { registerDict, Dict } from '../i18n'
+
+const zh: Dict = new Map<string, string>([
+	['validator.usernameEmpty', '请输入用户名'],
+	['validator.usernameLength', '用户名长度需为 2-15 个字符'],
+	['validator.usernameCharset', '用户名仅允许中文、英文及数字字符'],
+	['validator.passwordEmpty', '请输入密码'],
+	['validator.passwordLength', '密码长度需为 8-20 位'],
+	['validator.passwordWeak', '密码需包含大小写字母、数字、特殊符号中的至少三种'],
+	['validator.confirmEmpty', '请再次输入密码'],
+	['validator.pwdMismatch', '两次密码不一致'],
+	['validator.emailEmpty', '请输入邮箱地址'],
+	['validator.emailFormat', '邮箱格式不正确'],
+	['validator.codeEmpty', '请输入验证码'],
+	['validator.codeFormat', '验证码为 6 位数字']
+])
+
+const en: Dict = new Map<string, string>([
+	['validator.usernameEmpty', 'Please enter a username'],
+	['validator.usernameLength', 'Username must be 2-15 characters'],
+	['validator.usernameCharset', 'Username allows Chinese characters, letters and digits only'],
+	['validator.passwordEmpty', 'Please enter a password'],
+	['validator.passwordLength', 'Password must be 8-20 characters'],
+	['validator.passwordWeak', 'Password needs at least 3 of: upper/lowercase letters, digits, symbols'],
+	['validator.confirmEmpty', 'Enter your password again'],
+	['validator.pwdMismatch', 'Passwords do not match'],
+	['validator.emailEmpty', 'Please enter an email address'],
+	['validator.emailFormat', 'Invalid email format'],
+	['validator.codeEmpty', 'Please enter the code'],
+	['validator.codeFormat', 'Code must be 6 digits']
+])
+
+registerDict(zh, en)

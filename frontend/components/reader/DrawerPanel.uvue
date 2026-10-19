@@ -5,14 +5,14 @@
 		</view>
 		<view class="drawer-header">
 			<view :class="drawerTab === 'catalog' ? 'drawer-tab-active' : 'drawer-tab-plain'" @click="switchDrawerTab('catalog')">
-				<text :class="drawerTab === 'catalog' ? 'drawer-tab-title' : 'drawer-tab-plain'">目录</text>
+				<text :class="drawerTab === 'catalog' ? 'drawer-tab-title' : 'drawer-tab-plain'">{{ t('readercomp.tabCatalog') }}</text>
 				<text v-if="drawerTab === 'catalog'" class="drawer-tab-sort" @click="onSortTap($event)">{{ orderDesc ? '↓↑' : '⇅' }}</text>
 			</view>
 			<view :class="drawerTab === 'note' ? 'drawer-tab-active' : 'drawer-tab-plain'" @click="switchDrawerTab('note')">
-				<text :class="drawerTab === 'note' ? 'drawer-tab-title' : 'drawer-tab-plain'">想法/划线</text>
+				<text :class="drawerTab === 'note' ? 'drawer-tab-title' : 'drawer-tab-plain'">{{ t('readercomp.tabNotes') }}</text>
 			</view>
 			<view :class="drawerTab === 'bookmark' ? 'drawer-tab-active' : 'drawer-tab-plain'" @click="switchDrawerTab('bookmark')">
-				<text :class="drawerTab === 'bookmark' ? 'drawer-tab-title' : 'drawer-tab-plain'">书签</text>
+				<text :class="drawerTab === 'bookmark' ? 'drawer-tab-title' : 'drawer-tab-plain'">{{ t('readercomp.tabBookmark') }}</text>
 			</view>
 		</view>
 		<scroll-view class="drawer-list" direction="vertical" :show-scrollbar="false" :scroll-into-view="catalogAnchor">
@@ -31,7 +31,7 @@
 			<!-- 想法/划线页（懒渲染同目录页）：划线记录卡片（宿主 notes 随划线与取消划线实时同步） -->
 			<view v-else-if="open && drawerTab === 'note'">
 				<view v-if="notes.length == 0" class="bookmark-empty">
-					<text class="bookmark-empty-text" :style="'color:' + theme.mutedColor">暂无划线记录，长按正文即可划线</text>
+					<text class="bookmark-empty-text" :style="'color:' + theme.mutedColor">{{ t('readercomp.noUnderlines') }}</text>
 				</view>
 				<view
 					v-for="(r, ri) in notes"
@@ -63,6 +63,10 @@
 	import { Chapter, Bookmark, NoteRecord } from '@/utils/readerTypes.uts'
 	import { ReaderTheme } from '@/utils/theme.uts'
 	import BookmarkPanel from '@/components/reader/BookmarkPanel.uvue'
+	import { t } from '@/utils/i18n.uts'
+	// 词典注册（阅读器组件文案）
+	import '@/utils/locales/readercomp.uts'
+	import '@/utils/locales/common.uts'
 
 	/**
 	 * DrawerPanel —— 目录抽屉子组件（抽屉壳与页签）
@@ -136,7 +140,7 @@
 	function onSortTap(e : UniPointerEvent) : void {
 		e.stopPropagation()
 		orderDesc.value = !orderDesc.value
-		emit('toast', orderDesc.value ? '已切换至倒序排列' : '已切换至正序排列')
+		emit('toast', orderDesc.value ? t('readercomp.orderDesc') : t('readercomp.orderAsc'))
 		locateCatalogAnchor()
 	}
 

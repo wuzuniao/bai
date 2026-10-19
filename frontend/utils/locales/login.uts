@@ -1,0 +1,59 @@
+/**
+ * 登录页词典段（pages/user/login.uvue）
+ * 模块载入时注册进 i18n 全局词典；login.uvue 引入本文件即完成注册。
+ */
+import { registerDict, Dict } from '../i18n'
+
+const zh: Dict = new Map<string, string>([
+	['login.title', '一键登录'],
+	['login.welcome', '欢迎回来'],
+	['login.switchPassword', '账号密码登录'],
+	['login.usernameLabel', '用户名或邮箱'],
+	['login.usernamePh', '请输入用户名或邮箱'],
+	['login.passwordLabel', '密码'],
+	['login.passwordPh', '请输入密码'],
+	['login.forgot', '忘记密码？'],
+	['login.submit', '登录'],
+	['login.noAccount', '还没有账号？'],
+	['login.goRegister', '立即注册'],
+	['login.shareTitle', '登录'],
+	['login.usernameEmpty', '请输入用户名'],
+	['login.passwordEmpty', '请输入密码'],
+	['login.agreeContent', '查看并同意《服务协议》和《隐私政策》'],
+	['login.success', '登录成功'],
+	['login.fingerprintVerifying', '指纹验证中...'],
+	['login.fingerprintFail', '指纹登录失败，请使用账号密码登录'],
+	['login.wechatLoading', '微信登录中...'],
+	['login.timeout', '登录超时，请检查网络或认证服务'],
+	['login.wechatCodeFail', '获取微信登录凭证失败'],
+	['login.wechatFail', '微信登录失败'],
+	['login.wechatCancelled', '已取消微信登录']
+])
+
+const en: Dict = new Map<string, string>([
+	['login.title', 'Quick Sign In'],
+	['login.welcome', 'Welcome back'],
+	['login.switchPassword', 'Sign in with Password'],
+	['login.usernameLabel', 'Username or Email'],
+	['login.usernamePh', 'Enter your username or email'],
+	['login.passwordLabel', 'Password'],
+	['login.passwordPh', 'Enter your password'],
+	['login.forgot', 'Forgot password?'],
+	['login.submit', 'Sign In'],
+	['login.noAccount', 'No account yet?'],
+	['login.goRegister', 'Sign Up'],
+	['login.shareTitle', 'Sign In'],
+	['login.usernameEmpty', 'Please enter your username'],
+	['login.passwordEmpty', 'Please enter your password'],
+	['login.agreeContent', 'Please view and agree to the Terms of Service and Privacy Policy'],
+	['login.success', 'Signed in'],
+	['login.fingerprintVerifying', 'Verifying fingerprint...'],
+	['login.fingerprintFail', 'Fingerprint sign-in failed, please use your password'],
+	['login.wechatLoading', 'Signing in with WeChat...'],
+	['login.timeout', 'Sign-in timed out, please check your network or the auth service'],
+	['login.wechatCodeFail', 'Failed to get WeChat login code'],
+	['login.wechatFail', 'WeChat sign-in failed'],
+	['login.wechatCancelled', 'WeChat sign-in cancelled']
+])
+
+registerDict(zh, en)

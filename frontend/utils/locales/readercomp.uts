@@ -1,0 +1,69 @@
+/**
+ * 阅读器组件词典段（components/reader/*：ReaderControl/DrawerPanel/SettingsPanel/BookmarkPanel/ReaderFooterBar/ReaderToast）
+ * 注意：字体名（FONT_OPTIONS.label）为字体专名不翻译；翻页模式内部值为中文（持久化兼容），
+ * 仅展示层经 modeLabel 取词。
+ * 模块载入时注册进 i18n 全局词典；相关组件引入本文件即完成注册。
+ */
+import { registerDict, Dict } from '../i18n'
+
+const zh: Dict = new Map<string, string>([
+	['readercomp.fontSize', '字号'],
+	['readercomp.fontPick', '请选择'],
+	['readercomp.background', '背景'],
+	['readercomp.pageTurn', '翻页'],
+	['readercomp.modeScroll', '滚动'],
+	['readercomp.modeCurl', '仿真'],
+	['readercomp.modeCover', '覆盖'],
+	['readercomp.modeSlide', '平移'],
+	['readercomp.fontSaved', '字体已保存'],
+	['readercomp.switchedMode', '已切换至【{0}】模式'],
+	['readercomp.nightOn', '已切换至夜晚模式'],
+	['readercomp.nightOff', '已切换至白天模式'],
+	['readercomp.tabCatalog', '目录'],
+	['readercomp.tabNotes', '想法/划线'],
+	['readercomp.tabBookmark', '书签'],
+	['readercomp.noUnderlines', '暂无划线记录，长按正文即可划线'],
+	['readercomp.noBookmarks', '书签列表为空，正文下滑即可添加书签'],
+	['readercomp.orderDesc', '已切换至倒序排列'],
+	['readercomp.orderAsc', '已切换至正序排列'],
+	['readercomp.totalChapters', '共 {0} 章'],
+	['readercomp.chapterOfTotal', '{0} / 共 {1} 章'],
+	['readercomp.bookmarkPageN', '{0} · 第 {1} 页'],
+	['readercomp.listen', '听'],
+	['readercomp.navCatalog', '目录'],
+	['readercomp.navTheme', '白天'],
+	['readercomp.navSettings', '设置'],
+	['readercomp.themeNight', '夜晚']
+])
+
+const en: Dict = new Map<string, string>([
+	['readercomp.fontSize', 'Size'],
+	['readercomp.fontPick', 'Select'],
+	['readercomp.background', 'Theme'],
+	['readercomp.pageTurn', 'Turn'],
+	['readercomp.modeScroll', 'Scroll'],
+	['readercomp.modeCurl', 'Curl'],
+	['readercomp.modeCover', 'Cover'],
+	['readercomp.modeSlide', 'Slide'],
+	['readercomp.fontSaved', 'Font saved'],
+	['readercomp.switchedMode', 'Switched to {0} mode'],
+	['readercomp.nightOn', 'Night mode on'],
+	['readercomp.nightOff', 'Day mode on'],
+	['readercomp.tabCatalog', 'Contents'],
+	['readercomp.tabNotes', 'Notes'],
+	['readercomp.tabBookmark', 'Bookmarks'],
+	['readercomp.noUnderlines', 'No underlines yet — long-press the text to underline'],
+	['readercomp.noBookmarks', 'No bookmarks yet — swipe down while reading to add one'],
+	['readercomp.orderDesc', 'Sorted newest-first'],
+	['readercomp.orderAsc', 'Sorted oldest-first'],
+	['readercomp.totalChapters', '{0} chapters'],
+	['readercomp.chapterOfTotal', '{0} / {1} chapters'],
+	['readercomp.bookmarkPageN', '{0} · p.{1}'],
+	['readercomp.listen', '♪'],
+	['readercomp.navCatalog', 'Index'],
+	['readercomp.navTheme', 'Day'],
+	['readercomp.navSettings', 'Settings'],
+	['readercomp.themeNight', 'Night']
+])
+
+registerDict(zh, en)

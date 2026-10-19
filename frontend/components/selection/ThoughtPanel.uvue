@@ -16,7 +16,7 @@
 		<!-- 想法编辑器（多行输入框浮层：上方双引号引用高亮文本，确认后保存想法到本地存储并同步划线；点击拦截已移除避免微信端 textarea 聚焦失效） -->
 		<view v-if="editorOpen" class="thought-mask">
 			<view class="thought-dialog">
-				<text class="thought-title">写想法</text>
+				<text class="thought-title">{{ t('sel.thoughtTitle') }}</text>
 				<view class="thought-quote">
 					<!-- 对齐式（短行诗句，首页）：开引号固定盒悬挂行首，各行文字左缘对齐 -->
 					<template v-if="quoteAlign">
@@ -43,7 +43,7 @@
 				<textarea
 					class="thought-input"
 					v-model="editorInput"
-					placeholder="写下你的想法…"
+					:placeholder="t('sel.thoughtPh')"
 					:maxlength="10000"
 					:focus="editorFocus"
 					auto-height
@@ -51,10 +51,10 @@
 				/>
 				<view class="thought-actions">
 					<view class="thought-btn-cancel" @click="cancelEditor">
-						<text class="thought-btn-cancel-text">取消</text>
+						<text class="thought-btn-cancel-text">{{ t('common.cancel') }}</text>
 					</view>
 					<view class="thought-btn-confirm" @click="confirmEditor">
-						<text class="thought-btn-confirm-text">保存</text>
+						<text class="thought-btn-confirm-text">{{ t('common.save') }}</text>
 					</view>
 				</view>
 			</view>
@@ -65,6 +65,10 @@
 <script setup lang="uts">
 	import { getCurrentInstance } from 'vue'
 	import { SpanSeg, Thought, applySpanUnderlineToStorage, saveThought } from '@/utils/readerTypes.uts'
+	import { t } from '@/utils/i18n.uts'
+	// 词典注册（划词子系统文案 + 公共段）
+	import '@/utils/locales/selectioncomp.uts'
+	import '@/utils/locales/common.uts'
 
 	/**
 	 * ThoughtPanel —— 想法子组件（查看卡片 + 写想法编辑器合并内聚）
@@ -200,7 +204,7 @@
 	function confirmEditor() : void {
 		const content = editorInput.value.trim()
 		if (content.length == 0) {
-			emit('toast', '请输入想法内容')
+			emit('toast', t('sel.thoughtEmpty'))
 			return
 		}
 		const segs = editorSegs.value

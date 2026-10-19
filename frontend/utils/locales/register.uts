@@ -1,0 +1,53 @@
+/**
+ * 注册页词典段（pages/user/register.uvue）
+ * 模块载入时注册进 i18n 全局词典；register.uvue 引入本文件即完成注册。
+ */
+import { registerDict, Dict } from '../i18n'
+
+const zh: Dict = new Map<string, string>([
+	['register.title', '注册账号'],
+	['register.subtitle', '创建账号，开启您的阅读之旅。'],
+	['register.usernameLabel', '用户名'],
+	['register.usernamePh', '请输入用户名（2-15 个字符，仅限中文、英文及数字）'],
+	['register.passwordLabel', '密码'],
+	['register.passwordPh', '请输入密码'],
+	['register.confirmLabel', '确认密码'],
+	['register.confirmPh', '请再次输入密码'],
+	['register.emailLabel', '电子邮箱'],
+	['register.emailPh', '请输入邮箱地址'],
+	['register.codeLabel', '验证码'],
+	['register.submit', '注册'],
+	['register.hasAccount', '已有账号？'],
+	['register.goLogin', '去登录'],
+	['register.shareTitle', '注册账号'],
+	['register.codeEmpty', '请输入验证码'],
+	['register.agreeContent', '查看并同意《服务协议》和《隐私政策》'],
+	['register.success', '注册成功'],
+	['register.codeWrong', '请输入正确验证码'],
+	['register.codeSent', '验证码已发送']
+])
+
+const en: Dict = new Map<string, string>([
+	['register.title', 'Create Account'],
+	['register.subtitle', 'Create an account and start your reading journey.'],
+	['register.usernameLabel', 'Username'],
+	['register.usernamePh', 'Enter a username (2-15 characters, Chinese/English letters and digits only)'],
+	['register.passwordLabel', 'Password'],
+	['register.passwordPh', 'Enter your password'],
+	['register.confirmLabel', 'Confirm Password'],
+	['register.confirmPh', 'Enter your password again'],
+	['register.emailLabel', 'Email'],
+	['register.emailPh', 'Enter your email address'],
+	['register.codeLabel', 'Verification Code'],
+	['register.submit', 'Sign Up'],
+	['register.hasAccount', 'Already have an account?'],
+	['register.goLogin', 'Sign In'],
+	['register.shareTitle', 'Create Account'],
+	['register.codeEmpty', 'Please enter the code'],
+	['register.agreeContent', 'Please view and agree to the Terms of Service and Privacy Policy'],
+	['register.success', 'Account created'],
+	['register.codeWrong', 'Please enter the correct code'],
+	['register.codeSent', 'Code sent']
+])
+
+registerDict(zh, en)

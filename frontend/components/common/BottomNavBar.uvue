@@ -13,7 +13,7 @@
 					:src="item.key === active ? item.iconActive : item.icon"
 					:style="'width:' + item.iconWidth + 'rpx;height:' + item.iconHeight + 'rpx'"
 				/>
-				<text class="nav-text" :class="item.key === active ? 'nav-text-active' : ''">{{ item.text }}</text>
+				<text class="nav-text" :class="item.key === active ? 'nav-text-active' : ''">{{ navText(item.key) }}</text>
 			</view>
 		</view>
 	</view>
@@ -21,12 +21,16 @@
 
 <script setup lang="uts">
 	import { BottomNavItem } from './navItem.uts'
+	import { t } from '@/utils/i18n.uts'
+	// 词典注册（底部导航文案）
+	import '@/utils/locales/common.uts'
 
-	/** 导航项定义（含目标路径）：导航数据与页面跳转均由本组件统一管理，页面仅需传入 active */
+	/** 导航项定义（含目标路径）：导航数据与页面跳转均由本组件统一管理，页面仅需传入 active；
+	 *  text 不再预置（文案随语言切换），经 navText 动态取词 */
 	const items : BottomNavItem[] = [
 		{
 			key: 'home',
-			text: '首页',
+			text: '',
 			icon: '/static/icons/home.svg',
 			iconActive: '/static/icons/home-active.svg',
 			iconWidth: 31,
@@ -35,7 +39,7 @@
 		} as BottomNavItem,
 		{
 			key: 'bookshelf',
-			text: '书架',
+			text: '',
 			icon: '/static/icons/bookshelf.svg',
 			iconActive: '/static/icons/bookshelf-active.svg',
 			iconWidth: 38,
@@ -44,7 +48,7 @@
 		} as BottomNavItem,
 		{
 			key: 'mine',
-			text: '我的',
+			text: '',
 			icon: '/static/icons/mine.svg',
 			iconActive: '/static/icons/mine-active.svg',
 			iconWidth: 31,
@@ -52,6 +56,17 @@
 			path: '/pages/user/settings'
 		} as BottomNavItem
 	]
+
+	/** 导航项文案（渲染期取词，随语言切换刷新） */
+	function navText(key: string) : string {
+		if (key === 'home') {
+			return t('nav.home')
+		}
+		if (key === 'bookshelf') {
+			return t('nav.bookshelf')
+		}
+		return t('nav.mine')
+	}
 
 	const props = defineProps<{
 		/** 当前激活项 key（home / bookshelf / mine） */
@@ -91,30 +106,28 @@
 		justify-content: center;
 	}
 
-	/* 白色胶囊容器（Stitch 原始文件: 343x54, 内留白 7, 项间距 23.1, 圆角 pill, 描边 弱文本/10%） */
+	/* 白色胶囊容器：宽度包裹内容（不固定宽，随文案长度自适应，中英文均贴合三个按钮） */
 	.navbar-pill {
-		width: 660rpx;
 		flex-direction: row;
 		align-items: center;
-		justify-content: center;
-		padding: 13rpx;
+		padding: 13rpx 20rpx;
 		background-color: $bai-canvas;
 		border-radius: $bai-rounded-pill;
 		border: 1px solid rgba($bai-mute, 0.1);
 		box-shadow: $bai-shadow-nav;
 	}
 
-	/* 导航项：左右各留 22rpx，相邻两项间距 44rpx（Figma 23.1px），两端空隙由容器居中产生 */
+	/* 导航项：左右各留 12rpx（英文文案较宽，收紧边距保证中英文均收进胶囊宽度） */
 	.nav-btn {
-		margin-left: 22rpx;
-		margin-right: 22rpx;
+		margin-left: 12rpx;
+		margin-right: 12rpx;
 	}
 
-	/* 激活项：墨黑胶囊（Figma: padding 10x20, gap 8, 背景 墨黑令牌） */
+	/* 激活项：墨黑胶囊（Figma: padding 10x20, gap 8, 背景 墨黑令牌；水平内边距收紧防英文溢出） */
 	.nav-btn-active {
 		flex-direction: row;
 		align-items: center;
-		padding: 20rpx 38rpx;
+		padding: 20rpx 30rpx;
 		background-color: $bai-ink;
 		border-radius: $bai-rounded-pill;
 	}
@@ -123,7 +136,7 @@
 	.nav-btn-idle {
 		flex-direction: row;
 		align-items: center;
-		padding: 20rpx 31rpx;
+		padding: 20rpx 22rpx;
 		border-radius: $bai-rounded-pill;
 	}
 
@@ -133,6 +146,8 @@
 		line-height: 38rpx;
 		font-weight: 600;
 		color: $bai-ink;
+		lines: 1;
+		text-overflow: ellipsis;
 	}
 
 	.nav-text-active {

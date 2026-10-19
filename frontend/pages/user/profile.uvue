@@ -1,26 +1,26 @@
 <template>
-	<PageShell title="个人信息" desc="管理您的账户资料与安全设置，随时修改个人信息。" :center="false">
+	<PageShell :title="t('profile.title')" :desc="t('profile.desc')" :center="false">
 
 				<!-- 分组 1：资料修改（账号待删除状态整体置灰并禁用交互） -->
 				<ListGroup :disabled="isDeletionScheduled">
 					<!-- 修改用户名 -->
-					<ListCell label="修改用户名" tone="default" :bordered="true" :arrow="true" @select="toggleUsername" />
+					<ListCell :label="t('profile.editUsername')" tone="default" :bordered="true" :arrow="true" @select="toggleUsername" />
 					<view v-if="expandUsername" class="profile-page__form-section">
 						<view class="profile-page__form-field">
-							<FormInput v-model="usernameValue" label="新用户名" placeholder="请输入新用户名（2-15 个字符）" :maxlength="15" :error="usernameError" @blur="onUsernameBlur" />
+							<FormInput v-model="usernameValue" :label="t('profile.newUsername')" :placeholder="t('profile.newUsernamePh')" :maxlength="15" :error="usernameError" @blur="onUsernameBlur" />
 						</view>
 						<view class="profile-page__form-actions">
 							<view class="profile-page__btn profile-page__btn--cancel" @click="toggleUsername">
-								<text class="profile-page__btn-text">取消</text>
+								<text class="profile-page__btn-text">{{ t('common.cancel') }}</text>
 							</view>
 							<view class="profile-page__btn profile-page__btn--submit" @click="handleUpdateUsername">
-								<text class="profile-page__btn-text profile-page__btn-text--primary">提交</text>
+								<text class="profile-page__btn-text profile-page__btn-text--primary">{{ t('common.submit') }}</text>
 							</view>
 						</view>
 					</view>
 
 					<!-- 修改头像 -->
-					<ListCell label="修改头像" tone="default" :bordered="true" :arrow="true" @select="toggleAvatar" />
+					<ListCell :label="t('profile.editAvatar')" tone="default" :bordered="true" :arrow="true" @select="toggleAvatar" />
 					<view v-if="expandAvatar" class="profile-page__form-section">
 						<view class="profile-page__avatar-list">
 							<view
@@ -35,81 +35,81 @@
 						</view>
 						<view class="profile-page__form-actions">
 							<view class="profile-page__btn profile-page__btn--cancel" @click="toggleAvatar">
-								<text class="profile-page__btn-text">取消</text>
+								<text class="profile-page__btn-text">{{ t('common.cancel') }}</text>
 							</view>
 							<view class="profile-page__btn profile-page__btn--submit" @click="handleUpdateAvatar">
-								<text class="profile-page__btn-text profile-page__btn-text--primary">提交</text>
+								<text class="profile-page__btn-text profile-page__btn-text--primary">{{ t('common.submit') }}</text>
 							</view>
 						</view>
 					</view>
 
 					<!-- 修改签名 -->
-					<ListCell label="修改签名" tone="default" :bordered="true" :arrow="true" @select="toggleSignature" />
+					<ListCell :label="t('profile.editSignature')" tone="default" :bordered="true" :arrow="true" @select="toggleSignature" />
 					<view v-if="expandSignature" class="profile-page__form-section">
-						<FormInput v-model="signatureValue" label="" placeholder="请输入签名（最多 70 个字符）" :maxlength="70" :error="signatureError" />
+						<FormInput v-model="signatureValue" label="" :placeholder="t('profile.signaturePh')" :maxlength="70" :error="signatureError" />
 						<view class="profile-page__form-actions">
 							<view class="profile-page__btn profile-page__btn--cancel" @click="toggleSignature">
-								<text class="profile-page__btn-text">取消</text>
+								<text class="profile-page__btn-text">{{ t('common.cancel') }}</text>
 							</view>
 							<view class="profile-page__btn profile-page__btn--submit" @click="handleUpdateSignature">
-								<text class="profile-page__btn-text profile-page__btn-text--primary">提交</text>
+								<text class="profile-page__btn-text profile-page__btn-text--primary">{{ t('common.submit') }}</text>
 							</view>
 						</view>
 					</view>
 
 					<!-- 修改密码 / 设置密码（无密码用户显示「设置密码」） -->
-					<ListCell :label="hasPassword ? '修改密码' : '设置密码'" tone="default" :bordered="true" :arrow="true" @select="togglePassword" />
+					<ListCell :label="hasPassword ? t('profile.changePassword') : t('profile.setPassword')" tone="default" :bordered="true" :arrow="true" @select="togglePassword" />
 					<view v-if="expandPassword" class="profile-page__form-section">
 						<view v-if="hasPassword" class="profile-page__form-field">
-							<PasswordInput v-model="oldPasswordValue" label="旧密码" placeholder="请输入旧密码" :maxlength="20" :error="oldPasswordError" @blur="onOldPasswordBlur" />
+							<PasswordInput v-model="oldPasswordValue" :label="t('profile.oldPassword')" :placeholder="t('profile.oldPasswordPh')" :maxlength="20" :error="oldPasswordError" @blur="onOldPasswordBlur" />
 						</view>
 						<view class="profile-page__form-field">
-							<PasswordInput v-model="newPasswordValue" label="新密码" placeholder="请设置强密码" :maxlength="20" :error="newPasswordError" @blur="onNewPasswordBlur" />
+							<PasswordInput v-model="newPasswordValue" :label="t('profile.newPassword')" :placeholder="t('profile.newPasswordPh')" :maxlength="20" :error="newPasswordError" @blur="onNewPasswordBlur" />
 						</view>
 						<view class="profile-page__form-field">
-							<PasswordInput v-model="confirmPasswordValue" label="确认密码" placeholder="请再次输入密码" :maxlength="20" :error="confirmPasswordError" @blur="onConfirmPasswordBlur" />
+							<PasswordInput v-model="confirmPasswordValue" :label="t('profile.confirmPassword')" :placeholder="t('profile.confirmPasswordPh')" :maxlength="20" :error="confirmPasswordError" @blur="onConfirmPasswordBlur" />
 						</view>
 						<view class="profile-page__form-actions">
 							<view class="profile-page__btn profile-page__btn--cancel" @click="togglePassword">
-								<text class="profile-page__btn-text">取消</text>
+								<text class="profile-page__btn-text">{{ t('common.cancel') }}</text>
 							</view>
 							<view class="profile-page__btn profile-page__btn--submit" @click="handleChangePassword">
-								<text class="profile-page__btn-text profile-page__btn-text--primary">提交</text>
+								<text class="profile-page__btn-text profile-page__btn-text--primary">{{ t('common.submit') }}</text>
 							</view>
 						</view>
 					</view>
 
 					<!-- 修改邮箱 / 绑定邮箱（无邮箱用户显示「绑定邮箱」），分组最后一项无下边框 -->
-					<ListCell :label="hasEmail ? '修改邮箱' : '绑定邮箱'" tone="default" :bordered="false" :arrow="true" @select="toggleEmail" />
+					<ListCell :label="hasEmail ? t('profile.changeEmail') : t('profile.bindEmail')" tone="default" :bordered="false" :arrow="true" @select="toggleEmail" />
 					<view v-if="expandEmail" class="profile-page__form-section">
 						<!-- 步骤1：旧邮箱验证（仅已有邮箱的用户需要） -->
 						<view v-if="hasEmail && emailStep === 1">
 							<view class="profile-page__form-field">
-								<CodeInput ref="oldCodeRef" v-model="oldCodeValue" label="旧邮箱验证码" :error="oldCodeError" :sending="oldCodeSending" @request-send="handleGetOldEmailCode" />
+								<CodeInput ref="oldCodeRef" v-model="oldCodeValue" :label="t('profile.oldCode')" :error="oldCodeError" :sending="oldCodeSending" @request-send="handleGetOldEmailCode" />
 							</view>
 							<view class="profile-page__form-actions">
 								<view class="profile-page__btn profile-page__btn--cancel" @click="toggleEmail">
-									<text class="profile-page__btn-text">取消</text>
+									<text class="profile-page__btn-text">{{ t('common.cancel') }}</text>
 								</view>
 								<view class="profile-page__btn profile-page__btn--submit" @click="handleVerifyOldEmail">
-									<text class="profile-page__btn-text profile-page__btn-text--primary">验证</text>
+									<text class="profile-page__btn-text profile-page__btn-text--primary">{{ t('common.verify') }}</text>
 								</view>
 							</view>
 						</view>
 						<!-- 步骤2：新邮箱验证 / 绑定邮箱（无邮箱用户直接显示此步骤） -->
 						<view v-else>
 							<view class="profile-page__form-field">
-								<FormInput v-model="newEmailValue" label="新邮箱地址" placeholder="请输入新邮箱地址" :maxlength="254" :error="newEmailError" @blur="onNewEmailBlur" />
+								<FormInput v-model="newEmailValue" :label="t('profile.newEmail')" :placeholder="t('profile.newEmailPh')" :maxlength="254" :error="newEmailError" @blur="onNewEmailBlur" />
 							</view>
 							<view class="profile-page__form-field">
-								<CodeInput ref="newCodeRef" v-model="newCodeValue" label="新邮箱验证码" :error="newCodeError" :sending="newCodeSending" @request-send="handleGetNewEmailCode" />
+								<CodeInput ref="newCodeRef" v-model="newCodeValue" :label="t('profile.newCode')" :error="newCodeError" :sending="newCodeSending" @request-send="handleGetNewEmailCode" />
 							</view>
 							<view class="profile-page__form-actions">
 								<view class="profile-page__btn profile-page__btn--cancel" @click="onEmailStepBack">
-									<text class="profile-page__btn-text">{{ hasEmail ? '返回' : '取消' }}</text>
+									<text class="profile-page__btn-text">{{ hasEmail ? t('common.back') : t('common.cancel') }}</text>
 								</view>
 								<view class="profile-page__btn profile-page__btn--submit" @click="handleChangeEmail">
-									<text class="profile-page__btn-text profile-page__btn-text--primary">{{ hasEmail ? '修改' : '绑定' }}</text>
+									<text class="profile-page__btn-text profile-page__btn-text--primary">{{ hasEmail ? t('common.modify') : t('common.bind') }}</text>
 								</view>
 							</view>
 						</view>
@@ -118,16 +118,16 @@
 
 				<!-- 分组 1.5：偏好设置（语言 / 指纹登录，独立成区） -->
 				<ListGroup :disabled="false">
-					<ListCell label="语言" tone="default" :bordered="false" :arrow="false">
-						<view class="profile-page__lang-switch" @click="toggleLanguage">
-							<view class="profile-page__lang-knob"></view>
-							<text class="profile-page__lang-text">简体中文</text>
+					<ListCell :label="t('profile.language')" tone="default" :bordered="false" :arrow="false">
+						<view :class="isEn ? 'profile-page__lang-switch profile-page__lang-switch--en' : 'profile-page__lang-switch'" @click="toggleLanguage">
+							<view :class="isEn ? 'profile-page__lang-knob profile-page__lang-knob--en' : 'profile-page__lang-knob'"></view>
+							<text :class="isEn ? 'profile-page__lang-text profile-page__lang-text--en' : 'profile-page__lang-text'">{{ langText }}</text>
 						</view>
 					</ListCell>
 
 					<!-- 指纹登录开关（仅 App 端：设备支持指纹且已登录时显示） -->
 					<!-- #ifdef APP -->
-					<ListCell v-if="showBiometric" label="指纹登录" tone="default" :bordered="true" :arrow="false">
+					<ListCell v-if="showBiometric" :label="t('profile.biometric')" tone="default" :bordered="true" :arrow="false">
 						<!-- 纯 CSS 手写开关（uvue 不支持后代选择器，开态经动态组合类控制旋钮位移） -->
 						<view
 							:class="biometricEnabled ? 'profile-page__biometric-switch profile-page__biometric-switch--on' : 'profile-page__biometric-switch'"
@@ -141,9 +141,9 @@
 
 				<!-- 分组 2：退出登录 + 删除账号（危险操作红色提示） -->
 				<ListGroup :disabled="false">
-					<ListCell label="退出登录" tone="danger" :bordered="true" :arrow="true" @select="handleLogout" />
-					<ListCell :label="isDeletionScheduled ? '取消删除' : '删除账号'" tone="danger" :bordered="false" :arrow="true" @select="handleDeletion" />
-					<ListCell label="了解账号删除与数据说明" tone="hint" :bordered="false" :arrow="true" @select="goDeleteAccountHelp" />
+					<ListCell :label="t('profile.logout')" tone="danger" :bordered="true" :arrow="true" @select="handleLogout" />
+					<ListCell :label="isDeletionScheduled ? t('profile.cancelDeletion') : t('profile.deleteAccount')" tone="danger" :bordered="false" :arrow="true" @select="handleDeletion" />
+					<ListCell :label="t('profile.deletionHelp')" tone="hint" :bordered="false" :arrow="true" @select="goDeleteAccountHelp" />
 				</ListGroup>
 	</PageShell>
 </template>
@@ -157,6 +157,10 @@
 	import ListCell from '@/components/list/ListCell.uvue'
 	import { useUserStore } from '@/stores/user.uts'
 	import { ApiResponse } from '@/utils/request.uts'
+	import { t, currentLocale, setLocale } from '@/utils/i18n.uts'
+	// 词典注册（profile 页文案 + 公共段）
+	import '@/utils/locales/profile.uts'
+	import '@/utils/locales/common.uts'
 	// #ifdef APP
 	import { isBiometricAvailable, isBiometricEnabled, setBiometricEnabled, getBiometricToken } from '@/utils/biometric.uts'
 	// #endif
@@ -289,7 +293,7 @@
 		}
 		updateUsername(v).then((_res: ApiResponse) => {
 			userStore.patchUser('username', v)
-			uni.showToast({ title: '用户名修改成功', icon: 'success' })
+			uni.showToast({ title: t('profile.usernameOk'), icon: 'success' })
 			collapseAll()
 		}).catch((e) => {
 			const err = e as Error
@@ -338,7 +342,7 @@
 	function handleUpdateAvatar() : void {
 		updateAvatar(selectedAvatar.value).then((_res: ApiResponse) => {
 			userStore.patchUser('avatar_url', selectedAvatar.value)
-			uni.showToast({ title: '头像更新成功', icon: 'success' })
+			uni.showToast({ title: t('profile.avatarOk'), icon: 'success' })
 			collapseAll()
 		}).catch((e) => {
 			const err = e as Error
@@ -358,16 +362,16 @@
 	function handleUpdateSignature() : void {
 		const v = signatureValue.value.trim()
 		if (v.length == 0) {
-			signatureError.value = '请输入签名'
+			signatureError.value = t('profile.signatureEmpty')
 			return
 		}
 		if (v.length > 70) {
-			signatureError.value = '签名长度不能超过 70 个字符'
+			signatureError.value = t('profile.signatureTooLong')
 			return
 		}
 		updateSignature(v).then((_res: ApiResponse) => {
 			userStore.patchUser('signature', v)
-			uni.showToast({ title: '签名更新成功', icon: 'success' })
+			uni.showToast({ title: t('profile.signatureOk'), icon: 'success' })
 			collapseAll()
 		}).catch((e) => {
 			const err = e as Error
@@ -395,7 +399,7 @@
 	// 密码校验规则见 utils/validators.uts
 
 	function onOldPasswordBlur() : void {
-		oldPasswordError.value = oldPasswordValue.value.length == 0 ? '请输入旧密码' : ''
+		oldPasswordError.value = oldPasswordValue.value.length == 0 ? t('profile.oldPasswordPh') : ''
 	}
 
 	function onNewPasswordBlur() : void {
@@ -407,20 +411,20 @@
 			confirmPasswordError.value = ''
 			return
 		}
-		confirmPasswordError.value = confirmPasswordValue.value !== newPasswordValue.value ? '两次密码不一致' : ''
+		confirmPasswordError.value = confirmPasswordValue.value !== newPasswordValue.value ? t('profile.pwdMismatch') : ''
 	}
 
 	function handleChangePassword() : void {
 		newPasswordError.value = validatePassword(newPasswordValue.value)
 		if (newPasswordValue.value.length > 0 && confirmPasswordValue.value !== newPasswordValue.value) {
-			confirmPasswordError.value = '两次密码不一致'
+			confirmPasswordError.value = t('profile.pwdMismatch')
 		} else if (confirmPasswordValue.value.length == 0) {
-			confirmPasswordError.value = '请再次输入密码'
+			confirmPasswordError.value = t('profile.confirmPasswordPh')
 		} else {
 			confirmPasswordError.value = ''
 		}
 		if (hasPassword.value) {
-			oldPasswordError.value = oldPasswordValue.value.length == 0 ? '请输入旧密码' : ''
+			oldPasswordError.value = oldPasswordValue.value.length == 0 ? t('profile.oldPasswordPh') : ''
 		} else {
 			oldPasswordError.value = ''
 		}
@@ -439,7 +443,7 @@
 		if (hasPassword.value) {
 			// 修改密码：验证旧密码后更新
 			changePassword(oldPasswordValue.value, newPasswordValue.value).then((_res: ApiResponse) => {
-				uni.showToast({ title: '密码修改成功', icon: 'success' })
+				uni.showToast({ title: t('profile.pwdChangeOk'), icon: 'success' })
 				collapseAll()
 			}).catch((e) => {
 				const err = e as Error
@@ -449,7 +453,7 @@
 			// 设置密码：无密码用户首次设置
 			setPassword(newPasswordValue.value).then((_res: ApiResponse) => {
 				userStore.patchUser('has_password', true)
-				uni.showToast({ title: '密码设置成功', icon: 'success' })
+				uni.showToast({ title: t('profile.pwdSetOk'), icon: 'success' })
 				collapseAll()
 			}).catch((e) => {
 				const err = e as Error
@@ -497,7 +501,7 @@
 		}
 		oldCodeSending.value = true
 		sendChangeEmailOldCode().then((_res: ApiResponse) => {
-			uni.showToast({ title: '验证码已发送', icon: 'none' })
+			uni.showToast({ title: t('profile.codeSent'), icon: 'none' })
 			oldCodeRef.value?.startCountdown()
 		}).catch((e) => {
 			const err = e as Error
@@ -544,7 +548,7 @@
 		newCodeSending.value = true
 		// 绑定邮箱场景（无邮箱用户）允许邮箱已存在以触发账号合并提示；修改邮箱场景禁止已存在
 		sendChangeEmailNewCode(newEmailValue.value, !hasEmail.value).then((_res: ApiResponse) => {
-			uni.showToast({ title: '验证码已发送', icon: 'none' })
+			uni.showToast({ title: t('profile.codeSent'), icon: 'none' })
 			newCodeRef.value?.startCountdown()
 		}).catch((e) => {
 			const err = e as Error
@@ -570,11 +574,11 @@
 			// 修改邮箱：需旧邮箱验证码 + 新邮箱验证码
 			changeEmail(oldCodeValue.value, newEmailValue.value, newCodeValue.value).then((_res: ApiResponse) => {
 				userStore.patchUser('email', newEmailValue.value)
-				uni.showToast({ title: '邮箱修改成功', icon: 'success' })
+				uni.showToast({ title: t('profile.emailChangeOk'), icon: 'success' })
 				collapseAll()
 			}).catch((e) => {
 				const err = e as Error
-				const msg = err.message.includes('验证码') ? '请输入正确验证码' : err.message
+				const msg = err.message.includes('验证码') ? t('profile.codeWrong') : err.message
 				uni.showToast({ title: msg, icon: 'none' })
 			})
 		} else {
@@ -584,19 +588,22 @@
 					// 全量更新登录态（id/资料/令牌三件套），并同步父域 SSO Cookie
 					userStore.setUser(res.data as UTSJSONObject)
 				}
-				uni.showToast({ title: '邮箱绑定成功', icon: 'success' })
+				uni.showToast({ title: t('profile.emailBindOk'), icon: 'success' })
 				collapseAll()
 			}).catch((e) => {
 				const err = e as Error
-				const msg = err.message.includes('验证码') ? '请输入正确验证码' : err.message
+				const msg = err.message.includes('验证码') ? t('profile.codeWrong') : err.message
 				uni.showToast({ title: msg, icon: 'none' })
 			})
 		}
 	}
 
-	// ===== 语言切换（界面仅还原，翻译功能后续实现） =====
+	// ===== 语言切换（中/英：i18n 模块级响应式语言，切换即刻全端生效并持久化） =====
+	const isEn = computed((): boolean => currentLocale() == 'en')
+	const langText = computed((): string => currentLocale() == 'en' ? 'English' : t('profile.langZh'))
+
 	function toggleLanguage() : void {
-		uni.showToast({ title: '英文版即将上线，敬请期待', icon: 'none' })
+		setLocale(isEn.value ? 'zh' : 'en')
 	}
 
 	// ===== App 端指纹登录开关（仅 App 端，与 yao 同构） =====
@@ -618,7 +625,7 @@
 		if (next) {
 			if (getBiometricToken().length == 0) {
 				biometricEnabled.value = false
-				uni.showToast({ title: '请先使用账号密码登录一次以生成指纹登录凭证', icon: 'none' })
+				uni.showToast({ title: t('profile.biometricNeedLogin'), icon: 'none' })
 				return
 			}
 			setBiometricEnabled(true)
@@ -634,10 +641,10 @@
 	// 微信小程序分享：转发好友与朋友圈（封面统一 /static/share-cover.png，复制自 yao 项目）
 	// #ifdef MP-WEIXIN
 	onShareAppMessage(() => {
-		return { title: '个人信息', imageUrl: '/static/share-cover.png' }
+		return { title: t('profile.title'), imageUrl: '/static/share-cover.png' }
 	})
 	onShareTimeline(() => {
-		return { title: '个人信息', imageUrl: '/static/share-cover.png' }
+		return { title: t('profile.title'), imageUrl: '/static/share-cover.png' }
 	})
 	// #endif
 
@@ -697,13 +704,13 @@
 		if (isDeletionScheduled.value) {
 			// 处于冷静期，执行取消删除
 			uni.showModal({
-				title: '提示',
-				content: '确定要取消账号删除吗？',
+				title: t('common.tip'),
+				content: t('profile.confirmCancelDeletion'),
 				success: (res) => {
 					if (res.confirm) {
 						cancelDeletion().then((_res: ApiResponse) => {
 							userStore.patchUser('status', 1)
-							uni.showToast({ title: '账号删除已取消', icon: 'success' })
+							uni.showToast({ title: t('profile.deletionCancelled'), icon: 'success' })
 						}).catch((e) => {
 							const err = e as Error
 							uni.showToast({ title: err.message, icon: 'none' })
@@ -714,17 +721,17 @@
 		} else {
 			// 未处于冷静期，执行删除
 			uni.showModal({
-				title: '删除账号',
-				content: '账号将在24小时后自动删除，业务数据将无法恢复；删除后仍可通过「忘记密码」找回账号',
-				confirmText: '确认删除',
-				cancelText: '取消',
+				title: t('profile.deleteAccountTitle'),
+				content: t('profile.deleteAccountContent'),
+				confirmText: t('profile.confirmDelete'),
+				cancelText: t('common.cancel'),
 				success: (res) => {
 					if (res.confirm) {
 						scheduleDeletion().then((result: ApiResponse) => {
 							const d = result.data
 							const status = d != null ? (d.getNumber('status') ?? 0) : 0
 							userStore.patchUser('status', status)
-							uni.showToast({ title: '已计划删除，24小时后自动删除', icon: 'none' })
+							uni.showToast({ title: t('profile.deletionScheduled'), icon: 'none' })
 						}).catch((e) => {
 							const err = e as Error
 							uni.showToast({ title: err.message, icon: 'none' })
@@ -743,8 +750,8 @@
 	// ===== 退出登录 =====
 	function handleLogout() : void {
 		uni.showModal({
-			title: '提示',
-			content: '确定要退出登录吗？',
+			title: t('common.tip'),
+			content: t('profile.confirmLogout'),
 			success: (res) => {
 				if (res.confirm) {
 					// 先通知 auth 撤销全部令牌；失败不阻断本地退出
@@ -752,7 +759,7 @@
 						// 服务端退出失败已忽略，本地态照常清理
 					}).finally(() => {
 						userStore.clearUser()
-						uni.showToast({ title: '已退出登录', icon: 'none' })
+						uni.showToast({ title: t('profile.loggedOut'), icon: 'none' })
 						setTimeout(() => {
 							uni.redirectTo({ url: '/pages/user/settings' })
 						}, 1500)
@@ -795,7 +802,7 @@
 		background-color: $bai-on-primary;
 	}
 
-	/* 语言切换开关：纯 CSS 手写开关（当前仅简体中文，翻译功能后续实现） */
+	/* 语言切换开关：纯 CSS 手写开关（中文=旋钮靠左文案右对齐 / English=旋钮靠右文案左对齐） */
 	.profile-page__lang-switch {
 		position: relative;
 		width: 176rpx;
@@ -806,6 +813,11 @@
 		overflow: hidden;
 	}
 
+	/* 英文态：旋钮滑至右端 */
+	.profile-page__lang-switch--en {
+		background-color: $bai-ink;
+	}
+
 	.profile-page__lang-knob {
 		position: absolute;
 		top: 4rpx;
@@ -814,6 +826,10 @@
 		height: 48rpx;
 		border-radius: 50%;
 		background-color: $bai-on-primary;
+	}
+
+	.profile-page__lang-knob--en {
+		transform: translateX(120rpx);
 	}
 
 	.profile-page__lang-text {
@@ -828,6 +844,12 @@
 		font-size: 24rpx;
 		font-weight: 500;
 		color: $bai-on-primary;
+	}
+
+	.profile-page__lang-text--en {
+		text-align: left;
+		padding-right: 0;
+		padding-left: 16rpx;
 	}
 
 	/* ===== 动态表单区域 ===== */

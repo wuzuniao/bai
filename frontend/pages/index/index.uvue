@@ -86,6 +86,10 @@
 	import { useUserStore, avatarSrcOf } from '@/stores/user.uts'
 	import { SelSpan, SpanSeg, TextMetrics, ParaRect, ShareQuoteCtx, Thought, UnderlineEntry, Paragraph, normalizeSpan, setActiveBookId, loadUnderlines, loadThoughts, fetchNotesToCache, VIRTUAL_BOOK_ID, SENTENCE_END_CHARS, thoughtAt, spanOfThought, thoughtTextOfSpan, buildSpanSegs } from '@/utils/readerTypes.uts'
 	import { POEM_LINES, PoemLine } from '@/utils/poem.uts'
+	import { t } from '@/utils/i18n.uts'
+	// 词典注册（首页文案；诗词内容不翻译）
+	import '@/utils/locales/index.uts'
+	import '@/utils/locales/common.uts'
 
 	/** 诗文内容（8 联 16 行，逐字拼音取自设计稿，数据真源 utils/poem.uts） */
 	const poemLines = ref<PoemLine[]>(POEM_LINES)
@@ -118,10 +122,10 @@
 	// 微信小程序分享：转发好友与朋友圈（封面统一 /static/share-cover.png，复制自 yao 项目）
 	// #ifdef MP-WEIXIN
 	onShareAppMessage(() => {
-		return { title: '无足鸟古诗词学习助手', imageUrl: '/static/share-cover.png' }
+		return { title: t('index.shareTitle'), imageUrl: '/static/share-cover.png' }
 	})
 	onShareTimeline(() => {
-		return { title: '无足鸟古诗词学习助手', imageUrl: '/static/share-cover.png' }
+		return { title: t('index.shareTitle'), imageUrl: '/static/share-cover.png' }
 	})
 	// #endif
 

@@ -4,6 +4,9 @@
 import { applyRegisteredBook, nextPendingBookId, applyPendingImport } from './books'
 import { registerBook } from '../api/reading.uts'
 import { hasAccessToken } from './request.uts'
+import { t } from './i18n'
+// 词典注册（导入管线文案）
+import './locales/bookparse.uts'
 // #ifdef MP-WEIXIN
 import { decodeGbkBytes } from './gbk'
 // #endif
@@ -18,6 +21,11 @@ import { webFsCopy, webFsDelete, webReadTextFile } from './webfs'
 // #endif
 
 /** 解析后的章（目录标题 + 正文页眉/大标题拆分 + 该章段落） */
+/** 序章标签（展示值：解析时按当前语言取词） */
+function prefaceLabel() : string {
+	return t('bookparse.preface')
+}
+
 export type ParsedChapter = {
 	/** 目录标题（完整标题行） */
 	title: string
@@ -82,7 +90,7 @@ function readGbkChunkedMp(path : string) : Promise<string> {
 		try {
 			size = fs.statSync(path).size
 		} catch (e) {
-			reject(new Error('文件读取失败'))
+			reject(new Error(t('bookparse.readFail')))
 			return
 		}
 		if (size == 0) {
@@ -106,18 +114,18 @@ function readGbkChunkedMp(path : string) : Promise<string> {
 				}
 			}
 			if (len <= 0) {
-				reject(new Error('文件读取失败'))
+				reject(new Error(t('bookparse.readFail')))
 				return
 			}
 			try {
 				const chunk = fs.readFileSync(path, 'latin1', pos, len)
 				if (typeof chunk != 'string') {
-					reject(new Error('文件读取失败'))
+					reject(new Error(t('bookparse.readFail')))
 					return
 				}
 				parts.push(decodeGbkBytes(chunk as string))
 			} catch (e) {
-				reject(new Error('文件读取失败'))
+				reject(new Error(t('bookparse.readFail')))
 				return
 			}
 			pos += len
@@ -134,7 +142,7 @@ function readTextFileChunkedMp(path : string) : Promise<string> {
 		try {
 			size = fs.statSync(path).size
 		} catch (e) {
-			reject(new Error('文件读取失败'))
+			reject(new Error(t('bookparse.readFail')))
 			return
 		}
 		if (size == 0) {
@@ -152,7 +160,7 @@ function readTextFileChunkedMp(path : string) : Promise<string> {
 					const tail = fs.readFileSync(path, 'latin1', pos + len - 4, 4) as string
 					len -= incompleteTailBytes(tail)
 					if (len <= 0) {
-						reject(new Error('文件读取失败'))
+						reject(new Error(t('bookparse.readFail')))
 						return
 					}
 				} catch (e) {
@@ -162,12 +170,12 @@ function readTextFileChunkedMp(path : string) : Promise<string> {
 			try {
 				const chunk = fs.readFileSync(path, 'utf-8', pos, len)
 				if (typeof chunk != 'string') {
-					reject(new Error('文件读取失败'))
+					reject(new Error(t('bookparse.readFail')))
 					return
 				}
 				text = text + (chunk as string)
 			} catch (e) {
-				reject(new Error('文件读取失败'))
+				reject(new Error(t('bookparse.readFail')))
 				return
 			}
 			pos += len
@@ -218,7 +226,7 @@ function readChunkedApp(path : string, charsetName : string) : Promise<string> {
 					// 忽略
 				}
 			}
-			reject(new Error('文件读取失败'))
+			reject(new Error(t('bookparse.readFail')))
 			return
 		}
 		const closeQuiet = () : void => {
@@ -245,7 +253,7 @@ function readChunkedApp(path : string, charsetName : string) : Promise<string> {
 				readLen = fs.readSync(ab, fd, pos, 0, len)
 			} catch (e) {
 				closeQuiet()
-				reject(new Error('文件读取失败'))
+				reject(new Error(t('bookparse.readFail')))
 				return
 			}
 			if (readLen <= 0) {
@@ -263,7 +271,7 @@ function readChunkedApp(path : string, charsetName : string) : Promise<string> {
 				sb.append(charset.decode(bb).toString())
 			} catch (e) {
 				closeQuiet()
-				reject(new Error('文件读取失败'))
+				reject(new Error(t('bookparse.readFail')))
 				return
 			}
 			pos += adjusted
@@ -287,10 +295,10 @@ export function readTextFile(path : string) : Promise<string> {
 			readGbkChunkedMp(path).then((gbkText : string) => {
 				resolve(gbkText)
 			}, (_e : Error | null) => {
-				reject(new Error('文件读取失败'))
+				reject(new Error(t('bookparse.readFail')))
 			})
 		}, (e : Error | null) => {
-			reject(e != null ? e : new Error('文件读取失败'))
+			reject(e != null ? e : new Error(t('bookparse.readFail')))
 		})
 	})
 	// #endif
@@ -305,10 +313,10 @@ export function readTextFile(path : string) : Promise<string> {
 			readChunkedApp(path, 'GBK').then((gbkText : string) => {
 				resolve(gbkText)
 			}, (_e : Error | null) => {
-				reject(new Error('文件读取失败'))
+				reject(new Error(t('bookparse.readFail')))
 			})
 		}, (e : Error | null) => {
-			reject(e != null ? e : new Error('文件读取失败'))
+			reject(e != null ? e : new Error(t('bookparse.readFail')))
 		})
 	})
 	// #endif
@@ -319,14 +327,14 @@ export function readTextFile(path : string) : Promise<string> {
 			const raw = uni.getFileSystemManager().readFileSync(path, 'utf-8')
 			text = raw as string
 		} catch (e) {
-			reject(new Error('文件读取失败'))
+			reject(new Error(t('bookparse.readFail')))
 			return
 		}
 		if (!looksMisencoded(text)) {
 			resolve(text)
 			return
 		}
-		reject(new Error('该文件编码暂不支持'))
+		reject(new Error(t('bookparse.encodingUnsupported')))
 	})
 	// #endif
 	// #ifdef WEB
@@ -334,7 +342,7 @@ export function readTextFile(path : string) : Promise<string> {
 	// #endif
 	// #ifndef MP-WEIXIN || APP || WEB
 	return new Promise<string>((_resolve, reject) => {
-		reject(new Error('该文件编码暂不支持'))
+		reject(new Error(t('bookparse.encodingUnsupported')))
 	})
 	// #endif
 }
@@ -422,7 +430,7 @@ export function parseChapters(text : string, bookTitle : string) : ParsedChapter
 	if (startIdx[0] > 0) {
 		const prefaceParas = collectParagraphs(lines, 0, startIdx[0])
 		if (prefaceParas.length > 0) {
-			result.unshift({ title: '序', label: '序', contentTitle: '序', preface: true, paragraphs: prefaceParas } as ParsedChapter)
+			result.unshift({ title: prefaceLabel(), label: prefaceLabel(), contentTitle: prefaceLabel(), preface: true, paragraphs: prefaceParas } as ParsedChapter)
 		}
 	}
 	return result
@@ -459,7 +467,7 @@ function ensureBooksDir(dir : string) : Promise<void> {
 					uni.getFileSystemManager().accessSync(dir)
 					resolve()
 				} catch (e) {
-					reject(new Error('本地目录创建失败'))
+					reject(new Error(t('bookparse.dirCreateFail')))
 				}
 			}
 		})
@@ -486,7 +494,7 @@ async function copyToSandbox(srcPath : string, destPath : string) : Promise<void
 			srcPath: srcPath,
 			destPath: destPath,
 			success: (_res) => { resolve() },
-			fail: (_err) => { reject(new Error('文件保存失败')) }
+			fail: (_err) => { reject(new Error(t('bookparse.saveFail'))) }
 		})
 	})
 	// #endif
@@ -497,7 +505,7 @@ function titleFromFileName(fileName : string) : string {
 	const dot = fileName.lastIndexOf('.')
 	const base = dot > 0 ? fileName.substring(0, dot) : fileName
 	const title = base.trim()
-	return title.length > 0 ? title : '未命名书籍'
+	return title.length > 0 ? title : t('bookparse.untitled')
 }
 
 /** 清理导入中途落盘的文件（失败路径回收；Web 端为 IndexedDB 键删除，容错忽略） */
@@ -520,12 +528,12 @@ export async function importBook(fileName : string, tempPath : string, size : nu
 	const dot = fileName.lastIndexOf('.')
 	const ext = dot >= 0 ? fileName.substring(dot + 1).toLowerCase() : ''
 	if (ext != 'txt' && ext != 'pdf') {
-		throw new Error('暂不支持该格式，当前支持 TXT / PDF')
+		throw new Error(t('bookparse.formatUnsupported'))
 	}
 	const bookTitle = titleFromFileName(fileName)
 	if (bookTitle.length > 200) {
 		// 与后端登记校验对齐：离线导入无服务端校验，超限会导致登录后同步永久失败
-		throw new Error('书名过长（超 200 字），请重命名文件后重试')
+		throw new Error(t('bookparse.titleTooLong'))
 	}
 	// #ifdef WEB
 	// Web 端无文件系统沙盒：dir 为 IndexedDB 键命名空间（虚拟路径，末段文件名语义与沙盒一致）
@@ -568,13 +576,13 @@ export async function importBook(fileName : string, tempPath : string, size : nu
 		// #endif
 		// #ifndef APP
 		discardFile(workPath)
-		throw new Error('当前端暂不支持 PDF 导入，请使用 APP 端')
+		throw new Error(t('bookparse.pdfUnsupported'))
 		// #endif
 	}
 	// 章节数与后端登记校验对齐：离线导入无服务端校验，超限会导致登录后同步永久失败
 	if (chapterCount > 100000) {
 		discardFile(workPath)
-		throw new Error('章节过多，无法导入')
+		throw new Error(t('bookparse.tooManyChapters'))
 	}
 	if (hasAccessToken()) {
 		// 云端登记（同用户同名书复用已有 id，进度与笔记自动关联；失败即导入失败，云端为准）
@@ -593,7 +601,7 @@ export async function importBook(fileName : string, tempPath : string, size : nu
 		}
 		if (bookId <= 0) {
 			discardFile(workPath)
-			throw new Error('云端登记失败，请检查网络后重试')
+			throw new Error(t('bookparse.registerFail'))
 		}
 		// 以云端 id 命名正文文件；重导入换格式时清理旧格式残留
 		const bodyPath = dir + '/' + bookId + '.' + ext

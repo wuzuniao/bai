@@ -1,0 +1,16 @@
+/**
+ * 首页词典段（pages/index/index.uvue）
+ * 注意：诗词卡片内容（诗行/拼音/铭文《无题》）不参与国际化，恒为中文。
+ * 模块载入时注册进 i18n 全局词典；index.uvue 引入本文件即完成注册。
+ */
+import { registerDict, Dict } from '../i18n'
+
+const zh: Dict = new Map<string, string>([
+	['index.shareTitle', '无足鸟古诗词学习助手']
+])
+
+const en: Dict = new Map<string, string>([
+	['index.shareTitle', 'Wuzuniao Poetry Learning Assistant']
+])
+
+registerDict(zh, en)

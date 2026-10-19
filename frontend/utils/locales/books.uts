@@ -1,0 +1,24 @@
+/**
+ * 书籍数据层词典段（utils/books.uts）
+ * 注意：pageTurn 默认值「滚动」为持久化内部值，不翻译。
+ * 模块载入时注册进 i18n 全局词典；books.uts 引入本文件即完成注册。
+ */
+import { registerDict, Dict } from '../i18n'
+
+const zh: Dict = new Map<string, string>([
+	['books.contentMoveFail', '正文文件迁移失败'],
+	['books.fileMoveFail', '文件迁移失败'],
+	['books.cloudIdInvalid', '云端书籍 id 无效'],
+	['books.cloudParseFail', '云端书籍记录解析失败'],
+	['books.rewardAutoN', '阅读奖励自动领取 +{0} 铜币']
+])
+
+const en: Dict = new Map<string, string>([
+	['books.contentMoveFail', 'Failed to move book content file'],
+	['books.fileMoveFail', 'Failed to move file'],
+	['books.cloudIdInvalid', 'Invalid cloud book id'],
+	['books.cloudParseFail', 'Failed to parse cloud book record'],
+	['books.rewardAutoN', 'Reading reward auto-claimed +{0} copper']
+])
+
+registerDict(zh, en)

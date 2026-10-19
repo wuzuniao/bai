@@ -9,6 +9,9 @@
  */
 import { AUTH_BASE_URL, AUTH_CLIENT_ID, API_BASE_URL } from './config'
 import { syncAuthCookie, recoverAuthFromCookie, SyncAuthCookieOptions, RestoredAuthState } from './authCookie'
+import { t } from './i18n'
+// 词典注册（请求层文案）
+import './locales/request.uts'
 
 /** 统一响应结构（code 非 0 表示业务错误，msg 面向用户） */
 export type ApiResponse = {
@@ -67,7 +70,7 @@ function handleUnauthorized() : void {
 	}
 	clearAuthStorage()
 	if (hadToken) {
-		uni.showToast({ title: '登录已过期，请重新登录', icon: 'none' })
+		uni.showToast({ title: t('request.expired'), icon: 'none' })
 	}
 	setTimeout(() => {
 		uni.reLaunch({
@@ -178,7 +181,7 @@ function recoverAndRetry(options: RequestOptions, resolve: (res: ApiResponse) =>
 			if (options.silent != true) {
 				handleUnauthorized()
 			}
-			reject(new Error('登录已过期，请重新登录'))
+			reject(new Error(t('request.expired')))
 		})
 	}
 	if (getRefreshToken() != '') {
@@ -262,7 +265,7 @@ export function request(options: RequestOptions) : Promise<ApiResponse> {
 			if (token.length == 0 && options.silent == true) {
 				// 未登录 + 静默请求（书架业务接口）：本地直接拒绝，不发无效网络请求、
 				// 不触发 401 跳登录，由调用方容错走本地缓存/默认样式
-				reject(new Error('未登录'))
+				reject(new Error(t('request.notLoggedIn')))
 				return
 			}
 			// 用户模块既有行为维持不变：无令牌照常发请求，服务端 401 → 统一跳登录
@@ -284,7 +287,7 @@ export function request(options: RequestOptions) : Promise<ApiResponse> {
 						if (options.silent != true) {
 							handleUnauthorized()
 						}
-						reject(new Error('登录已过期，请重新登录'))
+					reject(new Error(t('request.expired')))
 						return
 					}
 					// 先本地 rt 静默刷新，失败再经父域 Cookie 平台令牌兜底恢复（SSO）
@@ -293,7 +296,7 @@ export function request(options: RequestOptions) : Promise<ApiResponse> {
 				}
 				// 429 限流：仅提示，不跳转登录页
 				if (res.statusCode === 429) {
-					reject(new Error(parseErrMsg(res.data, '操作过于频繁，请稍后再试')))
+					reject(new Error(parseErrMsg(res.data, t('request.tooFrequent'))))
 					return
 				}
 				if (res.statusCode >= 200 && res.statusCode < 300) {
@@ -309,17 +312,17 @@ export function request(options: RequestOptions) : Promise<ApiResponse> {
 					const code = body.getNumber('code')
 					if (code == null || code != 0) {
 						const bizMsg = body.getString('msg')
-						reject(new Error(bizMsg != null && bizMsg != '' ? bizMsg : '请求失败'))
+						reject(new Error(bizMsg != null && bizMsg != '' ? bizMsg : t('request.failed')))
 						return
 					}
 					const data = body['data']
 					resolve({ code: 0, msg: body.getString('msg') ?? 'success', data: data == null ? null : (data as UTSJSONObject) } as ApiResponse)
 					return
 				}
-				reject(new Error(parseErrMsg(res.data, '请求失败')))
+				reject(new Error(parseErrMsg(res.data, t('request.failed'))))
 			},
 			fail: (_err) => {
-				reject(new Error('网络请求失败，请检查网络后重试'))
+				reject(new Error(t('request.networkFail')))
 			}
 		})
 	})

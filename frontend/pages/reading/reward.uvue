@@ -5,23 +5,23 @@
 
 		<scroll-view class="scroll" direction="vertical" :show-scrollbar="false">
 			<view class="main" :style="'padding-top:' + mainTop + 'px'">
-				<PageHeader title="活动" desc="每 100 铜币自动兑换 1 银币，每 100 银币自动兑换 1 金币" />
+				<PageHeader :title="tr('reward.title')" :desc="tr('reward.desc')" />
 				<!-- 资产总览卡（Stitch: 今日已获 + 总资产三项） -->
 				<view class="asset-card">
 					<view class="asset-top">
 						<view class="asset-left">
-							<text class="asset-label">今日已获铜币</text>
+							<text class="asset-label">{{ tr('reward.todayGained') }}</text>
 							<view class="asset-num-row">
 								<text class="asset-num">{{ todayGained }}</text>
-								<text class="asset-unit">铜币</text>
+								<text class="asset-unit">{{ tr('reward.copper') }}</text>
 							</view>
 						</view>
 						<view class="use-btn" @click="goMemberPay">
-							<text class="use-btn-text">去使用</text>
+							<text class="use-btn-text">{{ tr('reward.use') }}</text>
 						</view>
 					</view>
 					<view class="asset-total">
-						<text class="asset-total-label">总资产：</text>
+						<text class="asset-total-label">{{ tr('reward.totalAssets') }}</text>
 						<view class="coin-item">
 							<text class="coin-num">{{ goldNum }}</text>
 							<image class="coin-icon" src="/static/icons/coin-gold.svg" />
@@ -42,11 +42,11 @@
 					<view class="checkin-head">
 						<view class="checkin-head-text">
 							<view class="checkin-title-row">
-								<text class="checkin-title">已连续签到</text>
+								<text class="checkin-title">{{ tr('reward.streak') }}</text>
 								<text class="checkin-days">{{ streakDays }}</text>
-								<text class="checkin-title">天</text>
+								<text class="checkin-title">{{ tr('reward.days') }}</text>
 							</view>
-							<text class="checkin-sub">连签满 7 天才能领福利，断签或领奖后重新计算</text>
+							<text class="checkin-sub">{{ tr('reward.streakRule') }}</text>
 						</view>
 					</view>
 					<view class="checkin-grid">
@@ -56,7 +56,7 @@
 							:class="dayClass(d)"
 							@click="onDayTap(d)"
 						>
-							<text :class="dayWeekClass(d)">{{ d.label }}</text>
+							<text :class="dayWeekClass(d)">{{ weekLabel(d.weekday) }}</text>
 							<view :class="dayCircleClass(d)">
 								<image v-if="d.checked" class="day-check-icon" src="/static/icons/check-warning.svg" />
 								<text v-else :class="dayRewardClass(d)">+{{ d.reward }}</text>
@@ -66,17 +66,17 @@
 					</view>
 					<view class="makeup-bar">
 						<text class="makeup-text">{{ makeupBarText }}</text>
-						<text v-if="!isMember" class="makeup-btn" @click="goMemberPay">查看</text>
+						<text v-if="!isMember" class="makeup-btn" @click="goMemberPay">{{ tr('reward.view') }}</text>
 					</view>
 				</view>
 
 				<!-- 阅读领铜币卡（Stitch: 头部 + 进度条 + 五档阶梯；已达成的档位可点击领取） -->
 				<view class="reward-card">
 					<view class="reward-head">
-						<text class="reward-title">阅读领铜币</text>
+						<text class="reward-title">{{ tr('reward.readEarn') }}</text>
 						<view class="reward-stat">
-							<text class="reward-stat-line">总阅读时间：<text class="reward-stat-num">{{ totalMinutes }}</text> 分钟</text>
-							<text class="reward-stat-line">今日已读：<text class="reward-stat-num">{{ todayMinutes }}</text> 分钟</text>
+							<text class="reward-stat-line">{{ tr('reward.totalMinutes') }}<text class="reward-stat-num">{{ totalMinutes }}</text> {{ tr('rewards.minute') }}</text>
+							<text class="reward-stat-line">{{ tr('reward.todayMinutes') }}<text class="reward-stat-num">{{ todayMinutes }}</text> {{ tr('rewards.minute') }}</text>
 						</view>
 					</view>
 					<view class="progress-track">
@@ -89,7 +89,7 @@
 									<text :class="tierBadgeTextClass(t)">{{ t.badge }}</text>
 								</view>
 								<view class="tier-title-row">
-									<text :class="tierTitleClass(t)">{{ t.title }}</text>
+									<text :class="tierTitleClass(t)">{{ tr(t.title) }}</text>
 									<view :class="tierTagClass(t)">
 										<text :class="tierTagTextClass(t)">{{ tierTagText(t) }}</text>
 									</view>
@@ -123,6 +123,12 @@
 	import { fetchActivitySummary, postCheckin, postCheckinMakeup, claimReadingReward } from '@/api/activity.uts'
 	import { REWARD_TIERS, fmtRemainMinutes } from '@/utils/rewards.uts'
 	import { useUserStore } from '@/stores/user.uts'
+	// i18n：本页 v-for 变量名 t 与取词函数冲突，取词函数别名 tr
+	import { t as tr, tf } from '@/utils/i18n.uts'
+	// 词典注册（reward 页文案 + 公共段 + 奖励共享段）
+	import '@/utils/locales/reward.uts'
+	import '@/utils/locales/rewards.uts'
+	import '@/utils/locales/common.uts'
 
 	type DayView = {
 		weekday: number
@@ -142,8 +148,28 @@
 		state: string
 	}
 
-	/** 星期标签（周一~周日，自然周口径，index 0=周一） */
-	const WEEK_LABELS: string[] = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
+	/** 星期标签（周一~周日，自然周口径，index 0=周一；渲染期经 weekLabel 取词随语言切换刷新） */
+	function weekLabel(weekday: number) : string {
+		if (weekday == 1) {
+			return tr('reward.week1')
+		}
+		if (weekday == 2) {
+			return tr('reward.week2')
+		}
+		if (weekday == 3) {
+			return tr('reward.week3')
+		}
+		if (weekday == 4) {
+			return tr('reward.week4')
+		}
+		if (weekday == 5) {
+			return tr('reward.week5')
+		}
+		if (weekday == 6) {
+			return tr('reward.week6')
+		}
+		return tr('reward.week7')
+	}
 	/** 每日签到奖励档（周一~周五 +5、周六 +10、周日大礼 +20；与后端 CHECKIN_REWARDS 同步维护，未登录兜底展示用） */
 	const DEFAULT_WEEK_REWARDS: number[] = [5, 5, 5, 5, 5, 10, 20]
 	/** 进度条满档分钟数（12h 最高档） */
@@ -191,9 +217,9 @@
 	/** 补签提示条文案：非会员引导开通；会员展示剩余次数 */
 	const makeupBarText = computed((): string => {
 		if (!isMember.value) {
-			return '漏签无需担忧，开通月卡每月赠 3 次补签'
+			return tr('reward.makeupGuide')
 		}
-		return '本月剩余 ' + makeupLeft.value + ' 次补签机会'
+		return tf('reward.makeupLeftN', [makeupLeft.value.toString()])
 	})
 
 	/** 顶部留白：返回按钮（状态栏高度 + 40px）之下再留 12px（计算逻辑见 utils/layout.uts） */
@@ -220,10 +246,10 @@
 	// 微信小程序分享：转发好友与朋友圈（封面统一 /static/share-cover.png，复制自 yao 项目）
 	// #ifdef MP-WEIXIN
 	onShareAppMessage(() => {
-		return { title: '活动福利', imageUrl: '/static/share-cover.png' }
+		return { title: tr('reward.shareTitle'), imageUrl: '/static/share-cover.png' }
 	})
 	onShareTimeline(() => {
-		return { title: '活动福利', imageUrl: '/static/share-cover.png' }
+		return { title: tr('reward.shareTitle'), imageUrl: '/static/share-cover.png' }
 	})
 	// #endif
 
@@ -275,7 +301,7 @@
 					next.push({
 						weekday: weekday,
 						date: weekDateOf(weekday),
-						label: WEEK_LABELS[i],
+						label: weekLabel(weekday),
 						reward: item.getNumber('reward') ?? DEFAULT_WEEK_REWARDS[i],
 						checked: item.getBoolean('checked') == true,
 						isToday: weekday == getTodayWeekday()
@@ -338,7 +364,7 @@
 		return {
 			weekday: weekday,
 			date: weekDateOf(weekday),
-			label: WEEK_LABELS[weekday - 1],
+			label: weekLabel(weekday),
 			reward: DEFAULT_WEEK_REWARDS[weekday - 1],
 			checked: false,
 			isToday: weekday == getTodayWeekday()
@@ -364,18 +390,18 @@
 			if (isDayMissed(d)) {
 				makeupDay(d)
 			} else if (d.checked) {
-				showToast('当天已签到')
+				showToast(tr('toast.dayCheckedAlready'))
 			} else {
-				showToast('还未到该天签到时间')
+				showToast(tr('toast.dayNotArrived'))
 			}
 			return
 		}
 		if (checkedToday.value) {
-			showToast('今日已签到')
+			showToast(tr('toast.todayCheckedAlready'))
 			return
 		}
 		if (!hasAccessToken()) {
-			showToast('请先登录后再签到')
+			showToast(tr('toast.loginFirst'))
 			return
 		}
 		if (checkinLoading.value) {
@@ -391,7 +417,7 @@
 				streakDays.value = data.getNumber('streak_days') ?? (streakDays.value + 1)
 				applyBalanceFromData(data)
 				markDayChecked(getTodayWeekday())
-				showToast('签到成功，+' + reward + ' 铜币')
+				showToast(tf('toast.checkinOkN', [reward.toString()]))
 			}
 		}, (e: Error) => {
 			checkinLoading.value = false
@@ -405,15 +431,15 @@
 	 */
 	function makeupDay(d: DayView) : void {
 		if (!hasAccessToken()) {
-			showToast('请先登录后再补签')
+			showToast(tr('toast.makeupLoginFirst'))
 			return
 		}
 		if (!isMember.value) {
-			showToast('开通会员后每月可补签 3 次')
+			showToast(tr('toast.makeupMemberOnly'))
 			return
 		}
 		if (makeupLeft.value <= 0) {
-			showToast('本月补签次数已用完')
+			showToast(tr('toast.makeupQuotaUsed'))
 			return
 		}
 		if (makeupBusy.value) {
@@ -429,7 +455,7 @@
 				streakDays.value = data.getNumber('streak_days') ?? streakDays.value
 				applyBalanceFromData(data)
 				markDayChecked(d.weekday)
-				showToast('补签成功，+' + reward + ' 铜币')
+				showToast(tf('toast.makeupOkN', [reward.toString()]))
 			}
 		}, (e: Error) => {
 			makeupBusy.value = false
@@ -467,7 +493,7 @@
 		}
 		if (t.state == 'claimable') {
 			if (!hasAccessToken()) {
-				showToast('请先登录后再领取')
+				showToast(tr('toast.claimLoginFirst'))
 				return
 			}
 			if (claimBusy.value) {
@@ -481,7 +507,7 @@
 					const reward = data.getNumber('reward') ?? (t.base + t.bonus)
 					applyBalanceFromData(data)
 					setTierState(t.minutes, 'claimed')
-					showToast('领取成功，+' + reward + ' 铜币')
+					showToast(tf('toast.claimOkN', [reward.toString()]))
 				}
 			}, (e: Error) => {
 				claimBusy.value = false
@@ -605,23 +631,23 @@
 	/** 周末格文案按奖励档统一：+20「大礼」/ +10「双倍」/ +5「待签」（周六周日同映射） */
 	function dayStateText(d: DayView) : string {
 		if (d.checked) {
-			return '已签'
+			return tr('reward.dayChecked')
 		}
 		if (d.isToday) {
-			return '今日'
+			return tr('reward.dayToday')
 		}
 		if (isDayMissed(d)) {
-			return '漏签'
+			return tr('reward.dayMissed')
 		}
 		if (d.weekday >= 6) {
 			if (d.reward >= 20) {
-				return '大礼'
+				return tr('reward.dayGrand')
 			}
 			if (d.reward >= 10) {
-				return '双倍'
+				return tr('reward.dayDouble')
 			}
 		}
-		return '待签'
+		return tr('reward.dayPending')
 	}
 
 	function dayStateClass(d: DayView) : string {
@@ -703,9 +729,9 @@
 
 	/** 奖励标签文案：+N 铜币（含额外赠送时追加说明） */
 	function tierTagText(t: TierView) : string {
-		let text = '+' + t.base + ' 铜币'
+		let text = tf('reward.tagCopperN', [t.base.toString()])
 		if (t.bonus > 0) {
-			text += ' · 再额外赠送 ' + t.bonus + ' 铜币'
+			text += tf('reward.tagBonusN', [t.bonus.toString()])
 		}
 		return text
 	}
@@ -720,12 +746,12 @@
 	function tierDesc(t: TierView) : string {
 		const total = t.base + t.bonus
 		if (t.state == 'claimed') {
-			return '已达成任务，获得 ' + total + ' 铜币'
+			return tf('reward.tierClaimedN', [total.toString()])
 		}
 		if (t.state == 'claimable') {
-			return '已达成，可领取 ' + total + ' 铜币'
+			return tf('reward.tierClaimableN', [total.toString()])
 		}
-		return '还差 ' + fmtRemainMinutes(t.minutes - todayMinutes.value) + ' 解锁'
+		return tf('reward.tierLocked', [fmtRemainMinutes(t.minutes - todayMinutes.value)])
 	}
 
 	function tierBtnClass(t: TierView) : string {
@@ -740,12 +766,12 @@
 
 	function tierBtnText(t: TierView) : string {
 		if (t.state == 'claimed') {
-			return '已领取'
+			return tr('reward.btnClaimed')
 		}
 		if (t.state == 'claimable') {
-			return '领取'
+			return tr('reward.btnClaim')
 		}
-		return '去阅读'
+		return tr('reward.btnRead')
 	}
 
 	function tierBtnTextClass(t: TierView) : string {

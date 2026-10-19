@@ -12,6 +12,11 @@
  * 读取：分块流式 TextDecoder 解码（stream 选项跨块续解多字节字符，无块边界截断），
  * utf-8 优先、检出替换符 U+FFFD 后按 GBK 重解码（浏览器原生 GBK 解码器）。
  */
+import { t } from './i18n'
+// 词典注册（webfs 文案 + 复用 books/bookparse 错误文案段）
+import './locales/webfs.uts'
+import './locales/books.uts'
+import './locales/bookparse.uts'
 
 /** IndexedDB 库名 / 对象仓库名 */
 const WEBFS_DB_NAME = 'bai_webfs'
@@ -45,7 +50,7 @@ function openDb() : Promise<any> {
 			resolve(req.result)
 		}
 		req.onerror = () => {
-			reject(new Error('本地存储打开失败'))
+			reject(new Error(t('webfs.openFail')))
 		}
 	})
 }
@@ -65,13 +70,13 @@ function withStore(mode : string, run : (store : any) => void) : Promise<void> {
 			tx.onerror = () => {
 				if (!settled) {
 					settled = true
-					reject(new Error('本地存储读写失败'))
+					reject(new Error(t('webfs.rwFail')))
 				}
 			}
 			tx.onabort = () => {
 				if (!settled) {
 					settled = true
-					reject(new Error('本地存储读写失败'))
+					reject(new Error(t('webfs.rwFail')))
 				}
 			}
 			run(tx.objectStore(WEBFS_STORE))
@@ -97,7 +102,7 @@ export function webFsGet(key : string) : Promise<ArrayBuffer | null> {
 				resolve(req.result == null ? null : req.result as ArrayBuffer)
 			}
 			req.onerror = () => {
-				reject(new Error('本地存储读取失败'))
+				reject(new Error(t('webfs.readFail')))
 			}
 		}, (e) => {
 			reject(e)
@@ -128,7 +133,7 @@ export async function webFsRename(from : string, to : string) : Promise<void> {
 		if (await webFsGet(to) != null) {
 			return
 		}
-		throw new Error('正文文件迁移失败')
+		throw new Error(t('books.contentMoveFail'))
 	}
 	await webFsPut(to, data)
 	await webFsDelete(from)
@@ -144,7 +149,7 @@ export async function webFsCopy(srcPath : string, destPath : string) : Promise<v
 		const token = srcPath.substring(PICK_PREFIX.length)
 		const buf = pickedBuffers.get(token)
 		if (buf == null) {
-			throw new Error('导入文件已失效，请重新选择')
+			throw new Error(t('webfs.pickExpired'))
 		}
 		await webFsPut(destPath, buf)
 		pickedBuffers.delete(token)
@@ -152,7 +157,7 @@ export async function webFsCopy(srcPath : string, destPath : string) : Promise<v
 	}
 	const data = await webFsGet(srcPath)
 	if (data == null) {
-		throw new Error('文件读取失败')
+		throw new Error(t('bookparse.readFail'))
 	}
 	await webFsPut(destPath, data)
 }
@@ -205,7 +210,7 @@ export function webPickBooks() : Promise<WebPickedFile[]> {
 					} as WebPickedFile)
 					readAt(i + 1)
 				}, (_e) => {
-					reject(new Error('文件读取失败，请重试'))
+					reject(new Error(t('webfs.readRetry')))
 				})
 			}
 			readAt(0)
@@ -248,7 +253,7 @@ function decodeAll(bytes : Uint8Array, encoding : string) : string {
 export async function webReadTextFile(path : string) : Promise<string> {
 	const buf = await webFsGet(path)
 	if (buf == null) {
-		throw new Error('文件读取失败')
+		throw new Error(t('bookparse.readFail'))
 	}
 	const bytes = new Uint8Array(buf)
 	let text = decodeAll(bytes, 'utf-8')

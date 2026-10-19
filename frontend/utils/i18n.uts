@@ -1,0 +1,91 @@
+/**
+ * i18n 国际化基础设施（界面文案中英双语）
+ * --------------------------------------------------------------------------
+ * - 语言状态为模块级响应式 ref：模板/计算属性中调用 t() 即自动跟随语言切换
+ * - 词典按源文件分段存放 utils/locales/<模块>.uts，每段导出 zh/en 两个 Map
+ *   并在模块载入时调用 registerDict 注册（按需 import，避免本文件集中维护）
+ * - t(key) 取当前语言文案；缺失回退中文，仍缺失返回 key（便于发现漏翻）
+ * - tf(key, args) 占位替换：词典值中的 {0}{1} 依序替换为 args 项
+ * - 语言选择持久化 storage key 'app_locale'；默认简体中文，
+ *   启动时由 App.uvue onLaunch 调 initLocale() 恢复上次选择
+ * - 诗词卡片内容（首页诗行/标题/作者，utils/poem.uts）不参与国际化，恒为中文
+ */
+import { ref } from 'vue'
+
+/** 语言标识 */
+export type Locale = 'zh' | 'en'
+
+/** 词典类型：key 为「模块.语义」扁平键 */
+export type Dict = Map<string, string>
+
+const STORAGE_KEY = 'app_locale'
+
+// 词典容器（registerDict 汇入；查词典动态按 locale 取，切换语言即刻生效）
+const zhDict: Dict = new Map<string, string>()
+const enDict: Dict = new Map<string, string>()
+
+/** 词典段注册（utils/locales/*.uts 模块载入时调用，重复注册覆盖同 key） */
+export function registerDict(zh: Dict, en: Dict): void {
+	zh.forEach((v: string, k: string) => {
+		zhDict.set(k, v)
+	})
+	en.forEach((v: string, k: string) => {
+		enDict.set(k, v)
+	})
+}
+
+// 当前语言（模块级响应式状态，全端共享同一份）
+const locale = ref<Locale>('zh')
+
+/** 当前语言（模板/计算属性中经此读取即具备响应式） */
+export function currentLocale(): Locale {
+	return locale.value
+}
+
+/** 启动恢复上次语言选择（App.uvue onLaunch 调用；无记录/异常保持默认中文） */
+export function initLocale(): void {
+	try {
+		const stored = uni.getStorageSync(STORAGE_KEY)
+		if (stored == 'en') {
+			locale.value = 'en'
+		} else if (stored == 'zh') {
+			locale.value = 'zh'
+		}
+	} catch (e) {
+		// 读取失败保持默认中文
+	}
+}
+
+/** 切换语言并持久化（profile 语言开关调用） */
+export function setLocale(l: Locale): void {
+	locale.value = l
+	try {
+		uni.setStorageSync(STORAGE_KEY, l)
+	} catch (e) {
+		// 持久化失败不影响本次会话内切换
+	}
+}
+
+/** 取当前语言文案（缺失回退中文，仍缺失返回 key 本身） */
+export function t(key: string): string {
+	const dict = locale.value == 'en' ? enDict : zhDict
+	const v = dict.get(key)
+	if (v != null) {
+		return v
+	}
+	const fallback = zhDict.get(key)
+	if (fallback != null) {
+		return fallback
+	}
+	console.warn('[i18n] 缺失词条: ' + key)
+	return key
+}
+
+/** 带占位符文案：词典值中的 {0}{1} 依序替换为 args 各项 */
+export function tf(key: string, args: string[]): string {
+	let s = t(key)
+	for (let i = 0; i < args.length; i++) {
+		s = s.replace('{' + i.toString() + '}', args[i])
+	}
+	return s
+}

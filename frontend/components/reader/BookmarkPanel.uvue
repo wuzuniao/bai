@@ -1,7 +1,7 @@
 <template>
 	<view class="bookmark-panel">
 		<view v-if="bookmarks.length == 0" class="bookmark-empty">
-			<text class="bookmark-empty-text" :style="'color:' + theme.mutedColor">书签列表为空，正文下滑即可添加书签</text>
+			<text class="bookmark-empty-text" :style="'color:' + theme.mutedColor">{{ t('readercomp.noBookmarks') }}</text>
 		</view>
 		<view
 			v-for="(bm, bi) in bookmarks"
@@ -18,6 +18,10 @@
 <script setup lang="uts">
 	import { Chapter, Bookmark, loadBookmarks, saveBookmarksToStorage } from '@/utils/readerTypes.uts'
 	import { ReaderTheme } from '@/utils/theme.uts'
+	import { t } from '@/utils/i18n.uts'
+	// 词典注册（阅读器组件文案）
+	import '@/utils/locales/readercomp.uts'
+	import '@/utils/locales/common.uts'
 
 	/**
 	 * BookmarkPanel —— 书签子组件（书签真源）
@@ -69,7 +73,7 @@
 	/** 书签条目文案（章节标题 · 第 N 页，页码 1-based 展示） */
 	function bookmarkLabel(bm : Bookmark) : string {
 		const ch = chapterAt(bm.chapterId)
-		return ch.title + ' · 第 ' + (bm.pageIndex + 1) + ' 页'
+		return t('readercomp.bookmarkPageN').replace('{0}', ch.title).replace('{1}', (bm.pageIndex + 1).toString())
 	}
 
 	/** 当前页是否已有书签 */

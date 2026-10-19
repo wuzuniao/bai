@@ -18,6 +18,9 @@ import {
 } from '../api/reading.uts'
 import { hasAccessToken } from './request.uts'
 import { relocateBookNotes, repushBookNotes, thoughtFromCloud, Thought } from './readerTypes.uts'
+import { t, tf } from './i18n'
+// 词典注册（书籍数据层文案）
+import './locales/books.uts'
 // #ifdef WEB
 import { webFsDelete, webFsRename } from './webfs'
 // #endif
@@ -576,7 +579,7 @@ async function renameSandboxFile(from : string, to : string) : Promise<void> {
 			fs.accessSync(to)
 			return
 		} catch (e2) {
-			throw new Error('正文文件迁移失败')
+			throw new Error(t('books.contentMoveFail'))
 		}
 	}
 	try {
@@ -590,12 +593,12 @@ async function renameSandboxFile(from : string, to : string) : Promise<void> {
 				srcPath: from,
 				destPath: to,
 				success: (_res) => { resolve() },
-				fail: (_err) => { reject(new Error('文件迁移失败')) }
+				fail: (_err) => { reject(new Error(t('books.fileMoveFail'))) }
 			})
 		})
 		discardSandboxFile(from)
 	} catch (e) {
-		throw new Error('正文文件迁移失败')
+		throw new Error(t('books.contentMoveFail'))
 	}
 	// #endif
 }
@@ -604,7 +607,7 @@ async function renameSandboxFile(from : string, to : string) : Promise<void> {
 async function migratePendingBook(book : LocalBook, data : UTSJSONObject) : Promise<void> {
 	const newId = data.getNumber('id') ?? 0
 	if (newId <= 0) {
-		throw new Error('云端书籍 id 无效')
+		throw new Error(t('books.cloudIdInvalid'))
 	}
 	// 离线期间的划线/想法/书签先回补云端（失败抛出，重试只补失败类）
 	await relocateBookNotes(book.id, newId)
@@ -646,7 +649,7 @@ async function migratePendingBook(book : LocalBook, data : UTSJSONObject) : Prom
 	// 本地记录替换为云端记录（本地进度较新时保留本地值）
 	const cloudBook = bookFromCloud(data)
 	if (cloudBook == null) {
-		throw new Error('云端书籍记录解析失败')
+		throw new Error(t('books.cloudParseFail'))
 	}
 	cloudBook.path = newPath
 	if (book.lastReadAt > cloudReadMs) {
@@ -794,7 +797,7 @@ function notifyAutoClaimed(data : UTSJSONObject) : void {
 	for (let i = 0; i < arr.length; i++) {
 		sum += arr[i].getNumber('reward') ?? 0
 	}
-	uni.showToast({ title: '阅读奖励自动领取 +' + sum + ' 铜币', icon: 'none' })
+	uni.showToast({ title: tf('books.rewardAutoN', [sum.toString()]), icon: 'none' })
 }
 
 // ==================== 阅读会话流水（按书/时段明细账；本地暂存 + 登录后补传） ====================

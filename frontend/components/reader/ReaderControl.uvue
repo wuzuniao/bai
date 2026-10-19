@@ -53,22 +53,22 @@
 			<!-- 听书悬浮球（Stitch: 黑底 64px 圆，"听" 28px/900，设置/抽屉展开时隐藏） -->
 			<view v-if="!settingsOpen && !drawerOpen" class="listen-wrap">
 				<view class="listen-btn" @click="onListen">
-					<text class="listen-text">听</text>
+					<text class="listen-text">{{ t('readercomp.listen') }}</text>
 				</view>
 			</view>
 			<!-- 底部三项导航（Stitch: 目录/夜间/设置） -->
 			<view class="bottom-nav">
 				<view class="bottom-nav-btn" @click="onToggleDrawer">
 					<image class="bottom-nav-icon" :src="themeIcon('reader-catalog')" />
-					<text class="bottom-nav-text" :style="'color:' + theme.titleColor">目录</text>
+					<text class="bottom-nav-text" :style="'color:' + theme.titleColor">{{ t('readercomp.navCatalog') }}</text>
 				</view>
 				<view class="bottom-nav-btn" @click="toggleNightMode">
 					<image class="bottom-nav-icon" :src="nightMode ? '/static/icons/reader-sun.svg' : themeIcon('reader-moon')" />
-					<text class="bottom-nav-text" :style="'color:' + theme.titleColor">{{ nightMode ? '白天' : '夜晚' }}</text>
+					<text class="bottom-nav-text" :style="'color:' + theme.titleColor">{{ nightMode ? t('readercomp.navTheme') : t('readercomp.themeNight') }}</text>
 				</view>
 				<view class="bottom-nav-btn" @click="onToggleSettings">
 					<image class="bottom-nav-icon" :src="themeIcon('reader-settings')" />
-					<text class="bottom-nav-text" :style="'color:' + theme.titleColor">设置</text>
+					<text class="bottom-nav-text" :style="'color:' + theme.titleColor">{{ t('readercomp.navSettings') }}</text>
 				</view>
 			</view>
 		</view>
@@ -78,6 +78,10 @@
 <script setup lang="uts">
 	import { READER_THEME_LIGHT, READER_THEME_NIGHT, READER_THEME_PAPER, ReaderTheme } from '@/utils/theme.uts'
 	import { Chapter, NoteRecord, Bookmark, ReaderSettings, loadSettings } from '@/utils/readerTypes.uts'
+	import { t } from '@/utils/i18n.uts'
+	// 词典注册（阅读器组件文案）
+	import '@/utils/locales/readercomp.uts'
+	import '@/utils/locales/common.uts'
 	import DrawerPanel from '@/components/reader/DrawerPanel.uvue'
 	import SettingsPanel from '@/components/reader/SettingsPanel.uvue'
 

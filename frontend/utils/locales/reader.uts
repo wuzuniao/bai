@@ -1,0 +1,50 @@
+/**
+ * 阅读页词典段（pages/reading/reader.uvue）
+ * 翻页模式内部值为中文（持久化兼容），仅展示/toast 层取词。
+ * 模块载入时注册进 i18n 全局词典；reader.uvue 引入本文件即完成注册。
+ */
+import { registerDict, Dict } from '../i18n'
+
+const zh: Dict = new Map<string, string>([
+	['reader.shareTitle', '无足鸟古诗词学习助手'],
+	['reader.lastChapter', '已经是最后一章'],
+	['reader.firstChapter', '已经是第一章'],
+	['reader.pullRemove', '↑ 松手移除书签'],
+	['reader.pullAdd', '↓ 下拉添加书签'],
+	['reader.bookMissing', '书籍不存在'],
+	['reader.bookMissingOrDeleted', '书籍不存在或已删除'],
+	['reader.fileMissing', '本设备没有该书文件，请到书架重新导入'],
+	['reader.opening', '正在打开'],
+	['reader.readFail', '书籍读取失败，文件可能已被清理'],
+	['reader.listenTodo', '听书模式即将上线'],
+	['pdfreader.title', 'PDF 阅读'],
+	['pdfreader.pageN', '第 {0} 页 · {1}'],
+	['pdfreader.preparing', '正在准备阅读'],
+	['pdfreader.dataBroken', '书籍数据异常，请删除后重新导入'],
+	['pdfreader.renderFail', '渲染失败，请重新打开'],
+	['pdfreader.openFail', 'PDF 打开失败，文件可能已损坏'],
+	['pdfreader.rendering', '正在渲染 {0} / {1}']
+])
+
+const en: Dict = new Map<string, string>([
+	['reader.shareTitle', 'Wuzuniao Poetry Learning Assistant'],
+	['reader.lastChapter', 'Already the last chapter'],
+	['reader.firstChapter', 'Already the first chapter'],
+	['reader.pullRemove', '↑ Release to remove bookmark'],
+	['reader.pullAdd', '↓ Pull down to add bookmark'],
+	['reader.bookMissing', 'Book not found'],
+	['reader.bookMissingOrDeleted', 'Book not found or deleted'],
+	['reader.fileMissing', 'No local copy of this book — re-import it from the bookshelf'],
+	['reader.opening', 'Opening'],
+	['reader.readFail', 'Failed to read the book; the file may have been cleared'],
+	['reader.listenTodo', 'Read-aloud mode coming soon'],
+	['pdfreader.title', 'PDF Reader'],
+	['pdfreader.pageN', 'p.{0} · {1}'],
+	['pdfreader.preparing', 'Preparing to read'],
+	['pdfreader.dataBroken', 'Book data is broken — delete and re-import it'],
+	['pdfreader.renderFail', 'Render failed, please reopen'],
+	['pdfreader.openFail', 'Failed to open PDF; the file may be corrupted'],
+	['pdfreader.rendering', 'Rendering {0} / {1}']
+])
+
+registerDict(zh, en)

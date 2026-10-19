@@ -5,13 +5,13 @@
 
 		<view class="messages-page__canvas" :style="'padding-top:' + mainTop + 'px'">
 			<!-- 页面标题区 -->
-			<PageHeader title="站内信" desc="查看系统公告，点击未读公告可标记为已读。" />
+			<PageHeader :title="t('messages.title')" :desc="t('messages.desc')" />
 
 			<!-- 工具栏：分类（公告）+ 全部已读 -->
 			<view class="messages-page__toolbar">
 				<view class="messages-page__tabs">
 					<view class="messages-page__tab messages-page__tab--active">
-						<text class="messages-page__tab-text messages-page__tab-text--active">公告</text>
+						<text class="messages-page__tab-text messages-page__tab-text--active">{{ t('messages.tab') }}</text>
 					</view>
 				</view>
 				<view
@@ -20,7 +20,7 @@
 					:class="{ 'messages-page__mark-all--disabled': markingAll }"
 					@tap="handleMarkAllRead"
 				>
-					<text class="messages-page__mark-all-text">全部已读</text>
+					<text class="messages-page__mark-all-text">{{ t('messages.markAll') }}</text>
 				</view>
 			</view>
 
@@ -28,17 +28,17 @@
 			<view class="messages-page__list">
 				<!-- 加载中（初次加载） -->
 				<view v-if="loading && announcements.length === 0" class="messages-page__status">
-					<text class="messages-page__status-text">加载中…</text>
+					<text class="messages-page__status-text">{{ t('messages.loading') }}</text>
 				</view>
 
 				<!-- 加载失败（初次加载，点击重试） -->
 				<view v-else-if="error && announcements.length === 0" class="messages-page__status" @tap="retry">
-					<text class="messages-page__status-text messages-page__status-text--error">加载失败，点击重试</text>
+					<text class="messages-page__status-text messages-page__status-text--error">{{ t('messages.loadFail') }}</text>
 				</view>
 
 				<!-- 空数据 -->
 				<view v-else-if="announcements.length === 0" class="messages-page__status">
-					<text class="messages-page__status-text">暂无公告</text>
+					<text class="messages-page__status-text">{{ t('messages.empty') }}</text>
 				</view>
 
 				<!-- 公告卡片（数据来源：auth /api/v1/announcements，卡片直接显示全部内容） -->
@@ -61,11 +61,11 @@
 
 					<!-- 加载更多（分页加载中） -->
 					<view v-if="loadingMore" class="messages-page__status">
-						<text class="messages-page__status-text">加载中…</text>
+						<text class="messages-page__status-text">{{ t('messages.loading') }}</text>
 					</view>
 					<!-- 没有更多 -->
 					<view v-else-if="!hasMore && announcements.length > 0" class="messages-page__status">
-						<text class="messages-page__status-text">没有更多了</text>
+						<text class="messages-page__status-text">{{ t('messages.noMore') }}</text>
 					</view>
 				</template>
 			</view>
@@ -88,6 +88,10 @@
 	import PageHeader from '@/components/common/PageHeader.uvue'
 	import { getAnnouncements, markAnnouncementRead, markAllAnnouncementsRead, AnnouncementItem, AnnouncementsPage } from '@/api/announcement.uts'
 	import { mainTopPx } from '@/utils/layout.uts'
+	import { t } from '@/utils/i18n.uts'
+	// 词典注册（messages 页文案 + 公共段）
+	import '@/utils/locales/userinfo-pages.uts'
+	import '@/utils/locales/common.uts'
 
 	/** 顶部留白：返回按钮（状态栏高度 + 40px）之下再留 12px（计算逻辑见 utils/layout.uts） */
 	const mainTop = ref(mainTopPx())
@@ -161,7 +165,7 @@
 			announcements.value.forEach((item: AnnouncementItem) => {
 				item.is_read = true
 			})
-			uni.showToast({ title: '已全部标记为已读', icon: 'none' })
+			uni.showToast({ title: t('messages.markAllDone'), icon: 'none' })
 		}, (e: Error) => {
 			uni.showToast({ title: e.message, icon: 'none' })
 		}).finally(() => {
@@ -182,10 +186,10 @@
 	// 微信小程序分享：转发好友与朋友圈（封面统一 /static/share-cover.png，复制自 yao 项目）
 	// #ifdef MP-WEIXIN
 	onShareAppMessage(() => {
-		return { title: '站内信', imageUrl: '/static/share-cover.png' }
+		return { title: t('messages.shareTitle'), imageUrl: '/static/share-cover.png' }
 	})
 	onShareTimeline(() => {
-		return { title: '站内信', imageUrl: '/static/share-cover.png' }
+		return { title: t('messages.shareTitle'), imageUrl: '/static/share-cover.png' }
 	})
 	// #endif
 

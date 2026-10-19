@@ -4,13 +4,18 @@
  * - 档位数额与后端 services/reward_service.py 的 READING_TIERS 同步维护
  *   （后端为发放真源，本配置仅驱动展示；数值变更须两处同步）
  * - 状态取值与后端一致：locked=未达成 / claimable=已达成未领 / claimed=已领取
+ * - title 字段存 i18n key（渲染层经 t() 取词，随语言切换刷新）
  */
+import { t } from './i18n'
+// 词典注册（档位标题/时长单位文案）
+import './locales/rewards.uts'
+
 export type RewardTier = {
 	/** 档位阈值分钟数 */
 	minutes: number
 	/** 徽标文案（5'/30'/2h/6h/12h） */
 	badge: string
-	/** 标题文案 */
+	/** 标题 i18n key（渲染层 t(title) 取词） */
 	title: string
 	/** 基础奖励铜币数 */
 	base: number
@@ -19,11 +24,11 @@ export type RewardTier = {
 }
 
 export const REWARD_TIERS: RewardTier[] = [
-	{ minutes: 5, badge: "5'", title: "读满 5 分钟 (5')", base: 1, bonus: 0 } as RewardTier,
-	{ minutes: 30, badge: "30'", title: '读满 30 分钟', base: 6, bonus: 0 } as RewardTier,
-	{ minutes: 120, badge: '2h', title: "读满 2 小时 (120')", base: 24, bonus: 10 } as RewardTier,
-	{ minutes: 360, badge: '6h', title: "读满 6 小时 (360')", base: 72, bonus: 30 } as RewardTier,
-	{ minutes: 720, badge: '12h', title: "读满 12 小时 (720')", base: 144, bonus: 60 } as RewardTier,
+	{ minutes: 5, badge: "5'", title: 'rewards.tierTitle5', base: 1, bonus: 0 } as RewardTier,
+	{ minutes: 30, badge: "30'", title: 'rewards.tierTitle30', base: 6, bonus: 0 } as RewardTier,
+	{ minutes: 120, badge: '2h', title: 'rewards.tierTitle120', base: 24, bonus: 10 } as RewardTier,
+	{ minutes: 360, badge: '6h', title: 'rewards.tierTitle360', base: 72, bonus: 30 } as RewardTier,
+	{ minutes: 720, badge: '12h', title: 'rewards.tierTitle720', base: 144, bonus: 60 } as RewardTier,
 ]
 
 /** 档位领取总额（基础 + 额外赠送） */
@@ -40,10 +45,10 @@ export function fmtRemainMinutes(mins: number) : string {
 	const h = Math.floor(m / 60)
 	const r = m % 60
 	if (h > 0 && r > 0) {
-		return h + ' 小时 ' + r + ' 分钟'
+		return h + ' ' + t('rewards.hour') + ' ' + r + ' ' + t('rewards.minute')
 	}
 	if (h > 0) {
-		return h + ' 小时'
+		return h + ' ' + t('rewards.hour')
 	}
-	return r + ' 分钟'
+	return r + ' ' + t('rewards.minute')
 }

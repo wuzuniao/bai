@@ -6,7 +6,7 @@
 				class="code-input__field"
 				:class="error.length > 0 ? 'code-input__field--error' : ''"
 				:value="modelValue"
-				placeholder="请输入验证码"
+				:placeholder="t('common.code.placeholder')"
 				:placeholder-style="PLACEHOLDER_STYLE"
 				:maxlength="6"
 				@input="onInput"
@@ -32,6 +32,9 @@
 	 * 失败调 reset() 恢复按钮（参照 NoticeButton 的 defineExpose 模式）。
 	 */
 	import { PLACEHOLDER_STYLE } from '@/utils/theme.uts'
+	import { t } from '@/utils/i18n.uts'
+	// 词典注册（验证码组件文案）
+	import '@/utils/locales/common.uts'
 
 	const props = defineProps<{
 		/** 输入值（v-model） */
@@ -52,12 +55,12 @@
 	/** 是否倒计时中（模板禁用态） */
 	const counting = computed(() : boolean => sec.value >= 0)
 
-	/** 按钮文案：倒计时中 Ns / 发送中 / 默认 */
+	/** 按钮文案：倒计时中 Ns / 发送中 / 默认（渲染期取词，随语言切换刷新） */
 	const btnText = computed(() : string => {
 		if (counting.value) {
 			return `${sec.value}s`
 		}
-		return props.sending ? '发送中...' : '获取验证码'
+		return props.sending ? t('common.code.sending') : t('common.code.send')
 	})
 
 	/** 是否倒计时中（宿主防重入判断） */

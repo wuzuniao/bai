@@ -1,0 +1,27 @@
+/**
+ * 活动奖励共享文案段（utils/rewards.uts：档位标题/时长单位，活动页与书架统计卡共用）
+ * 模块载入时注册进 i18n 全局词典；utils/rewards.uts 引入本文件即完成注册。
+ */
+import { registerDict, Dict } from '../i18n'
+
+const zh: Dict = new Map<string, string>([
+	['rewards.tierTitle5', "读满 5 分钟 (5')"],
+	['rewards.tierTitle30', '读满 30 分钟'],
+	['rewards.tierTitle120', "读满 2 小时 (120')"],
+	['rewards.tierTitle360', "读满 6 小时 (360')"],
+	['rewards.tierTitle720', "读满 12 小时 (720')"],
+	['rewards.hour', '小时'],
+	['rewards.minute', '分钟']
+])
+
+const en: Dict = new Map<string, string>([
+	['rewards.tierTitle5', "Read 5 min (5')"],
+	['rewards.tierTitle30', 'Read 30 min'],
+	['rewards.tierTitle120', "Read 2 hours (120')"],
+	['rewards.tierTitle360', "Read 6 hours (360')"],
+	['rewards.tierTitle720', "Read 12 hours (720')"],
+	['rewards.hour', 'h'],
+	['rewards.minute', 'min']
+])
+
+registerDict(zh, en)

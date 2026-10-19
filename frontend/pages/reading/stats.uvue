@@ -1,6 +1,6 @@
 <template>
 	<view class="page">
-		<PageShell title="阅读时间统计" desc="按周/月/年/总查看阅读时长、书籍榜与时段分布">
+		<PageShell :title="tr('stats.title')" :desc="tr('stats.desc')">
 			<!-- 周期 Tab（周/月/年/总） -->
 			<view class="tabs">
 				<view
@@ -9,7 +9,7 @@
 					:class="period == t.key ? 'tab tab-on' : 'tab'"
 					@click="switchPeriod(t.key)"
 				>
-					<text :class="period == t.key ? 'tab-text-on' : 'tab-text'">{{ t.label }}</text>
+					<text :class="period == t.key ? 'tab-text-on' : 'tab-text'">{{ tr(t.label) }}</text>
 				</view>
 			</view>
 			<!-- 周期切换（总览无周期概念，隐藏） -->
@@ -26,20 +26,20 @@
 			<!-- 总览卡：周期总时长 + 日均 + 四项指标 -->
 			<view class="card">
 				<text class="total-text">{{ totalText }}</text>
-				<text class="avg-text">日均阅读 {{ avgMinutes }} 分钟</text>
+				<text class="avg-text">{{ tf('stats.avgN', [avgMinutes.toString()]) }}</text>
 				<view class="metric-grid">
 					<view class="metric-cell">
-						<text class="metric-label">阅读</text>
+						<text class="metric-label">{{ tr('stats.metricRead') }}</text>
 						<view class="metric-value-row">
 							<text class="metric-num">{{ activeDays }}</text>
-							<text class="metric-unit">天</text>
+							<text class="metric-unit">{{ tr('stats.metricDays') }}</text>
 						</view>
 					</view>
 					<view class="metric-cell">
-						<text class="metric-label">笔记</text>
+						<text class="metric-label">{{ tr('stats.metricNotes') }}</text>
 						<view class="metric-value-row">
 							<text class="metric-num">{{ notesCount }}</text>
-							<text class="metric-unit">条</text>
+							<text class="metric-unit">{{ tr('stats.metricItems') }}</text>
 						</view>
 					</view>
 				</view>
@@ -47,7 +47,7 @@
 
 			<!-- 阅读时长分布（周=逐日条形 / 月=实际月历灰度 / 年=逐月条形 / 总=逐年条形） -->
 			<view class="card">
-				<text class="card-title">阅读时长分布</text>
+				<text class="card-title">{{ tr('stats.distTitle') }}</text>
 				<!-- 条形图（周/年/总）：右侧纵坐标刻度 -->
 				<view v-if="period != 'month'" class="chart-wrap">
 					<view class="chart">
@@ -65,7 +65,7 @@
 				<!-- 月历（月）：当日有阅读以灰度色块表示，时长越长越深，12 小时封顶纯黑 -->
 				<view v-else class="calendar">
 					<view class="cal-head">
-						<text v-for="(w, wi) in CAL_HEAD" :key="wi" class="cal-head-text">{{ w }}</text>
+						<text v-for="(w, wi) in CAL_HEAD" :key="wi" class="cal-head-text">{{ weekChar(wi) }}</text>
 					</view>
 					<view class="cal-grid">
 						<view v-for="(c, ci) in calendarCells" :key="ci" class="cal-cell">
@@ -82,9 +82,9 @@
 
 			<!-- 阅读最久书籍榜（top3） -->
 			<view class="card">
-				<text class="card-title">阅读最久</text>
+				<text class="card-title">{{ tr('stats.longestTitle') }}</text>
 				<view v-if="bookList.length == 0" class="empty-row">
-					<text class="empty-text">本期暂无阅读记录</text>
+					<text class="empty-text">{{ tr('stats.empty') }}</text>
 				</view>
 				<view v-for="(b, i) in bookList" :key="i" :class="i > 0 ? 'book-item book-item-gap' : 'book-item'">
 					<view class="book-cover">
@@ -134,6 +134,11 @@
 	import { fetchReadingReport } from '@/api/reading.uts'
 	import { hasAccessToken } from '@/utils/request.uts'
 	import { loadBooks, exportPendingSessionRows } from '@/utils/books.uts'
+	// i18n：本页 v-for 变量名 t 与取词函数冲突，取词函数别名 tr
+	import { t as tr, tf } from '@/utils/i18n.uts'
+	// 词典注册（stats 页文案 + 公共段）
+	import '@/utils/locales/stats.uts'
+	import '@/utils/locales/common.uts'
 
 	type PeriodTab = {
 		key: string
@@ -162,14 +167,19 @@
 	}
 
 	const PERIOD_TABS: PeriodTab[] = [
-		{ key: 'week', label: '周' } as PeriodTab,
-		{ key: 'month', label: '月' } as PeriodTab,
-		{ key: 'year', label: '年' } as PeriodTab,
-		{ key: 'total', label: '总' } as PeriodTab,
+		{ key: 'week', label: 'stats.tabWeek' } as PeriodTab,
+		{ key: 'month', label: 'stats.tabMonth' } as PeriodTab,
+		{ key: 'year', label: 'stats.tabYear' } as PeriodTab,
+		{ key: 'total', label: 'stats.tabTotal' } as PeriodTab,
 	]
 
-	/** 月历表头（周日起始，与周粒度轴序一致） */
-	const CAL_HEAD: string[] = ['日', '一', '二', '三', '四', '五', '六']
+	/** 月历表头占位（渲染期经 weekChar(wi) 取词随语言切换刷新） */
+	const CAL_HEAD: string[] = ['0', '1', '2', '3', '4', '5', '6']
+
+	/** 月历表头字符（周日起始，与周粒度轴序一致） */
+	function weekChar(index: number) : string {
+		return tr('stats.weekChar' + index.toString())
+	}
 
 	/** 当前周期与锚点日期（锚点为周期内任一日期，周/月/年切换周期用） */
 	const period = ref('month')
@@ -189,7 +199,7 @@
 	const bookList = ref<BookRow[]>([])
 	const hourBars = ref<BarCell[]>([])
 	const hourTicks = ref<string[]>(['', '', '', '', ''])
-	const hoursTitle = ref('阅读时段分布')
+	const hoursTitle = ref(tr('stats.hoursTitle'))
 
 	// ── 文案与格式化 ──
 
@@ -206,34 +216,34 @@
 		return '' + y + '-' + pad2(m) + '-' + pad2(d)
 	}
 
-	/** 分钟数 → 「X小时Y分钟 / X小时 / Y分钟」 */
+	/** 分钟数 → 「X小时Y分钟 / X小时 / Y分钟」（i18n） */
 	function fmtMinutes(mins : number) : string {
 		const h = Math.floor(mins / 60)
 		const r = mins % 60
 		if (h > 0 && r > 0) {
-			return h + '小时' + r + '分钟'
+			return tf('stats.fmtHM', [h.toString(), r.toString()])
 		}
 		if (h > 0) {
-			return h + '小时'
+			return tf('stats.fmtH', [h.toString()])
 		}
-		return r + '分钟'
+		return tf('stats.fmtM', [r.toString()])
 	}
 
 	/** 周期切换文案（周=区间 / 月=YYYY年M月 / 年=YYYY年） */
 	const periodText = computed((): string => {
 		if (period.value == 'year') {
-			return anchor.value.substring(0, 4) + '年'
+			return tf('stats.periodYear', [anchor.value.substring(0, 4)])
 		}
 		if (period.value == 'month') {
 			const p = anchor.value.split('-')
-			return parseInt(p[0]) + '年' + parseInt(p[1]) + '月'
+			return tf('stats.periodMonth', [parseInt(p[0]).toString(), parseInt(p[1]).toString()])
 		}
 		const s = startDate.value.split('-')
 		const e = endDate.value.split('-')
 		if (s.length < 3 || e.length < 3) {
 			return ''
 		}
-		return parseInt(s[1]) + '月' + parseInt(s[2]) + '日 - ' + parseInt(e[1]) + '月' + parseInt(e[2]) + '日'
+		return tf('stats.periodRange', [parseInt(s[1]).toString(), parseInt(s[2]).toString(), parseInt(e[1]).toString(), parseInt(e[2]).toString()])
 	})
 
 	/** 周日为一周起点（轴序 日一二三四五六） */
@@ -466,7 +476,6 @@
 		const trendArr: UTSJSONObject[] = []
 		let peakMinutes = 0
 		let peakFull = ''
-		const WEEKDAY_CHARS: string = '日一二三四五六'
 		if (periodKey == 'week') {
 			const p = startKey.split('-')
 			const sd = new Date(parseInt(p[0]), parseInt(p[1]) - 1, parseInt(p[2]))
@@ -474,12 +483,12 @@
 				const d = new Date(sd.getFullYear(), sd.getMonth(), sd.getDate() + i)
 				const mins = bucketOf(dayBuckets, fmtDate(d.getFullYear(), d.getMonth() + 1, d.getDate()))
 				const item = {} as UTSJSONObject
-				item['label'] = WEEKDAY_CHARS.substring(i, i + 1)
+				item['label'] = weekChar(i)
 				item['minutes'] = mins
 				trendArr.push(item)
 				if (mins > peakMinutes) {
 					peakMinutes = mins
-					peakFull = (d.getMonth() + 1) + '月' + d.getDate() + '日'
+					peakFull = tf('stats.dateMD', [(d.getMonth() + 1).toString(), d.getDate().toString()])
 				}
 			}
 		} else if (periodKey == 'month') {
@@ -494,7 +503,7 @@
 				trendArr.push(item)
 				if (mins > peakMinutes) {
 					peakMinutes = mins
-					peakFull = day + '日'
+					peakFull = tf('stats.dateD', [day.toString()])
 				}
 			}
 		} else if (periodKey == 'year') {
@@ -502,12 +511,12 @@
 			for (let m = 1; m <= 12; m++) {
 				const mins = bucketOf(monthBuckets, y + '-' + pad2(m))
 				const item = {} as UTSJSONObject
-				item['label'] = m + '月'
+				item['label'] = tr('stats.mLabel' + m.toString())
 				item['minutes'] = mins
 				trendArr.push(item)
 				if (mins > peakMinutes) {
 					peakMinutes = mins
-					peakFull = m + '月'
+					peakFull = tr('stats.mLabel' + m.toString())
 				}
 			}
 		} else {
@@ -521,7 +530,7 @@
 				trendArr.push(item)
 				if (mins > peakMinutes) {
 					peakMinutes = mins
-					peakFull = y + '年'
+					peakFull = tf('stats.periodYear', [y.toString()])
 				}
 			}
 		}
@@ -754,7 +763,7 @@
 		if (peak != null) {
 			const pm = peak.getNumber('minutes') ?? 0
 			const pl = peak.getString('label') ?? ''
-			peakText.value = pm > 0 && pl.length > 0 ? pl + '阅读最久 · ' + fmtMinutes(pm) : ''
+			peakText.value = pm > 0 && pl.length > 0 ? tf('stats.peak', [pl, fmtMinutes(pm)]) : ''
 		} else {
 			peakText.value = ''
 		}
@@ -768,7 +777,7 @@
 				const tm = o.getNumber('total_minutes') ?? 0
 				list.push({
 					title: title,
-					coverChar: title.length > 0 ? title.substring(0, 1) : '书',
+					coverChar: title.length > 0 ? title.substring(0, 1) : tr('stats.coverChar'),
 					totalText: fmtMinutes(tm)
 				} as BookRow)
 			}
@@ -776,16 +785,30 @@
 		bookList.value = list
 		// 时段偏好标题（按实际高峰分段生成：凌晨/上午/下午/夜间）
 		const tag = d.getString('peak_tag') ?? ''
-		hoursTitle.value = tag.length > 0 ? '偏好' + tag + '阅读' : '阅读时段分布'
+		hoursTitle.value = tag.length > 0 ? tf('stats.hoursPref', [segTagLabel(tag)]) : tr('stats.hoursTitle')
+	}
+
+	/** 时段偏好标签 → 文案（后端/本地报表 peak_tag 为中文枚举，按值映射 i18n 词条） */
+	function segTagLabel(tag: string) : string {
+		if (tag == '上午') {
+			return tr('stats.segMorning')
+		}
+		if (tag == '下午') {
+			return tr('stats.segAfternoon')
+		}
+		if (tag == '夜间') {
+			return tr('stats.segNight')
+		}
+		return tr('stats.segEarly')
 	}
 
 	// 微信小程序分享：转发好友与朋友圈（封面统一 /static/share-cover.png，复制自 yao 项目）
 	// #ifdef MP-WEIXIN
 	onShareAppMessage(() => {
-		return { title: '阅读统计', imageUrl: '/static/share-cover.png' }
+		return { title: tr('stats.shareTitle'), imageUrl: '/static/share-cover.png' }
 	})
 	onShareTimeline(() => {
-		return { title: '阅读统计', imageUrl: '/static/share-cover.png' }
+		return { title: tr('stats.shareTitle'), imageUrl: '/static/share-cover.png' }
 	})
 	// #endif
 

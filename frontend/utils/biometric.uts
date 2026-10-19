@@ -7,6 +7,9 @@
  * 直接存本地沙箱；开关状态独立持久化，关闭开关不清理凭证（重新开启无需重新登录）。
  * - Android 端需在 manifest.json 勾选指纹权限；鸿蒙端 HBuilderX 4.31+ 原生支持
  */
+import { t } from './i18n'
+// 词典注册（指纹验证提示文案）
+import './locales/biometric.uts'
 
 const DEVICE_ID_KEY = 'biometricDeviceId'
 const TOKEN_KEY = 'biometricToken'
@@ -91,7 +94,7 @@ export function authenticate(): Promise<void> {
 		uni.startSoterAuthentication({
 			requestAuthModes: ['fingerPrint'],
 			challenge: Date.now().toString(),
-			authContent: '指纹验证已登录',
+			authContent: t('biometric.authContent'),
 			success: (_res) => {
 				resolve()
 			},

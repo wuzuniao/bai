@@ -1,0 +1,43 @@
+/**
+ * 找回密码页词典段（pages/user/forgot-password.uvue）
+ * 模块载入时注册进 i18n 全局词典；forgot-password.uvue 引入本文件即完成注册。
+ */
+import { registerDict, Dict } from '../i18n'
+
+const zh: Dict = new Map<string, string>([
+	['forgot.title', '找回密码'],
+	['forgot.emailLabel', '电子邮箱'],
+	['forgot.emailPh', '请输入邮箱地址'],
+	['forgot.codeLabel', '验证码'],
+	['forgot.next', '下一步'],
+	['forgot.newPasswordLabel', '新密码'],
+	['forgot.newPasswordPh', '请设置强密码'],
+	['forgot.confirmLabel', '确认密码'],
+	['forgot.confirmPh', '请再次输入密码'],
+	['forgot.submit', '找回'],
+	['forgot.backLogin', '返回登录'],
+	['forgot.shareTitle', '找回密码'],
+	['forgot.codeSent', '验证码已发送'],
+	['forgot.success', '密码重置成功'],
+	['forgot.codeWrong', '请输入正确验证码']
+])
+
+const en: Dict = new Map<string, string>([
+	['forgot.title', 'Reset Password'],
+	['forgot.emailLabel', 'Email'],
+	['forgot.emailPh', 'Enter your email address'],
+	['forgot.codeLabel', 'Verification Code'],
+	['forgot.next', 'Next'],
+	['forgot.newPasswordLabel', 'New Password'],
+	['forgot.newPasswordPh', 'Choose a strong password'],
+	['forgot.confirmLabel', 'Confirm Password'],
+	['forgot.confirmPh', 'Enter your password again'],
+	['forgot.submit', 'Reset'],
+	['forgot.backLogin', 'Back to Sign In'],
+	['forgot.shareTitle', 'Reset Password'],
+	['forgot.codeSent', 'Code sent'],
+	['forgot.success', 'Password reset'],
+	['forgot.codeWrong', 'Please enter the correct code']
+])
+
+registerDict(zh, en)

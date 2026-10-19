@@ -1,0 +1,23 @@
+/**
+ * Web 端书籍正文存储层词典段（utils/webfs.uts）
+ * 模块载入时注册进 i18n 全局词典；webfs.uts 引入本文件即完成注册。
+ */
+import { registerDict, Dict } from '../i18n'
+
+const zh: Dict = new Map<string, string>([
+	['webfs.openFail', '本地存储打开失败'],
+	['webfs.rwFail', '本地存储读写失败'],
+	['webfs.readFail', '本地存储读取失败'],
+	['webfs.pickExpired', '导入文件已失效，请重新选择'],
+	['webfs.readRetry', '文件读取失败，请重试']
+])
+
+const en: Dict = new Map<string, string>([
+	['webfs.openFail', 'Failed to open local storage'],
+	['webfs.rwFail', 'Local storage read/write failed'],
+	['webfs.readFail', 'Failed to read local storage'],
+	['webfs.pickExpired', 'The picked file has expired, select it again'],
+	['webfs.readRetry', 'Failed to read file, try again']
+])
+
+registerDict(zh, en)
