@@ -531,7 +531,9 @@
 		box-sizing: border-box;
 		padding: 40rpx 40rpx calc(40rpx + env(safe-area-inset-bottom));
 		background-color: #2f3131;
-		border: 1px solid #e2e2e2;
+		border-top-width: 1px;
+		border-top-style: solid;
+		border-top-color: #e2e2e2;
 		border-top-left-radius: 24rpx;
 		border-top-right-radius: 24rpx;
 		flex-direction: column;
