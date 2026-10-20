@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- H5 站点地图（SEO）：仅收录无需登录即可打开的公开页面路由；
+     阅读器/PDF 阅读器/会员支付等需参数或登录态的页面不列入。
+     经构建拷贝至 /static/sitemap.xml，nginx 以 alias 映射到域名根 /sitemap.xml 惯例路径。 -->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+	<url><loc>https://bai.wuzuniao.com/h5/</loc></url>
+	<url><loc>https://bai.wuzuniao.com/h5/pages/reading/bookshelf</loc></url>
+	<url><loc>https://bai.wuzuniao.com/h5/pages/reading/reward</loc></url>
+	<url><loc>https://bai.wuzuniao.com/h5/pages/reading/stats</loc></url>
+	<url><loc>https://bai.wuzuniao.com/h5/pages/user/settings</loc></url>
+	<url><loc>https://bai.wuzuniao.com/h5/pages/user/login</loc></url>
+	<url><loc>https://bai.wuzuniao.com/h5/pages/user/register</loc></url>
+	<url><loc>https://bai.wuzuniao.com/h5/pages/user/forgot-password</loc></url>
+	<url><loc>https://bai.wuzuniao.com/h5/pages/user/help</loc></url>
+	<url><loc>https://bai.wuzuniao.com/h5/pages/user/contact</loc></url>
+	<url><loc>https://bai.wuzuniao.com/h5/pages/user/delete-account</loc></url>
+</urlset>

@@ -4,21 +4,21 @@
 			"path": "pages/index/index",
 			"style": {
 				"navigationStyle": "custom",
-				"navigationBarTitleText": "首页"
+				"navigationBarTitleText": "首页 - 无足鸟古诗词"
 			}
 		},
 		{
 			"path": "pages/reading/bookshelf",
 			"style": {
 				"navigationStyle": "custom",
-				"navigationBarTitleText": "书架"
+				"navigationBarTitleText": "书架 - 无足鸟古诗词"
 			}
 		},
 		{
 			"path": "pages/reading/reader",
 			"style": {
 				"navigationStyle": "custom",
-				"navigationBarTitleText": "阅读",
+				"navigationBarTitleText": "阅读 - 无足鸟古诗词",
 				"swipeBackAsBackPress": true
 			}
 		},
@@ -26,21 +26,21 @@
 			"path": "pages/reading/pdfreader",
 			"style": {
 				"navigationStyle": "custom",
-				"navigationBarTitleText": "阅读"
+				"navigationBarTitleText": "PDF 阅读 - 无足鸟古诗词"
 			}
 		},
 		{
 			"path": "pages/reading/reward",
 			"style": {
 				"navigationStyle": "custom",
-				"navigationBarTitleText": "活动"
+				"navigationBarTitleText": "活动 - 无足鸟古诗词"
 			}
 		},
 		{
 			"path": "pages/reading/stats",
 			"style": {
 				"navigationStyle": "custom",
-				"navigationBarTitleText": "阅读时间统计"
+				"navigationBarTitleText": "阅读时间统计 - 无足鸟古诗词"
 			}
 		}
 	],
@@ -52,63 +52,63 @@
 					"path": "settings",
 					"style": {
 						"navigationStyle": "custom",
-						"navigationBarTitleText": "我的"
+						"navigationBarTitleText": "我的 - 无足鸟古诗词"
 					}
 				},
 				{
 					"path": "profile",
 					"style": {
 						"navigationStyle": "custom",
-						"navigationBarTitleText": "个人信息"
+						"navigationBarTitleText": "个人信息 - 无足鸟古诗词"
 					}
 				},
 				{
 					"path": "login",
 					"style": {
 						"navigationStyle": "custom",
-						"navigationBarTitleText": "登录"
+						"navigationBarTitleText": "登录 - 无足鸟古诗词"
 					}
 				},
 				{
 					"path": "register",
 					"style": {
 						"navigationStyle": "custom",
-						"navigationBarTitleText": "注册"
+						"navigationBarTitleText": "注册 - 无足鸟古诗词"
 					}
 				},
 				{
 					"path": "forgot-password",
 					"style": {
 						"navigationStyle": "custom",
-						"navigationBarTitleText": "找回密码"
+						"navigationBarTitleText": "找回密码 - 无足鸟古诗词"
 					}
 				},
 				{
 					"path": "help",
 					"style": {
 						"navigationStyle": "custom",
-						"navigationBarTitleText": "帮助中心"
+						"navigationBarTitleText": "帮助中心 - 无足鸟古诗词"
 					}
 				},
 				{
 					"path": "contact",
 					"style": {
 						"navigationStyle": "custom",
-						"navigationBarTitleText": "联系我们"
+						"navigationBarTitleText": "联系我们 - 无足鸟古诗词"
 					}
 				},
 				{
 					"path": "messages",
 					"style": {
 						"navigationStyle": "custom",
-						"navigationBarTitleText": "站内信"
+						"navigationBarTitleText": "站内信 - 无足鸟古诗词"
 					}
 				},
 				{
 					"path": "delete-account",
 					"style": {
 						"navigationStyle": "custom",
-						"navigationBarTitleText": "账号删除与数据说明"
+						"navigationBarTitleText": "账号删除与数据说明 - 无足鸟古诗词"
 					}
 				},
 				{
@@ -116,7 +116,7 @@
 					"style": {
 						"navigationStyle": "custom",
 						"navigationBarTextStyle": "white",
-						"navigationBarTitleText": "会员支付"
+						"navigationBarTitleText": "会员支付 - 无足鸟古诗词"
 					}
 				}
 			]
@@ -130,7 +130,7 @@
 	},
 	"globalStyle": {
 		"navigationBarTextStyle": "black",
-		"navigationBarTitleText": "uni-app x",
+		"navigationBarTitleText": "无足鸟古诗词学习助手",
 		"navigationBarBackgroundColor": "#F4F4F2",
 		"backgroundColor": "#F4F4F2"
 	},

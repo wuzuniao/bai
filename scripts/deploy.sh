@@ -572,6 +572,20 @@ server {
         add_header Cache-Control "no-cache" always;
     }
 
+    # robots.txt（SEO）：内联返回，无需静态文件；禁止爬虫抓取后端 API 与健康检查，
+    # 页面路径默认允许收录（/h5/assets/ 下 JS/CSS 保持可抓取，供引擎渲染 SPA）
+    location = /robots.txt {
+        default_type text/plain;
+        return 200 "User-agent: *\nDisallow: /api/\nDisallow: /health\nSitemap: https://bai.wuzuniao.com/sitemap.xml\n";
+    }
+
+    # sitemap.xml（SEO）：按惯例放域名根路径；文件随前端构建拷至 /static/sitemap.xml，
+    # 此处 alias 映射，无需构建侧特殊处理
+    location = /sitemap.xml {
+        alias /var/www/bai/static/sitemap.xml;
+        add_header Cache-Control "public, max-age=86400" always;
+    }
+
     # 过渡期：域名根路径 302 至 /h5/（Web 端上线后以 Web 端站点配置替换本块）
     location = / {
         return 302 /h5/;
