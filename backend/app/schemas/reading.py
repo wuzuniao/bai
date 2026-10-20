@@ -3,12 +3,17 @@
 --------------------------------------------------------------------------
 - 字段命名与接口 JSON 保持 snake_case（与 auth/项目既有接口风格一致）
 - 必填项缺失/越界由 Pydantic 抛 422，业务规则错误由服务层抛 ValueError 转 400
+- 全部入库文本字段经 SecuritySanitizer 清洗（控制/零宽字符剥离 + 长度收口），
+  清洗器位于 core/sanitizer.py（接口输入安全唯一入口）
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+from ..core.sanitizer import SecuritySanitizer
 
 
 class BookCreate(BaseModel):
@@ -21,21 +26,26 @@ class BookCreate(BaseModel):
     chapter_count: int = Field(default=0, ge=0, le=100000)
     has_preface: bool = False
 
-    @field_validator("format")
+    @field_validator("format", mode="before")
     @classmethod
     def validate_format(cls, v: str) -> str:
-        v = v.strip().upper()
+        v = SecuritySanitizer.clean_text(v, max_length=10).upper()
         if v not in ("TXT", "PDF"):
             raise ValueError("format 仅支持 TXT / PDF")
         return v
 
-    @field_validator("title")
+    @field_validator("title", mode="before")
     @classmethod
     def validate_title(cls, v: str) -> str:
-        v = v.strip()
+        v = SecuritySanitizer.clean_text(v, max_length=200)
         if not v:
             raise ValueError("书名不能为空")
         return v
+
+    @field_validator("author", mode="before")
+    @classmethod
+    def validate_author(cls, v: str) -> str:
+        return SecuritySanitizer.clean_text(v, max_length=100)
 
 
 class BookProgressUpdate(BaseModel):
@@ -80,7 +90,7 @@ class UnderlineUpsert(BaseModel):
 
 
 class ThoughtCreate(BaseModel):
-    """想法写入（跨章选区定位 + 划线文本快照 + 正文）"""
+    """想法写入（跨章选区定位 + 划线文本快照 + 正文；文本经清洗器净化收口）"""
 
     from_cid: int = Field(ge=0, le=100000)
     from_origin: int = Field(ge=0, le=1000000)
@@ -88,8 +98,14 @@ class ThoughtCreate(BaseModel):
     to_cid: int = Field(ge=0, le=100000)
     to_origin: int = Field(ge=0, le=1000000)
     to_end: int = Field(ge=0, le=10**7)
-    quote: str = Field(default="", max_length=65535)
-    content: str = Field(min_length=1, max_length=65535)
+    quote: str = Field(default="", max_length=5000)
+    content: str = Field(min_length=1, max_length=5000)
+
+    @field_validator("quote", "content", mode="before")
+    @classmethod
+    def validate_text(cls, v: str) -> str:
+        """控制/零宽字符剥离 + 超长截断（选区快照与正文多行保留）"""
+        return SecuritySanitizer.clean_text(v, max_length=5000, multiline=True)
 
 
 class BookmarkItem(BaseModel):
@@ -123,18 +139,18 @@ class SessionItem(BaseModel):
     # 在线直传条目为 False（时长已由 /reading/minutes 计入，聚合会双计）
     aggregate_minutes: bool = False
 
-    @field_validator("source")
+    @field_validator("source", mode="before")
     @classmethod
     def validate_source(cls, v: str) -> str:
-        v = v.strip().lower()
+        v = SecuritySanitizer.clean_text(v, max_length=10).lower()
         if v not in ("txt", "pdf"):
             raise ValueError("source 仅支持 txt / pdf")
         return v
 
-    @field_validator("started_at", "ended_at")
+    @field_validator("started_at", "ended_at", mode="before")
     @classmethod
     def validate_datetime(cls, v: str) -> str:
-        v = v.strip()
+        v = SecuritySanitizer.clean_text(v, max_length=32)
         try:
             datetime.strptime(v, "%Y-%m-%d %H:%M:%S")
         except ValueError:
@@ -156,7 +172,23 @@ class SessionsReport(BaseModel):
     sessions: list[SessionItem] = Field(min_length=1, max_length=500)
 
 
-class PrefsPut(BaseModel):
-    """偏好配置整包写入（键值集由前端定义，后端不感知内部结构）"""
+class ReportQuery(BaseModel):
+    """阅读报告查询参数（GET /reading/report，经 Depends() 收口为查询实体；裸 Query 参数不再透传）"""
 
-    prefs: dict = Field(max_length=100)
+    period: Literal["week", "month", "year", "total"] = Field(
+        default="month", description="统计周期 week/month/year/total"
+    )
+    anchor: date | None = Field(
+        default=None, description="锚点日期 YYYY-MM-DD（周期内切换用，缺省为今天）"
+    )
+
+
+class PrefsPut(BaseModel):
+    """偏好配置整包写入（键值集由前端定义，后端不感知内部结构；值经 clean_dict 递归净化）"""
+
+    prefs: dict[str, Any] = Field(max_length=100)
+
+    @field_validator("prefs", mode="before")
+    @classmethod
+    def validate_prefs(cls, v: Any) -> Any:
+        return SecuritySanitizer.clean_dict(v)

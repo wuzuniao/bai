@@ -1,5 +1,5 @@
 """
-数据库基础设施（SQLAlchemy 2.0 异步 + asyncmy）
+数据库基础设施（SQLAlchemy 2.0 异步 + asyncmy，面向对象：Database 类 + 模块级单例）
 --------------------------------------------------------------------------
 - 引擎按 backend/.env 的 DATABASE_URL 创建；连接初始化统一设置东八区时区
 - 隔离级别 READ COMMITTED：进度/排序/笔记写点均为「读最新→改→提交」短事务，
@@ -29,18 +29,28 @@ class Base(DeclarativeBase):
     """ORM 声明基类（表结构真源在 backend/sql/，模型仅做映射）"""
 
 
-engine = create_async_engine(
-    settings.DATABASE_URL,
-    pool_pre_ping=True,
-    pool_recycle=3600,
-    isolation_level="READ COMMITTED",
-    connect_args={"init_command": "SET time_zone='+08:00'"},
-)
+class Database:
+    """数据库引擎与会话工厂封装（请求级会话随请求结束关闭）"""
 
-SessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    def __init__(self, url: str) -> None:
+        self.engine = create_async_engine(
+            url,
+            pool_pre_ping=True,
+            pool_recycle=3600,
+            isolation_level="READ COMMITTED",
+            connect_args={"init_command": "SET time_zone='+08:00'"},
+        )
+        self.session_factory = async_sessionmaker(
+            self.engine, class_=AsyncSession, expire_on_commit=False
+        )
+
+    async def get_db(self) -> AsyncGenerator[AsyncSession, None]:
+        """FastAPI 依赖：请求级数据库会话（随请求结束关闭）"""
+        async with self.session_factory() as session:
+            yield session
 
 
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """FastAPI 依赖：请求级数据库会话（随请求结束关闭）"""
-    async with SessionLocal() as session:
-        yield session
+# 模块级单例（get_db 依赖函数与 SessionLocal 别名保持既有导入路径可用）
+database = Database(settings.DATABASE_URL)
+SessionLocal = database.session_factory
+get_db = database.get_db

@@ -11,6 +11,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 
 from ...core.deps import get_current_payload
+from ...core.response import response_service
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -21,12 +22,10 @@ async def get_me(payload: dict = Depends(get_current_payload)) -> dict:
     当前登录用户（本地验签通过即返回令牌主体信息）
     - 用于开发联调与后续业务接口的用户身份入口
     """
-    return {
-        "code": 0,
-        "msg": "success",
-        "data": {
+    return response_service.ok(
+        {
             "id": int(payload["sub"]),
             "roles": payload.get("roles") or [],
             "azp": payload.get("azp"),
-        },
-    }
+        }
+    )

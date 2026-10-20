@@ -6,6 +6,9 @@
 """
 from __future__ import annotations
 
+from datetime import date
+from typing import Annotated
+
 from pydantic import BaseModel, Field
 
 
@@ -16,6 +19,8 @@ class ReadingClaimRequest(BaseModel):
 
 
 class MakeupRequest(BaseModel):
-    """会员补签（POST /activity/makeup）"""
+    """会员补签（POST /activity/makeup；日期由 Pydantic 实体解析为 date，路由不再散写解析）"""
 
-    date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$", description="被补签到日期（YYYY-MM-DD，东八区）")
+    # 字段名与前端请求体保持一致（date: "YYYY-MM-DD" → date 对象）；
+    # Annotated 写法规避字段名与类型名同名的 Pydantic 冲突
+    date: Annotated[date, Field(description="被补签到日期（YYYY-MM-DD，东八区）")]
