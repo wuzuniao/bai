@@ -38,6 +38,19 @@ class Settings(BaseSettings):
     WX_APPID: str = ""
     WX_APP_SECRET: str = ""
 
+    # ==================== 腾讯云 COS 对象存储（书籍文件云端同步） ====================
+    # 永久密钥仅存后端：经 STS GetFederationToken 换取按用户目录隔离的临时密钥，
+    # 再生成预签名 URL 下发前端直传/下载，临时凭证同样不出后端
+    COS_SECRET_ID: str = ""
+    COS_SECRET_KEY: str = ""
+    COS_BUCKET: str = ""           # 桶全名（形如 bai-books-1253379498）
+    COS_REGION: str = "ap-guangzhou"
+    COS_APPID: str = ""            # 腾讯云 APPID（Policy 资源六段式 uid 段）
+    COS_CRED_SECONDS: int = 1800   # STS 临时凭证有效期（秒）
+    # 自定义源站域名（如 bai-books.wuzuniao.com，须已在 COS 控制台绑定桶并配 HTTPS 证书；
+    # 留空回退桶默认域名。COS 签名不含 Host 头，换域名不影响预签名校验）
+    COS_CUSTOM_DOMAIN: str = ""
+
     @property
     def cors_origins_list(self) -> list[str]:
         """解析 CORS_ALLOW_ORIGINS 为列表（去除空白与重复项）"""

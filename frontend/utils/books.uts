@@ -1,5 +1,6 @@
 // 书籍数据层：云端元数据为准，本地存储仅做缓存（书架/阅读页共享收口）
-// 正文保存于本机不上传云端（path 为本机字段，path='' 表示本设备无正文）：
+// 正文文件本机必存一份（path 为本机字段，path='' 表示本设备无正文）；
+// 黑铁及以上会员可经 COS 云同步（pages/reading/sync.uvue）把正文文件上传/下载到对象存储，业务库不存文件：
 // 小程序/App 为沙盒文件 uni.env.USER_DATA_PATH/books/，Web 端为 IndexedDB 虚拟键 'webbooks/<id>.<ext>'（见 webfs.uts，键路径与沙盒同构）；
 // 云端按 (用户, 书名) 唯一：重导入同名书复用同一 id，换设备重新导入后进度与笔记按书名自动关联；
 // 进度/时长均为「本地即时写缓存 + 云端静默跟随」，页面进入时以云端数据覆盖本地缓存
@@ -16,6 +17,7 @@ import {
 	reportReadingSessions,
 	syncQuiet
 } from '../api/reading.uts'
+import { deleteCloudObject } from '../api/cos.uts'
 import { hasAccessToken } from './request.uts'
 import { relocateBookNotes, repushBookNotes, thoughtFromCloud, Thought } from './readerTypes.uts'
 import { t, tf } from './i18n'
@@ -166,6 +168,18 @@ export function findBook(bookId : number) : LocalBook | null {
 	const list = loadBooks()
 	const i = findCached(bookId, list)
 	return i >= 0 ? list[i] : null
+}
+
+/** 本机正文落地回写（云端同步下载后调用；path 为本机字段不参与云端同步） */
+export function setBookFileLocal(bookId : number, path : string, size : number) : void {
+	const list = loadBooks()
+	const i = findCached(bookId, list)
+	if (i < 0) {
+		return
+	}
+	list[i].path = path
+	list[i].size = size
+	saveBooks(list)
 }
 
 // ==================== 云端同步（拉取覆盖缓存） ====================
@@ -408,8 +422,12 @@ export function updateBookReading(bookId : number, chapterId : number, percent :
 	syncQuiet(updateBookProgress(bookId, fields))
 }
 
-/** 删除书籍：本地正文与页图缓存清理；deleteCloud 且为云端书籍（id>0）时一并删云端（笔记/书签后端级联）；缓存列表由调用方过滤后 saveBooks */
+/** 删除书籍：本地正文与页图缓存清理；deleteCloud 且为云端书籍（id>0）时一并删云端（笔记/书签后端级联 + COS 对象文件，均幂等 best-effort）；缓存列表由调用方过滤后 saveBooks */
 export function removeBookData(book : LocalBook, deleteCloud : boolean) : void {
+	if (deleteCloud && book.id > 0 && (book.format == 'TXT' || book.format == 'PDF')) {
+		// COS 对象文件同步清理（幂等；失败不影响业务库删除，后端仅告警）
+		syncQuiet(deleteCloudObject(book.title, book.format.toLowerCase()))
+	}
 	// #ifdef WEB
 	if (book.path.length > 0) {
 		// IndexedDB 键删除（容错忽略），无 PDF 页图缓存目录

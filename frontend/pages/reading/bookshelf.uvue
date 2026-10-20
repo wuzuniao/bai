@@ -171,10 +171,13 @@
 				<text class="menu-item-text" :class="currentSort === opt ? 'menu-item-text-active' : ''">{{ sortLabel(opt) }}</text>
 			</view>
 		</view>
-		<!-- 加号浮动菜单（Stitch: 导入书籍 / 编辑书架，右对齐悬浮） -->
+		<!-- 加号浮动菜单（Stitch: 导入书籍 / 云端同步（会员可见）/ 编辑书架，右对齐悬浮） -->
 		<view v-if="plusMenuOpen" class="plus-menu" :style="'right:' + plusMenuRight + 'px;top:' + (navTop + navHeight + 8) + 'px'">
 			<view class="plus-menu-item" @click="onImportTap">
 				<text class="plus-menu-item-text">{{ t('bookshelf.import') }}</text>
+			</view>
+			<view v-if="isSyncMember" class="plus-menu-item" @click="openCloudSync">
+				<text class="plus-menu-item-text">{{ t('bookshelf.cloudSync') }}</text>
 			</view>
 			<view class="plus-menu-item" @click="enterEdit">
 				<text class="plus-menu-item-text">{{ t('bookshelf.edit') }}</text>
@@ -221,9 +224,12 @@
 	// 词典注册（bookshelf 页文案 + 公共段）
 	import '@/utils/locales/bookshelf.uts'
 	import '@/utils/locales/common.uts'
+	import { useUserStore } from '@/stores/user.uts'
 	// #ifdef WEB
 	import { webPickBooks } from '@/utils/webfs'
 	// #endif
+
+	const userStore = useUserStore()
 
 	/** 书架书籍（云端元数据 + 本机正文缓存合并列表，顺序即云端手动排序结果；未导入时仅显示添加格） */
 	const books = ref<LocalBook[]>([])
@@ -688,6 +694,26 @@
 	/** 排序/加号浮层菜单开关 */
 	const menuOpen = ref(false)
 	const plusMenuOpen = ref(false)
+
+	/** 云端同步入口可见性：黑铁及以上会员（含管理员），与后端 cos_service 口径一致；非会员不开放入口 */
+	const isSyncMember = computed((): boolean => {
+		const info = userStore.userInfo
+		if (info == null) {
+			return false
+		}
+		const roles = info.roles
+		return roles.includes('admin') || roles.includes('iron') || roles.includes('bronze')
+			|| roles.includes('silver') || roles.includes('gold')
+	})
+
+	/** 加号菜单「云端同步」：进入书籍文件云同步页（页内再做登录/会员门禁） */
+	function openCloudSync() : void {
+		plusMenuOpen.value = false
+		closeMenus()
+		uni.navigateTo({
+			url: '/pages/reading/sync'
+		})
+	}
 
 	onLoad(() => {
 		const win = uni.getWindowInfo()

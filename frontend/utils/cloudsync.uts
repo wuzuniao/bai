@@ -1,0 +1,135 @@
+/**
+ * 云端同步传输层（COS 预签名 URL 直传/直取 + 本地正文文件读写，分端条件编译）
+ * --------------------------------------------------------------------------
+ * - 对象存储地址与签名全部由后端下发（密钥与临时凭证不出后端），前端仅搬运字节
+ * - 本地正文读写复用导入管线的路径约定：<books 目录>/<id>.<ext>（Web 端为 IndexedDB
+ *   虚拟键 webbooks/<id>.<ext>，与 books.uts 的 path 字段运算同构）
+ */
+// #ifdef WEB
+import { webFsGet, webFsPut } from './webfs'
+// #endif
+
+/** 书籍正文本地路径（与导入管线同名约定，下载落盘 / 上传读源共用） */
+export function bookFilePath(bookId : number, format : string) : string {
+	const ext = format.toLowerCase()
+	// #ifdef WEB
+	return 'webbooks/' + bookId.toString() + '.' + ext
+	// #endif
+	// #ifndef WEB
+	return uni.env.USER_DATA_PATH + '/books/' + bookId.toString() + '.' + ext
+	// #endif
+}
+
+/** 读取本地正文文件字节（上传源；Web 端为 IndexedDB 键，文件缺失 reject） */
+export function readBookBytes(path : string) : Promise<ArrayBuffer> {
+	// #ifdef WEB
+	return new Promise<ArrayBuffer>((resolve, reject) => {
+		webFsGet(path).then((buf) => {
+			if (buf == null) {
+				reject(new Error('file missing'))
+				return
+			}
+			resolve(buf)
+		}).catch((err) => {
+			reject(err)
+		})
+	})
+	// #endif
+	// #ifndef WEB
+	return new Promise<ArrayBuffer>((resolve, reject) => {
+		try {
+			const buf = uni.getFileSystemManager().readFileSync(path) as ArrayBuffer
+			resolve(buf)
+		} catch (e) {
+			reject(e)
+		}
+	})
+	// #endif
+}
+
+/** 写入本地正文文件字节（下载落盘；目标已存在时覆盖） */
+export function writeBookBytes(path : string, buf : ArrayBuffer) : Promise<void> {
+	// #ifdef WEB
+	return webFsPut(path, buf)
+	// #endif
+	// #ifndef WEB
+	return new Promise<void>((resolve, reject) => {
+		const fsm = uni.getFileSystemManager()
+		const write = () => {
+			try {
+				fsm.writeFileSync(path, buf)
+				resolve()
+			} catch (e) {
+				reject(e)
+			}
+		}
+		const idx = path.lastIndexOf('/')
+		const dir = idx > 0 ? path.substring(0, idx) : ''
+		if (dir.length == 0) {
+			write()
+			return
+		}
+		// 目录可能不存在（首次下载）：mkdir 已存在报错各端不一致，失败后 access 复验（对齐 bookparse 范式）
+		fsm.mkdir({
+			dirPath: dir,
+			recursive: true,
+			success: (_res) => { write() },
+			fail: (_err) => {
+				try {
+					fsm.accessSync(dir)
+					write()
+				} catch (e) {
+					reject(e)
+				}
+			}
+		})
+	})
+	// #endif
+}
+
+/** COS 直传（PUT 预签名 URL，原始字节体；2xx 视为成功） */
+export function cosPut(url : string, buf : ArrayBuffer) : Promise<void> {
+	return new Promise<void>((resolve, reject) => {
+		const header = {} as UTSJSONObject
+		header['Content-Type'] = 'application/octet-stream'
+		uni.request({
+			url: url,
+			method: 'PUT',
+			data: buf,
+			header: header,
+			timeout: 600000,
+			success: (res) => {
+				if (res.statusCode >= 200 && res.statusCode < 300) {
+					resolve()
+				} else {
+					reject(new Error('HTTP ' + res.statusCode.toString()))
+				}
+			},
+			fail: (err) => {
+				reject(new Error(err.errMsg))
+			}
+		})
+	})
+}
+
+/** COS 直取（GET 预签名 URL，arraybuffer 响应；2xx 视为成功） */
+export function cosGetBytes(url : string) : Promise<ArrayBuffer> {
+	return new Promise<ArrayBuffer>((resolve, reject) => {
+		uni.request<ArrayBuffer>({
+			url: url,
+			method: 'GET',
+			responseType: 'arraybuffer',
+			timeout: 600000,
+			success: (res) => {
+				if (res.statusCode >= 200 && res.statusCode < 300 && res.data != null) {
+					resolve(res.data as ArrayBuffer)
+				} else {
+					reject(new Error('HTTP ' + res.statusCode.toString()))
+				}
+			},
+			fail: (err) => {
+				reject(new Error(err.errMsg))
+			}
+		})
+	})
+}

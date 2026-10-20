@@ -229,6 +229,19 @@ class AuthClient:
         revoked_before = self._revocations.get(user_id)
         return revoked_before is not None and iat < revoked_before
 
+    # ==================== 用户信息查询（服务间读调用） ====================
+
+    async def get_user_info(self, user_id: int) -> dict:
+        """
+        查询用户基本信息（GET /internal/users/{id}；入参别名解析，资料取属主行）
+        :return: auth 响应 data（{id, username, email, status, roles}）
+        :raises RuntimeError: auth 业务错误或网络异常（由调用方决定降级行为）
+        """
+        data = await self._get_json(f"/internal/users/{user_id}")
+        if data.get("code") != 0:
+            raise RuntimeError(f"auth 查询用户信息失败：{data.get('msg', '未知错误')}")
+        return data.get("data") or {}
+
     # ==================== 会员购买授权（服务间写调用） ====================
 
     async def grant_membership(
