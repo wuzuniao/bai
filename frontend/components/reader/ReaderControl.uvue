@@ -11,7 +11,10 @@
 					<view class="round-btn" @click="onBack">
 						<image class="round-btn-icon" :src="themeIcon('arrow-back')" />
 					</view>
-					<text class="book-name" :style="'color:' + theme.titleColor">{{ bookTitle }}</text>
+					<view class="title-col">
+						<text class="book-name" :style="'color:' + theme.titleColor">{{ bookTitle }}</text>
+						<text class="chapter-name" :style="'color:' + theme.mutedColor">{{ activeChapterTitle }}</text>
+					</view>
 				</view>
 			</view>
 		</view>
@@ -77,7 +80,7 @@
 
 <script setup lang="uts">
 	import { READER_THEME_LIGHT, READER_THEME_NIGHT, READER_THEME_PAPER, ReaderTheme } from '@/utils/theme.uts'
-	import { Chapter, NoteRecord, Bookmark, ReaderSettings, loadSettings } from '@/utils/readerTypes.uts'
+	import { Chapter, NoteRecord, Bookmark, ReaderSettings, loadSettings, spacedChapterTitle } from '@/utils/readerTypes.uts'
 	import { t } from '@/utils/i18n.uts'
 	// 词典注册（阅读器组件文案）
 	import '@/utils/locales/readercomp.uts'
@@ -117,6 +120,16 @@
 		/** 想法/划线记录卡片列表（宿主按划线/想法本地存储派生） */
 		notes: NoteRecord[]
 	}>()
+
+	/** 当前章标题（由目录列表与当前章 id 派生，顶栏书名下方展示；未命中为空串不占位） */
+	const activeChapterTitle = computed(() : string => {
+		for (let i = 0; i < props.chapters.length; i++) {
+			if (props.chapters[i].id == props.activeChapterId) {
+				return spacedChapterTitle(props.chapters[i].title)
+			}
+		}
+		return ''
+	})
 
 	const emit = defineEmits(['back', 'toggleDrawer', 'toggleSettings', 'listen', 'selectChapter', 'goBookmark', 'goNote', 'toast', 'change', 'bookmarksChanged'])
 
@@ -278,9 +291,24 @@
 		height: 80rpx;
 	}
 
+	/* 书名+章节名同列（纵向排列，随 menu-top-left 垂直居中；flex:1 约束宽度使长文本省略生效） */
+	.title-col {
+		flex: 1;
+		flex-direction: column;
+	}
+
 	.book-name {
 		font-size: 29rpx;
 		font-weight: 600;
+		lines: 1;
+		text-overflow: ellipsis;
+	}
+
+	.chapter-name {
+		margin-top: 4rpx;
+		font-size: 21rpx;
+		lines: 1;
+		text-overflow: ellipsis;
 	}
 
 	/* 底部控制面板（令牌: 顶部圆角 xl 24px、毛玻璃、浮层提升阴影；fixed 相对视口，bottom 即页面底） */

@@ -21,6 +21,20 @@ export type Chapter = {
 	active: boolean
 }
 
+/** 章节标题卷级单位字（章/回/卷/节/篇/话/集/部）与标题名之间补一个空格（不限开头格式；已有空格或无单位字原样返回） */
+export function spacedChapterTitle(title : string) : string {
+	const units = '章回卷节篇话集部'
+	for (let i = 0; i < title.length; i++) {
+		if (units.indexOf(title.charAt(i)) >= 0) {
+			if (i + 1 < title.length && title.charAt(i + 1) != ' ') {
+				return title.substring(0, i + 1) + ' ' + title.substring(i + 1)
+			}
+			break
+		}
+	}
+	return title
+}
+
 /** 书签（正文下滑切换添加/移除） */
 export type Bookmark = {
 	chapterId: number

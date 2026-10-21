@@ -60,7 +60,7 @@
 </template>
 
 <script setup lang="uts">
-	import { Chapter, Bookmark, NoteRecord } from '@/utils/readerTypes.uts'
+	import { Chapter, Bookmark, NoteRecord, spacedChapterTitle } from '@/utils/readerTypes.uts'
 	import { ReaderTheme } from '@/utils/theme.uts'
 	import BookmarkPanel from '@/components/reader/BookmarkPanel.uvue'
 	import { t } from '@/utils/i18n.uts'
@@ -120,7 +120,7 @@
 	/** 目录正/倒序展示（Stitch: ⇅/↓↑ 切换；当前阅读章节蓝色高亮由 activeChapterId 驱动） */
 	const displayChapters = computed<Chapter[]>(() : Chapter[] => {
 		const marked = props.chapters.map((c : Chapter) : Chapter => {
-			return { id: c.id, title: c.title, label: c.label, contentTitle: c.contentTitle, active: c.id == props.activeChapterId } as Chapter
+			return { id: c.id, title: spacedChapterTitle(c.title), label: c.label, contentTitle: c.contentTitle, active: c.id == props.activeChapterId } as Chapter
 		})
 		if (!orderDesc.value) {
 			return marked

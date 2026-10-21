@@ -16,7 +16,7 @@
 </template>
 
 <script setup lang="uts">
-	import { Chapter, Bookmark, loadBookmarks, saveBookmarksToStorage } from '@/utils/readerTypes.uts'
+	import { Chapter, Bookmark, loadBookmarks, saveBookmarksToStorage, spacedChapterTitle } from '@/utils/readerTypes.uts'
 	import { ReaderTheme } from '@/utils/theme.uts'
 	import { t } from '@/utils/i18n.uts'
 	// 词典注册（阅读器组件文案）
@@ -73,7 +73,7 @@
 	/** 书签条目文案（章节标题 · 第 N 页，页码 1-based 展示） */
 	function bookmarkLabel(bm : Bookmark) : string {
 		const ch = chapterAt(bm.chapterId)
-		return t('readercomp.bookmarkPageN').replace('{0}', ch.title).replace('{1}', (bm.pageIndex + 1).toString())
+		return t('readercomp.bookmarkPageN').replace('{0}', spacedChapterTitle(ch.title)).replace('{1}', (bm.pageIndex + 1).toString())
 	}
 
 	/** 当前页是否已有书签 */
