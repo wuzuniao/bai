@@ -11,26 +11,11 @@
 		</script>
 		<link rel="icon" href="/static/favicon.ico" />
 		<style>
-			/* H5 端 PC 浏览器最大宽度限制居中（对齐 yao 项目 global.scss 同名方案）：
-			 * PC 宽屏时页面铺满全屏导致布局错位，限制 body 最大宽度 480px 居中，
-			 * html 背景色取页面画布色（与 uni.scss 的 $bai-canvas-soft 保持一致）避免两侧突兀；
-			 * 移动端 H5（<768px）不触发，保持原始全屏自适应。
-			 * 仅 Web 构建使用本模板，小程序/App 端不受影响。 */
-			@media screen and (min-width: 768px) {
-				html {
-					background-color: #f4f4f2;
-				}
-				/* html body 提升优先级，防止框架运行时注入的基础样式覆盖 */
-				html body {
-					max-width: 480px;
-					margin: 0 auto;
-					box-shadow: 0 0 12px rgba(0, 0, 0, 0.08);
-				}
-			}
-			/* 阅读页（reader）解除限宽全屏阅读：页面在 WEB 端按生命周期切换 body 类名 */
-			html body.reader-full {
-				max-width: none;
-				box-shadow: none;
+			/* H5 端页面背景色（与 uni.scss 的 $bai-canvas-soft 保持一致），防止加载白闪。
+			 * 页面不再做 body 整体限宽（2026-10-22 起）：宽屏背景铺满全屏，
+			 * 内容卡片列由各页面容器限宽居中（Web 端 480px，与 rpx 冻结基准同值，卡片尺寸不变）。 */
+			html {
+				background-color: #f4f4f2;
 			}
 		</style>
 		<title>无足鸟古诗词学习助手 | 古诗词阅读与个人书架</title>

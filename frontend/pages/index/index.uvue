@@ -119,6 +119,24 @@
 		pageH.value = win.windowHeight
 	}
 
+	/** 折叠屏展开/折叠、旋转、桌面拖宽：窗口尺寸变化后更新页面尺寸并重建排版度量（rpx 换算系数随窗口宽变化），
+	 *  清除进行中的选区。App 端暂无 onResize 事件，由 onShow 比对窗口尺寸兜底（回前台时尺寸已变则重标定） */
+	function syncViewport() : void {
+		const win = uni.getWindowInfo()
+		if (win.windowWidth == pageW.value && win.windowHeight == pageH.value) {
+			return
+		}
+		pageW.value = win.windowWidth
+		pageH.value = win.windowHeight
+		poemMetrics.value = buildPoemMetrics()
+		clearSelection()
+	}
+	// #ifndef APP-ANDROID || APP-IOS || APP-HARMONY
+	onResize(() : void => {
+		syncViewport()
+	})
+	// #endif
+
 	// 微信小程序分享：转发好友与朋友圈（封面统一 /static/share-cover.png，复制自 yao 项目）
 	// #ifdef MP-WEIXIN
 	onShareAppMessage(() => {
@@ -130,6 +148,7 @@
 	// #endif
 
 	onShow(() => {
+		syncViewport()
 		loadHomeNotes()
 	})
 
@@ -156,17 +175,21 @@
 	const contentColor = READER_THEME_LIGHT.titleColor
 	const panelShadow = READER_THEME_LIGHT.panelShadow
 
-	/** 排版度量（划词换算）：诗行单行无缩进，行盒高 = 拼音区 27rpx + 汉字行高 50rpx = 77rpx；
+	/** 排版度量构建（划词换算）：诗行单行无缩进，行盒高 = 拼音区 27rpx + 汉字行高 50rpx = 77rpx；
 	 *  字步进 69rpx（单元 54 + 右距 15）均匀映射前 7 列，行尾标点区 27rpx 收敛于末列；
 	 *  perLine 借用阅读页「首行容量 = perLine - 2」公式：首页无缩进容量恒满行，取行字符数 + 2，
 	 *  使拖动映射的行数钳制恒为 0（否则行底触点会被误判到第二行、字符恒收敛到行尾标点，手柄不跟字） */
-	const poemMetrics = {
-		perLine: LINE_CHAR_COUNT + 2,
-		lineH: uni.upx2px(77),
-		charW: uni.upx2px(69),
-		fullCharW: uni.upx2px(69),
-		indentPx: 0
-	} as TextMetrics
+	function buildPoemMetrics() : TextMetrics {
+		return {
+			perLine: LINE_CHAR_COUNT + 2,
+			lineH: uni.upx2px(77),
+			charW: uni.upx2px(69),
+			fullCharW: uni.upx2px(69),
+			indentPx: 0
+		} as TextMetrics
+	}
+	/** 排版度量（ref：窗口尺寸变化后重建，rpx 换算系数随窗口宽变化） */
+	const poemMetrics = ref(buildPoemMetrics())
 
 	/** 划词选区镜像（选区真源在气泡组件，spanChanged 同步驱动行内高亮） */
 	const selSpan = ref<SelSpan | null>(null)
@@ -272,7 +295,7 @@
 		if (r == null) {
 			return ''
 		}
-		const step = poemMetrics.charW
+		const step = poemMetrics.value.charW
 		const right = r[1] >= LINE_CHAR_COUNT - 1 ? uni.upx2px(510) : (r[1] + 1) * step
 		const left = r[0] * step
 		return 'left:' + left + 'px;top:' + uni.upx2px(27) + 'px;width:' + (right - left) + 'px;height:' + uni.upx2px(50) + 'px'
@@ -320,7 +343,7 @@
 
 	/** 装饰条带内联样式（横向几何与选区高亮条同口径：left/width，纵向位置固定于样式类） */
 	function bandStyle(band : number[]) : string {
-		const step = poemMetrics.charW
+		const step = poemMetrics.value.charW
 		const right = band[1] >= LINE_CHAR_COUNT - 1 ? uni.upx2px(510) : (band[1] + 1) * step
 		return 'left:' + band[0] * step + 'px;width:' + (right - band[0] * step) + 'px'
 	}
@@ -389,7 +412,7 @@
 			// 长按字符列命中想法区间时恢复该想法的完整选区（含划线区域，默认高亮想法选区，
 			// 与阅读页「句间吸附前判定想法」同语义）；否则按句选取——句号结尾的才是一句，
 			// 逗号行与句号行构成一联一起选中（与阅读页句间吸附同语义）
-			const col = Math.max(0, Math.min(Math.floor((clientX - rects[li].left) / poemMetrics.charW), LINE_CHAR_COUNT - 1))
+			const col = Math.max(0, Math.min(Math.floor((clientX - rects[li].left) / poemMetrics.value.charW), LINE_CHAR_COUNT - 1))
 			const range = sentenceRangeOf(li)
 			let span : SelSpan
 			const hit = thoughtAt(thoughts.value, 0, li, col)
@@ -552,7 +575,7 @@
 			if (rect == null) {
 				return
 			}
-			const col = Math.max(0, Math.min(Math.floor((e.clientX - rect.left) / poemMetrics.charW), LINE_CHAR_COUNT - 1))
+			const col = Math.max(0, Math.min(Math.floor((e.clientX - rect.left) / poemMetrics.value.charW), LINE_CHAR_COUNT - 1))
 			const hit = thoughtAt(thoughts.value, 0, li, col)
 			if (hit != null) {
 				popoverRef.value?.showThoughtView(hit.quote, hit.content, rect.bottom, rect.top)
@@ -602,8 +625,19 @@
 		flex: 1;
 	}
 
-	/* 主内容容器（Figma: 左右边距 16px；底部预留悬浮导航区，滚动到底时卡片与导航保持 24px 间距） */
+	/* 主内容容器（Figma: 左右边距 16px；底部预留悬浮导航区，滚动到底时卡片与导航保持 24px 间距；
+	   宽屏限宽居中，折叠屏展开态不摊满） */
 	.main {
+		width: 100%;
+		/* #ifdef WEB */
+		max-width: 480px;
+		/* #endif */
+		/* #ifndef WEB */
+		max-width: 750px;
+		/* #endif */
+		margin-left: auto;
+		margin-right: auto;
+		box-sizing: border-box;
 		padding-left: 31rpx;
 		padding-right: 31rpx;
 		padding-bottom: 196rpx;

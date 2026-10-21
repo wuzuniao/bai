@@ -243,7 +243,8 @@
 		height: 0;
 	}
 
-	/* 顶部导航菜单（Stitch: 毛玻璃背景、底边框、底部圆角 16px；fixed 相对视口，top 即页面顶） */
+	/* 顶部导航菜单（Stitch: 毛玻璃背景、底边框、底部圆角 16px；fixed 相对视口，top 即页面顶；
+	   阅读页不限宽，随正文铺满全屏） */
 	.menu-top {
 		position: fixed;
 		left: 0;
@@ -311,7 +312,8 @@
 		text-overflow: ellipsis;
 	}
 
-	/* 底部控制面板（令牌: 顶部圆角 xl 24px、毛玻璃、浮层提升阴影；fixed 相对视口，bottom 即页面底） */
+	/* 底部控制面板（令牌: 顶部圆角 xl 24px、毛玻璃、浮层提升阴影；fixed 相对视口，bottom 即页面底；
+	   阅读页不限宽，随正文铺满全屏，目录抽屉/设置面板随本容器） */
 	.menu-bottom {
 		position: fixed;
 		left: 0;

@@ -1,8 +1,14 @@
 <template>
 	<view class="pay-page">
-		<!-- 返回按钮：固定近黑背景使用 arrow-back-light（夜间白色变体），定位规则与 BackButton 一致 -->
-		<view class="pay-page__back" :style="'top:' + backTop + 'px'" @click="goBack">
-			<image class="pay-page__back-icon" src="/static/icons/arrow-back-light.svg" mode="aspectFit" />
+		<!-- 返回按钮：固定近黑背景使用 arrow-back-light（夜间白色变体），定位规则与 BackButton 一致；
+		     零高定位层限宽与主内容同口径，宽屏时按钮对齐内容列而非视口缘；
+		     Web 端不渲染（浏览器自带返回，与 BackButton 同口径） -->
+		<view class="pay-page__back-cap">
+			<!-- #ifndef WEB -->
+			<view class="pay-page__back" :style="'top:' + backTop + 'px'" @click="goBack">
+				<image class="pay-page__back-icon" src="/static/icons/arrow-back-light.svg" mode="aspectFit" />
+			</view>
+			<!-- #endif -->
 		</view>
 
 		<!-- 主内容：标题区 / 权益卡 / 价格区（单屏布局，无滚动） -->
@@ -332,7 +338,22 @@
 		flex-direction: column;
 	}
 
-	/* ===== 返回按钮 ===== */
+	/* ===== 返回按钮（零高定位层：限宽与主内容同口径，Web 480 / 其余 750） ===== */
+	.pay-page__back-cap {
+		width: 100%;
+		/* #ifdef WEB */
+		max-width: 480px;
+		/* #endif */
+		/* #ifndef WEB */
+		max-width: 750px;
+		/* #endif */
+		margin-left: auto;
+		margin-right: auto;
+		position: relative;
+		/* 零高层显式放开裁剪（uni-h5 view 基础样式默认 hidden），否则 absolute 按钮不可见 */
+		overflow: visible;
+	}
+
 	.pay-page__back {
 		position: absolute;
 		left: 48rpx;
@@ -349,9 +370,18 @@
 		height: 80rpx;
 	}
 
-	/* ===== 主内容 ===== */
+	/* ===== 主内容（宽屏限宽居中，与 PageShell 画布同口径：Web 480 / 其余 750） ===== */
 	.pay-page__main {
 		flex: 1;
+		width: 100%;
+		/* #ifdef WEB */
+		max-width: 480px;
+		/* #endif */
+		/* #ifndef WEB */
+		max-width: 750px;
+		/* #endif */
+		margin-left: auto;
+		margin-right: auto;
 		box-sizing: border-box;
 		padding-left: 48rpx;
 		padding-right: 48rpx;

@@ -50,6 +50,15 @@
 	}
 
 	.page-shell__canvas {
+		width: 100%;
+		/* #ifdef WEB */
+		max-width: 480px;
+		/* #endif */
+		/* #ifndef WEB */
+		max-width: 750px;
+		/* #endif */
+		margin-left: auto;
+		margin-right: auto;
 		padding-left: 48rpx;
 		padding-right: 48rpx;
 		padding-bottom: 64rpx;

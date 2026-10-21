@@ -162,7 +162,7 @@
 		<!-- 浮层遮罩：菜单打开时覆盖全屏，点击外部关闭（Stitch: 全局点击 dismiss） -->
 		<view v-if="menuOpen || plusMenuOpen" class="menu-mask" @click="closeMenus" />
 		<!-- 排序下拉菜单（置于页面根、scroll-view 外，避免滚动容器裁剪；悬浮于标题下方 8px） -->
-		<view v-if="menuOpen" class="shelf-menu" :style="'top:' + (navTop + navHeight + 8) + 'px'">
+		<view v-if="menuOpen" class="shelf-menu" :style="'left:' + (capLeftPx + 20) + 'px;top:' + (navTop + navHeight + 8) + 'px'">
 			<view
 				v-for="(opt, oi) in sortOptions"
 				:key="oi"
@@ -219,7 +219,7 @@
 	import { importBook, runBookSync, restoreEmptyShelfFromCloud } from '@/utils/bookparse.uts'
 	import { ensureBookLocal } from '@/utils/cloudsync.uts'
 	import { hasAccessToken, ApiResponse } from '@/utils/request.uts'
-	import { mpCapsuleRect } from '@/utils/layout.uts'
+	import { mpCapsuleRect, CONTENT_CAP_PX } from '@/utils/layout.uts'
 	import { REWARD_TIERS, fmtRemainMinutes } from '@/utils/rewards.uts'
 	import { fetchActivitySummary, claimReadingReward } from '@/api/activity.uts'
 	import { t, tf } from '@/utils/i18n.uts'
@@ -474,11 +474,13 @@
 	const navHeight = ref(40)
 	/** 右侧胶囊避让边距（px）：操作按钮右缘置于胶囊左侧 8px；非小程序端 0（沿用样式默认 38rpx） */
 	const navRight = ref(0)
+	/** 内容区左缘偏移（px）：主内容限宽（CONTENT_CAP_PX，Web 480/App 750）居中后内容左缘距视口左缘的距离（宽屏浮层菜单对齐用，窄屏恒 0） */
+	const capLeftPx = ref(0)
 
 	/** 加号弹层右缘（px）：right 锚定 .page 右缘（菜单向左伸展，不依赖单位换算 API，Web 端 upx2px 行为不可靠）。
 	 * 小程序端随胶囊避让（navRight=右缘距视口右距离）；其余端固定列右缘内距（38rpx≈20px，390 设计稿） */
 	const plusMenuRight = computed(() : number => {
-		return navRight.value > 0 ? navRight.value : 20
+		return capLeftPx.value + (navRight.value > 0 ? navRight.value : 20)
 	})
 
 	/** 编辑模式：卡片可勾选删除、可拖拽调序 */
@@ -804,6 +806,8 @@
 		} else if (win.statusBarHeight > 0) {
 			navTop.value = win.statusBarHeight + 14
 		}
+		// 宽屏限宽偏移：内容区居中后左缘距视口距离（≤上限宽视口恒 0）
+		capLeftPx.value = Math.max(0, Math.round((win.windowWidth - Math.min(win.windowWidth, CONTENT_CAP_PX)) / 2))
 	})
 
 	// 微信小程序分享：转发好友与朋友圈（封面统一 /static/share-cover.png，复制自 yao 项目）
@@ -1063,8 +1067,18 @@
 		flex: 1;
 	}
 
-	/* 顶部导航（Stitch: 左右内边距 20px，上下 14px；顶部动态避让状态栏/小程序胶囊） */
+	/* 顶部导航（Stitch: 左右内边距 20px，上下 14px；顶部动态避让状态栏/小程序胶囊；宽屏限宽居中） */
 	.nav {
+		width: 100%;
+		/* #ifdef WEB */
+		max-width: 480px;
+		/* #endif */
+		/* #ifndef WEB */
+		max-width: 750px;
+		/* #endif */
+		margin-left: auto;
+		margin-right: auto;
+		box-sizing: border-box;
 		padding-left: 38rpx;
 		padding-right: 38rpx;
 		padding-bottom: 27rpx;
@@ -1245,8 +1259,18 @@
 		height: 28rpx;
 	}
 
-	/* 主内容（Stitch: 左右内边距 20px，底部预留悬浮导航区 128px） */
+	/* 主内容（Stitch: 左右内边距 20px，底部预留悬浮导航区 128px；宽屏限宽居中） */
 	.main {
+		width: 100%;
+		/* #ifdef WEB */
+		max-width: 480px;
+		/* #endif */
+		/* #ifndef WEB */
+		max-width: 750px;
+		/* #endif */
+		margin-left: auto;
+		margin-right: auto;
+		box-sizing: border-box;
 		padding-left: 38rpx;
 		padding-right: 38rpx;
 		/* 底部留白与首页一致（196rpx）：覆盖悬浮导航胶囊顶（约屏底上方 150rpx）+ 46rpx 间隙；

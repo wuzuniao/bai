@@ -37,7 +37,7 @@
 </template>
 
 <script setup lang="uts">
-	import { mpCapsuleRect } from '@/utils/layout.uts'
+	import { mpCapsuleRect, CONTENT_CAP_PX } from '@/utils/layout.uts'
 	import { findBook, loadPdfProgress, savePdfProgress, updateBookReading, addReadingSession } from '@/utils/books.uts'
 	import { openPdfSession } from '@/utils/pdfrender.uts'
 	import { t, tf } from '@/utils/i18n.uts'
@@ -72,8 +72,9 @@
 	/** 顶栏避让（px）：小程序端与胶囊对齐，其余端状态栏下 */
 	const navTop = ref(44)
 	const navHeight = ref(40)
-	/** 窗口尺寸（px，onLoad 固化） */
-	let winW = 0
+	/** 窗口尺寸（px，onLoad 固化；宽屏限宽 CONTENT_CAP_PX（Web 480/App 750）居中，正文区实宽取 min(窗口宽, 上限)；
+	 *  winW 用 ref 承载：折叠屏/拖宽后 pageWrapperH 随动重算） */
+	const winW = ref(0)
 	let winH = 0
 	/** 页面已卸载（渲染调度中断标志） */
 	let disposed = false
@@ -86,8 +87,8 @@
 
 	/** 页 wrapper 高（px）：屏宽 × 页比例，等比缩放的布局基准（固定高保证 scroll-into-view 定位与页码推算准确） */
 	const pageWrapperH = computed(() : number => {
-		if (pageRatio.value > 0 && winW > 0) {
-			return Math.round(winW * pageRatio.value)
+		if (pageRatio.value > 0 && winW.value > 0) {
+			return Math.round(winW.value * pageRatio.value)
 		}
 		return 0
 	})
@@ -113,7 +114,7 @@
 
 	onLoad((options : OnLoadOptions) : void => {
 		const win = uni.getWindowInfo()
-		winW = win.windowWidth
+		winW.value = Math.min(win.windowWidth, CONTENT_CAP_PX)
 		winH = win.windowHeight
 		// 小程序端顶栏与胶囊对齐，其余端状态栏下（App/Web：statusBarHeight 恒 0 时保持默认）
 		const capsule = mpCapsuleRect()
@@ -140,6 +141,20 @@
 		enterAt = Date.now()
 		lastActiveAt = enterAt
 	})
+
+	/** 折叠屏展开/折叠、旋转、桌面拖宽：更新正文区实宽，页 wrapper 高随动重算。
+	 *  页图按旧宽度渲染的位图经 aspectFit 等比缩放展示（轻微清晰度差异接受）；
+	 *  App 端暂无 onResize 事件（vapor 暂不支持），重开页面自动按新尺寸初始化 */
+	// #ifndef APP-ANDROID || APP-IOS || APP-HARMONY
+	onResize(() : void => {
+		const win = uni.getWindowInfo()
+		const w = Math.min(win.windowWidth, CONTENT_CAP_PX)
+		if (w == winW.value) {
+			return
+		}
+		winW.value = w
+	})
+	// #endif
 
 	/** 根节点触摸：记录操作时间；距上次操作超 10 分钟则上一会话以「最后操作+10min」入账并重新起算 */
 	function onPageTouchStart() : void {
@@ -257,7 +272,7 @@
 					}
 					// 渲染分辨率：屏逻辑宽 × dpr，上限 1440（清晰度与体积平衡）
 					const dpr = uni.getWindowInfo().devicePixelRatio
-					const targetW = Math.min(1440, Math.max(720, Math.round(winW * (dpr > 0 ? dpr : 2))))
+					const targetW = Math.min(1440, Math.max(720, Math.round(winW.value * (dpr > 0 ? dpr : 2))))
 					const renderNext = (index : number) : void => {
 						if (disposed) {
 							session.close()
@@ -341,16 +356,25 @@
 
 	.content {
 		flex: 1;
+		width: 100%;
+		/* #ifdef WEB */
+		max-width: 480px;
+		/* #endif */
+		/* #ifndef WEB */
+		max-width: 750px;
+		/* #endif */
+		margin-left: auto;
+		margin-right: auto;
 	}
 
-	/* 页容器：高按首页比例等比换算（px 内联绑定），白底页图与软灰底区分页界 */
+	/* 页容器：高按首页比例等比换算（px 内联绑定），白底页图与软灰底区分页界（宽随 .content 限宽） */
 	.pdf-page {
-		width: 750rpx;
+		width: 100%;
 		background-color: $bai-canvas;
 	}
 
 	.pdf-page-image {
-		width: 750rpx;
+		width: 100%;
 		height: 750rpx;
 	}
 
@@ -371,12 +395,20 @@
 		color: $bai-mute;
 	}
 
-	/* 顶栏（对齐 reader 顶栏：白底浮层，呼出态滑入） */
+	/* 顶栏（对齐 reader 顶栏：白底浮层，呼出态滑入；宽屏限宽居中） */
 	.topbar {
 		position: absolute;
 		left: 0;
 		right: 0;
 		top: 0;
+		/* #ifdef WEB */
+		max-width: 480px;
+		/* #endif */
+		/* #ifndef WEB */
+		max-width: 750px;
+		/* #endif */
+		margin-left: auto;
+		margin-right: auto;
 		background-color: $bai-canvas;
 		border-bottom: 1px solid $bai-pale;
 		z-index: 20;
@@ -420,12 +452,20 @@
 		text-overflow: ellipsis;
 	}
 
-	/* 底部进度条（与顶栏同呼出态） */
+	/* 底部进度条（与顶栏同呼出态；宽屏限宽居中） */
 	.footer {
 		position: absolute;
 		left: 0;
 		right: 0;
 		bottom: 0;
+		/* #ifdef WEB */
+		max-width: 480px;
+		/* #endif */
+		/* #ifndef WEB */
+		max-width: 750px;
+		/* #endif */
+		margin-left: auto;
+		margin-right: auto;
 		padding-top: 15rpx;
 		padding-bottom: 15rpx;
 		align-items: center;

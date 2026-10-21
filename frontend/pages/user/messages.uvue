@@ -216,8 +216,17 @@
 		box-sizing: border-box;
 	}
 
-	/* ===== 主内容画布（结构与 help.uvue 一致；顶部留白由内联动态值提供）===== */
+	/* ===== 主内容画布（结构与 help.uvue 一致；顶部留白由内联动态值提供；宽屏限宽居中）===== */
 	.messages-page__canvas {
+		width: 100%;
+		/* #ifdef WEB */
+		max-width: 480px;
+		/* #endif */
+		/* #ifndef WEB */
+		max-width: 750px;
+		/* #endif */
+		margin-left: auto;
+		margin-right: auto;
 		padding-left: 48rpx;
 		padding-right: 48rpx;
 		padding-bottom: 64rpx;

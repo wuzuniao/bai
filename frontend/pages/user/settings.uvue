@@ -1,7 +1,10 @@
 <template>
 	<view class="settings-page">
-		<!-- 站内信通知按钮（组件化：内部查询 auth 公告未读数驱动两态图标） -->
-		<NoticeButton ref="noticeRef" />
+		<!-- 站内信通知按钮（组件化：内部查询 auth 公告未读数驱动两态图标；
+		     零高定位层限宽与内容列同口径，宽屏时铃铛对齐内容列而非视口缘） -->
+		<view class="settings-page__notice-cap">
+			<NoticeButton ref="noticeRef" />
+		</view>
 
 		<scroll-view class="settings-page__scroll" direction="vertical" :show-scrollbar="false">
 			<view class="settings-page__main">
@@ -239,7 +242,18 @@
 	}
 
 	.settings-page__main {
-		/* padding-top 210rpx：通知按钮 top约50px + 高40px = 底部约90px，留间隙避免与内容重叠（与 yao 布局一致） */
+		/* padding-top 210rpx：通知按钮 top约50px + 高40px = 底部约90px，留间隙避免与内容重叠（与 yao 布局一致）；
+		 * 宽屏限宽居中（与 PageShell 画布同口径：Web 480 / 其余 750） */
+		width: 100%;
+		/* #ifdef WEB */
+		max-width: 480px;
+		/* #endif */
+		/* #ifndef WEB */
+		max-width: 750px;
+		/* #endif */
+		margin-left: auto;
+		margin-right: auto;
+		box-sizing: border-box;
 		padding-top: 210rpx;
 		padding-left: 48rpx;
 		padding-right: 48rpx;
@@ -248,7 +262,22 @@
 	}
 
 	/* ===== 站内信入口 ===== */
-	/* 通知按钮已组件化（components/NoticeButton/NoticeButton.uvue），样式随组件 */
+	/* 通知按钮已组件化（components/NoticeButton/NoticeButton.uvue），样式随组件；
+	 * 零高定位层：限宽与主内容同口径（Web 480 / 其余 750），铃铛 absolute 锚定本层 */
+	.settings-page__notice-cap {
+		width: 100%;
+		/* #ifdef WEB */
+		max-width: 480px;
+		/* #endif */
+		/* #ifndef WEB */
+		max-width: 750px;
+		/* #endif */
+		margin-left: auto;
+		margin-right: auto;
+		position: relative;
+		/* 零高层显式放开裁剪（uni-h5 view 基础样式默认 hidden），否则 absolute 铃铛不可见 */
+		overflow: visible;
+	}
 
 	/* ===== 用户资料卡片（普通版式） ===== */
 	.settings-page__profile-card {

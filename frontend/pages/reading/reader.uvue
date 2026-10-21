@@ -400,8 +400,12 @@
 	/** ===== 每行字数标定（渲染实测）：纯计算折行与真实渲染存在字距/标点禁则偏差，页尾空白据此累积；
 	 *  屏幕外标定节点（约 20 行字数）实测高度反推实际每行字数，标定前回退纯字宽估算 ===== */
 	const perLineExact = ref(0)
+	/** 正文排版宽度（px）：阅读页不限宽（2026-10-22 用户拍板），恒等于窗口宽，
+	 *  每行字数标定/分页/划词换算全部以它为准（与 content-inner/scroll-mode-inner 铺满布局同源） */
+	const bodyW = computed(() : number => pageW.value)
+
 	const perLineEstimate = computed(() : number => {
-		return Math.max(1, Math.floor((pageW.value - uni.upx2px(124)) / fontSize.value))
+		return Math.max(1, Math.floor((bodyW.value - uni.upx2px(124)) / fontSize.value))
 	})
 	const perLineEffective = computed(() : number => {
 		return perLineExact.value > 0 ? perLineExact.value : perLineEstimate.value
@@ -415,7 +419,7 @@
 		}
 		return s
 	})
-	const calibWidth = computed(() : number => pageW.value - uni.upx2px(124))
+	const calibWidth = computed(() : number => bodyW.value - uni.upx2px(124))
 
 	/** ===== 离屏排版实测（分页数据源）：整章段落行数 + 被切断段落的末行字符数。
 	 *  测量全程在屏外进行，且于页面展示前完成（开书在 loading 遮罩内、切章先测后切、相邻章后台预取），阅读翻页无可见重排；
@@ -1118,26 +1122,7 @@
 	/** 无操作超时阈值（超过则时长截断，下次操作重新起算） */
 	const IDLE_TIMEOUT_MS = 10 * 60 * 1000
 
-	// #ifdef WEB
-	/** PC 宽屏（H5 居中部署）：阅读页解除 body 480px 限宽全屏阅读；
-	 * onHide/onUnload 移除类名，恢复其他页面的居中限宽布局 */
-	function setBodyFull(full : boolean) : void {
-		try {
-			if (full) {
-				document.body.classList.add('reader-full')
-			} else {
-				document.body.classList.remove('reader-full')
-			}
-		} catch (e) {
-			// DOM 操作失败静默，不影响阅读主链路
-		}
-	}
-	// #endif
-
 	onShow(() => {
-		// #ifdef WEB
-		setBodyFull(true)
-		// #endif
 		enterAt = Date.now()
 		lastActiveAt = enterAt
 	})
@@ -1171,7 +1156,6 @@
 
 	onUnload(() => {
 		// #ifdef WEB
-		setBodyFull(false)
 		window.removeEventListener('mousemove', onWebMouseMove)
 		window.removeEventListener('mouseup', onWebMouseUp)
 		window.removeEventListener('wheel', onPageTouchStart)
@@ -1181,9 +1165,6 @@
 	})
 
 	onHide(() => {
-		// #ifdef WEB
-		setBodyFull(false)
-		// #endif
 		saveProgress()
 		recordReadingSession()
 	})
@@ -1510,6 +1491,23 @@
 			contentTopPx.value = capsule.top + capsule.height + 8
 		}
 	}
+
+	/** 折叠屏展开/折叠、旋转、桌面拖宽：窗口尺寸变化后复用排版失效链（同字号变化口径）——
+	 *  实测缓存清除、重标定、钳制页码、清除选区。正文排版宽度未变（宽屏已限宽 750px）且高度未变时跳过；
+	 *  App 端暂无 onResize 事件（vapor 暂不支持），重开页面自动按新尺寸初始化 */
+	// #ifndef APP-ANDROID || APP-IOS || APP-HARMONY
+	onResize(() : void => {
+		const win = uni.getWindowInfo()
+		if (win.windowWidth == bodyW.value && win.windowHeight == pageH.value) {
+			return
+		}
+		pageW.value = win.windowWidth
+		pageH.value = win.windowHeight
+		invalidateLayoutMeasure()
+		clampPageIndex()
+		clearSelection()
+	})
+	// #endif
 
 	/** ===== 书签（真源在 ReaderControl 组件：增删/持久化内聚；页面维护内存镜像供当前页旗帜渲染） ===== */
 	const bookmarks = ref<Bookmark[]>([])
@@ -2526,7 +2524,7 @@
 	/** 划词排版度量（TextMetrics 见 utils/readerTypes.uts 共享层，气泡组件随 metrics props 使用同源参数）；perLine 用渲染标定值，与分页引擎同源 */
 	function layoutMetrics() : TextMetrics {
 		const charW = fontSize.value
-		const contentW = pageW.value - uni.upx2px(124)
+		const contentW = bodyW.value - uni.upx2px(124)
 		const perLine = perLineEffective.value
 		return {
 			perLine: perLine,
@@ -3086,6 +3084,7 @@
 	/* 页层正文容器：上下留白内联动态绑定（顶部=控制项下方、底部=页脚浮层上方+安全区），左右为固定排版边距；
 	   连续流模式下整章渲染，translateY 按行网格窗口偏移，层裁剪出可视窗口 */
 	.content-inner {
+		box-sizing: border-box;
 		padding-left: 62rpx;
 		padding-right: 62rpx;
 	}
@@ -3096,6 +3095,7 @@
 	}
 
 	.scroll-mode-inner {
+		box-sizing: border-box;
 		padding-left: 62rpx;
 		padding-right: 62rpx;
 		flex-direction: column;

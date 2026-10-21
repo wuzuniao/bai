@@ -2,6 +2,18 @@
  * 页面布局尺寸计算（跨页面复用的顶部避让逻辑）
  */
 
+/** 主内容限宽（px，宽屏适配）：内容列居中的上限宽度（pdfreader 正文区、书架浮层对齐等 JS 几何使用；
+ *  阅读页 reader 不限宽不使用本常量）。
+ *  Web 端 480 与 rpx 冻结基准（pages.json globalStyle WEB 分支）同值，卡片尺寸与原 body 480px 限宽时期一致；
+ *  App 端 750 与页面 CSS 限宽同值；微信端原生 rpx 随窗口换算。
+ *  注意：页面 CSS 里的 max-width 无法引用常量，以条件编译写死同值，两处必须同步修改 */
+// #ifdef WEB
+export const CONTENT_CAP_PX = 480
+// #endif
+// #ifndef WEB
+export const CONTENT_CAP_PX = 750
+// #endif
+
 /** 次级页面内容区顶部留白（px）：返回按钮（状态栏高度 + 40px）之下再留 12px；Web 端无状态栏回退 96 */
 export function mainTopPx() : number {
 	const win = uni.getWindowInfo()

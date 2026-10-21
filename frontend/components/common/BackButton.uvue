@@ -1,6 +1,14 @@
 <template>
-	<view class="back-button" :style="'top:' + topPx + 'px'" @click="handleClick">
-		<image class="back-button__icon" src="/static/icons/arrow-back.svg" mode="aspectFit" />
+	<!-- 零高限宽锚定层：宽度与各页主内容列同口径（Web 480 / 其余 750，条件编译），
+		 宽屏时返回键对齐内容列左缘而非视口缘；层本身不占布局高度，按钮 absolute 锚定本层。
+		 Web 端不渲染返回键（2026-10-22：浏览器自带返回，站内返回图标冗余；阅读页不受影响——
+		 reader/pdfreader 返回键在各自页面内实现，不经本组件） -->
+	<view class="back-button">
+		<!-- #ifndef WEB -->
+		<view class="back-button__inner" :style="'top:' + topPx + 'px'" @click="handleClick">
+			<image class="back-button__icon" src="/static/icons/arrow-back.svg" mode="aspectFit" />
+		</view>
+		<!-- #endif -->
 	</view>
 </template>
 
@@ -8,7 +16,7 @@
 	/**
 	 * BackButton —— 次级页面返回按钮组件
 	 * 全项目唯一返回图标 arrow-back.svg（墨色），定位规则：状态栏高度驱动，
-	 * 左上角绝对定位。页面栈为空（如分享直达）时回退首页。
+	 * 左上角绝对定位（锚定限宽内容列）。页面栈为空（如分享直达）时回退首页。
 	 */
 
 	// 距顶部偏移（px）：取系统状态栏高度，Web 端无状态栏回退 44
@@ -30,6 +38,21 @@
 
 <style lang="scss">
 	.back-button {
+		width: 100%;
+		/* #ifdef WEB */
+		max-width: 480px;
+		/* #endif */
+		/* #ifndef WEB */
+		max-width: 750px;
+		/* #endif */
+		margin-left: auto;
+		margin-right: auto;
+		position: relative;
+		/* 零高层显式放开裁剪（uni-h5 view 基础样式默认 hidden），否则 absolute 按钮不可见 */
+		overflow: visible;
+	}
+
+	.back-button__inner {
 		position: absolute;
 		left: 48rpx;
 		z-index: 10;
