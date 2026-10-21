@@ -243,8 +243,8 @@ class ReadingService:
         )
         notes = list(result.scalars().all())
         return {
-            "underlines": [underline_to_dict(n) for n in notes if n.note_type == NOTE_TYPE_UNDERLINE],
-            "thoughts": [thought_to_dict(n) for n in notes if n.note_type == NOTE_TYPE_THOUGHT],
+            "underlines": [ReadingService.underline_to_dict(n) for n in notes if n.note_type == NOTE_TYPE_UNDERLINE],
+            "thoughts": [ReadingService.thought_to_dict(n) for n in notes if n.note_type == NOTE_TYPE_THOUGHT],
         }
 
 

@@ -4,10 +4,26 @@
  * - 对象存储地址与签名全部由后端下发（密钥与临时凭证不出后端），前端仅搬运字节
  * - 本地正文读写复用导入管线的路径约定：<books 目录>/<id>.<ext>（Web 端为 IndexedDB
  *   虚拟键 webbooks/<id>.<ext>，与 books.uts 的 path 字段运算同构）
+ * - ensureBookLocal：打开书籍前保障正文在本机（本地有直接用，本地无从云端下载）
+ * - 一键双向同步（runBookSync）与云端恢复建档在 bookparse.uts（依赖其解析/落盘管线）
  */
+import { LocalBook, setBookFileLocal } from './books.uts'
+import { fetchDownloadUrl } from '../api/cos.uts'
 // #ifdef WEB
 import { webFsGet, webFsPut } from './webfs'
 // #endif
+
+/** 文件名段清洗（与后端 cos_service.sanitize_segment 同规则：剥离路径分隔符并去首尾空白，保证本地匹配与云端对象名一致） */
+export function sanitizeTitle(value : string) : string {
+	let cleaned = ''
+	for (let i = 0; i < value.length; i++) {
+		const code = value.charCodeAt(i)
+		if (value.charAt(i) != '/' && value.charAt(i) != '\\' && code >= 32) {
+			cleaned += value.charAt(i)
+		}
+	}
+	return cleaned.trim()
+}
 
 /** 书籍正文本地路径（与导入管线同名约定，下载落盘 / 上传读源共用） */
 export function bookFilePath(bookId : number, format : string) : string {
@@ -55,13 +71,15 @@ export function writeBookBytes(path : string, buf : ArrayBuffer) : Promise<void>
 	// #ifndef WEB
 	return new Promise<void>((resolve, reject) => {
 		const fsm = uni.getFileSystemManager()
+		// 异步 writeFile：iOS 上 writeFileSync 属无返回值同步 API（失败无法 try-catch 捕获），
+		// 落盘主路径必须用带 fail 回调的异步版
 		const write = () => {
-			try {
-				fsm.writeFileSync(path, buf)
-				resolve()
-			} catch (e) {
-				reject(e)
-			}
+			fsm.writeFile({
+				filePath: path,
+				data: buf,
+				success: (_res) => { resolve() },
+				fail: (err) => { reject(new Error(err.errMsg)) }
+			})
 		}
 		const idx = path.lastIndexOf('/')
 		const dir = idx > 0 ? path.substring(0, idx) : ''
@@ -69,19 +87,12 @@ export function writeBookBytes(path : string, buf : ArrayBuffer) : Promise<void>
 			write()
 			return
 		}
-		// 目录可能不存在（首次下载）：mkdir 已存在报错各端不一致，失败后 access 复验（对齐 bookparse 范式）
+		// 目录可能不存在（首次下载）：mkdir 失败（含目录已存在）直接重写，最终由 writeFile 结果定成败
 		fsm.mkdir({
 			dirPath: dir,
 			recursive: true,
 			success: (_res) => { write() },
-			fail: (_err) => {
-				try {
-					fsm.accessSync(dir)
-					write()
-				} catch (e) {
-					reject(e)
-				}
-			}
+			fail: (_err) => { write() }
 		})
 	})
 	// #endif
@@ -112,9 +123,18 @@ export function cosPut(url : string, buf : ArrayBuffer) : Promise<void> {
 	})
 }
 
-/** COS 直取（GET 预签名 URL，arraybuffer 响应；2xx 视为成功） */
-export function cosGetBytes(url : string) : Promise<ArrayBuffer> {
-	return new Promise<ArrayBuffer>((resolve, reject) => {
+/** 云端对象不存在哨兵（COS 404：删除竞态/孤儿行场景，同步时应静默跳过而非计为失败） */
+export const CLOUD_MISSING_ERR = 'COS_OBJECT_MISSING'
+
+/** 判断异常是否为云端对象不存在（404） */
+export function isCloudMissingError(e : any | null) : boolean {
+	const err = e as Error
+	return err != null && err.message != null && err.message.indexOf(CLOUD_MISSING_ERR) >= 0
+}
+
+/** COS 直取（GET 预签名 URL；对象不存在 404 → null，其余失败抛错） */
+export function cosGetBytesOrNull(url : string) : Promise<ArrayBuffer | null> {
+	return new Promise<ArrayBuffer | null>((resolve, reject) => {
 		uni.request<ArrayBuffer>({
 			url: url,
 			method: 'GET',
@@ -123,6 +143,9 @@ export function cosGetBytes(url : string) : Promise<ArrayBuffer> {
 			success: (res) => {
 				if (res.statusCode >= 200 && res.statusCode < 300 && res.data != null) {
 					resolve(res.data as ArrayBuffer)
+				} else if (res.statusCode == 404) {
+					// 对象实际不存在（列举与删除竞态/孤儿行）：不视为传输失败
+					resolve(null)
 				} else {
 					reject(new Error('HTTP ' + res.statusCode.toString()))
 				}
@@ -132,4 +155,39 @@ export function cosGetBytes(url : string) : Promise<ArrayBuffer> {
 			}
 		})
 	})
+}
+
+// ==================== 打开书籍前的本机正文保障 ====================
+
+/** 单本下载（取预签名 → 直取字节 → 落盘 → 本机正文回写；失败抛错，云端对象不存在抛缺失哨兵） */
+async function downloadBook(book : LocalBook) : Promise<void> {
+	const urlRes = await fetchDownloadUrl(sanitizeTitle(book.title), book.format.toLowerCase())
+	if (urlRes.code != 0 || urlRes.data == null) {
+		throw new Error(urlRes.msg)
+	}
+	const url = urlRes.data!.getString('url') ?? ''
+	if (url.length == 0) {
+		throw new Error('empty download url')
+	}
+	const buf = await cosGetBytesOrNull(url)
+	if (buf == null) {
+		throw new Error(CLOUD_MISSING_ERR)
+	}
+	const path = bookFilePath(book.id, book.format)
+	await writeBookBytes(path, buf)
+	setBookFileLocal(book.id, path, buf.byteLength)
+}
+
+/** 打开书籍前确保正文在本机：本地有直接用；本地无从云端下载（成功回写缓存）。返回是否可用 */
+export async function ensureBookLocal(book : LocalBook) : Promise<boolean> {
+	if (book.path.length > 0) {
+		return true
+	}
+	try {
+		await downloadBook(book)
+		return true
+	} catch (e) {
+		console.warn('云端下载失败', book.title, e)
+		return false
+	}
 }

@@ -542,6 +542,7 @@
 			}
 			drawAndExport(res.node, false)
 		}).exec()
+		// #endif
 	}
 
 	/** 预生成分享封面图（仅微信端，打开预览时调用）：画布绘制后导出临时图经

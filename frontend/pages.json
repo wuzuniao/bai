@@ -42,13 +42,6 @@
 				"navigationStyle": "custom",
 				"navigationBarTitleText": "阅读时间统计 - 无足鸟古诗词"
 			}
-		},
-		{
-			"path": "pages/reading/sync",
-			"style": {
-				"navigationStyle": "custom",
-				"navigationBarTitleText": "云端同步 - 无足鸟古诗词"
-			}
 		}
 	],
 	"subPackages": [

@@ -295,13 +295,49 @@ class CosService:
         url = self._cos_presign_url("PUT", f"/{key}", creds)
         return key, url
 
+    async def resolve_object_key(self, user_dir: str, title: str, ext: str) -> str | None:
+        """
+        按书名定位用户目录内真实对象 key（扩展名大小写不敏感）
+        桶内对象扩展名大小写不保证与业务一致（如手动上传的 .TXT），下载/删除前须定位真实 key
+        :return: 真实完整 key；未找到返回 None
+        :raises ValueError: 列举失败（转 400 业务错误）
+        """
+        clean_title = self.sanitize_segment(title)
+        if not clean_title:
+            return None
+        prefix = f"{user_dir}/{clean_title}."
+        status, content = await self._server_cos_request(
+            "GET", "/", {"prefix": prefix, "max-keys": "100"})
+        if status != 200:
+            logger.warning(f"COS 对象定位列举失败（user_dir={user_dir}）：HTTP {status}")
+            raise ValueError("云端清单查询失败，请稍后重试")
+        want = ext.lower()
+        root = ElementTree.fromstring(content)
+        fallback: str | None = None
+        for node in root.findall("Contents"):
+            key = node.findtext("Key") or ""
+            name = key.rsplit("/", 1)[-1]
+            dot = name.rfind(".")
+            if dot <= 0:
+                continue
+            if name[dot + 1:].lower() != want:
+                continue
+            # 扩展名精确小写优先（上传恒小写，保证下载到最新上传内容）；其余大小写变体兜底
+            if name[dot + 1:] == ext.lower():
+                return key
+            if fallback is None:
+                fallback = key
+        return fallback
+
     async def create_presigned_get(self, user_dir: str, title: str, ext: str) -> tuple[str, str]:
         """
-        签发单本下载预签名 URL（GET 对象；仅限该用户目录内）
-        :return: (object_key, url)
+        签发单本下载预签名 URL（GET 对象；仅限该用户目录内；扩展名大小写不敏感定位真实 key）
+        :return: (object_key, url)（未找到对象时按规范小写 key 签发，GET 404 由前端缺失哨兵处理）
         """
+        key = await self.resolve_object_key(user_dir, title, ext)
+        if key is None:
+            key = self.object_key(user_dir, title, ext)
         creds = await self.issue_temp_credentials(user_dir)
-        key = self.object_key(user_dir, title, ext)
         url = self._cos_presign_url("GET", f"/{key}", creds)
         return key, url
 
@@ -374,13 +410,15 @@ class CosService:
 
     async def delete_cloud_book(self, user_dir: str, title: str, ext: str) -> None:
         """
-        删除云端书籍对象（幂等：对象不存在 COS 亦返回 204）
+        删除云端书籍对象（幂等：对象不存在 COS 亦返回 204；扩展名大小写不敏感定位真实 key）
         :raises ValueError: 删除请求失败（转 400 业务错误）
         """
         clean_title = self.sanitize_segment(title)
         if not clean_title:
             raise ValueError("书名不能为空")
-        key = self.object_key(user_dir, clean_title, ext.lower())
+        key = await self.resolve_object_key(user_dir, clean_title, ext)
+        if key is None:
+            return
         status, _ = await self._server_cos_request("DELETE", f"/{key}")
         if status not in (200, 204):
             logger.warning(f"云端对象删除失败（user_dir={user_dir} key={key}）：HTTP {status}")

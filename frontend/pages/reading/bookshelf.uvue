@@ -85,6 +85,7 @@
 							:id="'book-card-' + (ri * 3 + bi)"
 							:style="cardStyle(ri * 3 + bi)"
 							@click="onCardTap(book)"
+							@longpress="onCardLongPress(book)"
 							@touchstart="onCardTouchStart($event, ri * 3 + bi)"
 							@touchmove="onCardTouchMove($event, ri * 3 + bi)"
 							@touchend="onCardTouchEnd"
@@ -104,9 +105,9 @@
 										<text class="cover-author">{{ book.author }}</text>
 									</view>
 								</view>
-								<!-- 云端角标（本设备无正文文件时展示：水印式低对比小字；plain 右下与格式水印对位（编辑模式避让勾选点隐藏）、photo 左上避让右上水印） -->
-								<view v-if="book.path.length == 0 && (shelfStyle !== 'plain' || !editMode)" class="cloud-badge" :class="shelfStyle === 'plain' ? 'cloud-badge-plain' : 'cloud-badge-photo'">
-									<text class="cloud-badge-text" :class="shelfStyle === 'plain' ? 'cloud-badge-text-plain' : 'cloud-badge-text-photo'">{{ t('bookshelf.cloud') }}</text>
+								<!-- 状态角标（仅本地=「本地」/ 仅云端=「云端」/ 本地云端都有=无角标：水印式低对比小字；plain 右下与格式水印对位（编辑模式避让勾选点隐藏）、photo 左上避让右上水印） -->
+								<view v-if="badgeOf(book) !== '' && (shelfStyle !== 'plain' || !editMode)" class="cloud-badge" :class="shelfStyle === 'plain' ? 'cloud-badge-plain' : 'cloud-badge-photo'">
+									<text class="cloud-badge-text" :class="shelfStyle === 'plain' ? 'cloud-badge-text-plain' : 'cloud-badge-text-photo'">{{ badgeOf(book) === 'local' ? t('bookshelf.local') : t('bookshelf.cloud') }}</text>
 								</view>
 								<!-- 编辑勾选点（封面右下角） -->
 								<view
@@ -215,7 +216,8 @@
 	import { PLACEHOLDER_STYLE } from '@/utils/theme.uts'
 	import { LocalBook, loadBooks, saveBooks, syncBookOrder, removeBookData, getTodayMinutes, fetchBooksFromCloud, fetchReadingStatsFromCloud, cleanupLegacyBooks } from '@/utils/books.uts'
 	import { saveBookshelfStyle, loadBookshelfStyle } from '@/utils/readerTypes.uts'
-	import { importBook } from '@/utils/bookparse.uts'
+	import { importBook, runBookSync, restoreEmptyShelfFromCloud } from '@/utils/bookparse.uts'
+	import { ensureBookLocal } from '@/utils/cloudsync.uts'
 	import { hasAccessToken, ApiResponse } from '@/utils/request.uts'
 	import { mpCapsuleRect } from '@/utils/layout.uts'
 	import { REWARD_TIERS, fmtRemainMinutes } from '@/utils/rewards.uts'
@@ -391,7 +393,7 @@
 		}
 	}
 
-	/** 云端刷新（onShow 每次执行）：清理旧版数据 → 书架/时长以云端覆盖缓存 → 重渲染 */
+	/** 云端刷新（onShow 每次执行）：清理旧版数据 → 书架/时长以云端覆盖缓存 → 重渲染；空书架且会员时静默自动云端恢复 */
 	async function refreshShelf() : Promise<void> {
 		cleanupLegacyBooks()
 		loadShelf()
@@ -400,6 +402,26 @@
 		todayMinutes.value = getTodayMinutes()
 		readStyleFromCache()
 		await refreshTierStates()
+		await autoRestoreFromCloud()
+	}
+
+	/** 空书架自动云端恢复（登录+黑铁及以上会员；云端有书籍对象时逐本建档下载，静默执行无弹窗） */
+	async function autoRestoreFromCloud() : Promise<void> {
+		if (books.value.length > 0) {
+			return
+		}
+		if (userStore.userInfo == null || !isSyncMember.value) {
+			return
+		}
+		try {
+			const restored = await restoreEmptyShelfFromCloud()
+			if (restored > 0) {
+				books.value = loadBooks()
+			}
+		} catch (e) {
+			// 网络失败静默跳过，下次进入书架再试
+			console.warn('空书架云端恢复失败', e)
+		}
 	}
 
 	/** 书架顺序本地持久化（手动排序云端同步在拖拽落定处单独触发） */
@@ -427,6 +449,14 @@
 		}
 		const num = hasPref ? book.lastChapter : book.lastChapter + 1
 		return tf('bookshelf.metaChapterN', [num.toString(), total.toString()])
+	}
+
+	/** 卡片状态角标（''=无 / 'local'=仅本地 / 'cloud'=仅云端）：id>0=已在云端登记，path=本机正文；两侧都有则不显示角标 */
+	function badgeOf(book : LocalBook) : string {
+		if (book.id > 0) {
+			return book.path.length == 0 ? 'cloud' : ''
+		}
+		return book.path.length > 0 ? 'local' : ''
 	}
 
 	/** 切换书架卡片统一样式（缓存 + 云端偏好跟随） */
@@ -684,6 +714,15 @@
 		toggleSelect(book)
 	}
 
+	/** 长按书籍卡片：非编辑模式下快捷进入编辑书架并选中该本（编辑模式长按已被拖拽手势占用，直接忽略） */
+	function onCardLongPress(book : LocalBook) : void {
+		if (editMode.value) {
+			return
+		}
+		enterEdit()
+		toggleSelect(book)
+	}
+
 	/** 添加格点击：非编辑模式下触发导入（与 + 菜单同功能）；编辑模式无动作 */
 	function onAddCellTap() : void {
 		if (!editMode.value) {
@@ -706,13 +745,51 @@
 			|| roles.includes('silver') || roles.includes('gold')
 	})
 
-	/** 加号菜单「云端同步」：进入书籍文件云同步页（页内再做登录/会员门禁） */
-	function openCloudSync() : void {
+	/** 加号菜单「云端同步」：登录+会员校验后执行一次双向同步（本地↔云端差异互补），结果弹窗提示 */
+	async function openCloudSync() : Promise<void> {
 		plusMenuOpen.value = false
 		closeMenus()
-		uni.navigateTo({
-			url: '/pages/reading/sync'
-		})
+		if (userStore.userInfo == null || !isSyncMember.value) {
+			uni.showModal({
+				title: t('bookshelf.cloudSync'),
+				content: t('bookshelf.cloudSyncVipNeed'),
+				showCancel: false
+			})
+			return
+		}
+		uni.showLoading({ title: t('bookshelf.cloudSyncing') })
+		try {
+			const result = await runBookSync()
+			uni.hideLoading()
+			// 下载落地的正文回填书架列表（path/size 变化）
+			books.value = loadBooks()
+			let content = ''
+			if (result.uploaded == 0 && result.downloaded == 0 && result.restored == 0 && result.failed == 0) {
+				content = t('bookshelf.cloudSyncNone')
+			} else {
+				content = tf('bookshelf.cloudSyncResult', [result.uploaded.toString(), result.downloaded.toString()])
+				if (result.restored > 0) {
+					content += '\n' + tf('bookshelf.cloudSyncRestoreN', [result.restored.toString()])
+				}
+				if (result.failed > 0) {
+					content += '\n' + tf('bookshelf.cloudSyncFailN', [result.failed.toString()])
+				}
+			}
+			uni.showModal({
+				title: t('bookshelf.cloudSync'),
+				content: content,
+				showCancel: false
+			})
+		} catch (e) {
+			// 云端清单拉取失败（网络/服务异常）：整体未执行
+			console.warn('云端同步失败', e)
+			uni.hideLoading()
+			uni.showModal({
+				title: t('bookshelf.cloudSync'),
+				content: t('bookshelf.cloudSyncFail'),
+				showCancel: false
+			})
+		}
 	}
 
 	onLoad(() => {
@@ -883,11 +960,21 @@
 		searchFocused.value = false
 	}
 
-	/** 点击书籍进入阅读：txt 进文本阅读器，PDF 进原文件渲染页（携带书籍 id）；本设备无正文时提示重导 */
-	function openBook(book: LocalBook) : void {
+	/** 点击书籍进入阅读：txt 进文本阅读器，PDF 进原文件渲染页（携带书籍 id）；本设备无正文时先尝试从云端下载（会员），失败提示重导 */
+	async function openBook(book: LocalBook) : Promise<void> {
 		if (book.path.length == 0) {
-			uni.showToast({ title: t('bookshelf.fileMissing'), icon: 'none', duration: 2500 })
-			return
+			if (userStore.userInfo == null || !isSyncMember.value) {
+				uni.showToast({ title: t('bookshelf.fileMissing'), icon: 'none', duration: 2500 })
+				return
+			}
+			uni.showLoading({ title: t('bookshelf.cloudDownloading') })
+			const ok = await ensureBookLocal(book)
+			uni.hideLoading()
+			if (!ok) {
+				uni.showToast({ title: t('bookshelf.fileMissing'), icon: 'none', duration: 2500 })
+				return
+			}
+			books.value = loadBooks()
 		}
 		if (book.format == 'PDF') {
 			uni.navigateTo({
@@ -1361,7 +1448,7 @@
 		height: 48rpx;
 	}
 
-	/* 云端角标（本设备无正文：水印式低对比小字，与格式水印同族装饰语言；plain 右下与格式水印对位（编辑模式避让勾选点隐藏）、photo 左上避让右上水印） */
+	/* 状态角标（仅本地/仅云端：水印式低对比小字，与格式水印同族装饰语言；plain 右下与格式水印对位（编辑模式避让勾选点隐藏）、photo 左上避让右上水印） */
 	.cloud-badge {
 		position: absolute;
 		z-index: 3;

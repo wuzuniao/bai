@@ -1,8 +1,10 @@
 // 书籍导入管线：文件编码识别 → 章节解析 → 沙盒落盘入库
 // 端差异收口：文件选择由调用方（书架页）按端条件编译完成，本文件只处理已选中的本地文件
 
-import { applyRegisteredBook, nextPendingBookId, applyPendingImport } from './books'
+import { applyRegisteredBook, nextPendingBookId, applyPendingImport, loadBooks, setBookFileLocal, LocalBook } from './books'
 import { registerBook } from '../api/reading.uts'
+import { fetchDownloadUrl, fetchUploadUrl, fetchCloudObjects } from '../api/cos.uts'
+import { sanitizeTitle, readBookBytes, writeBookBytes, cosPut, cosGetBytesOrNull, isCloudMissingError, CLOUD_MISSING_ERR } from './cloudsync.uts'
 import { hasAccessToken } from './request.uts'
 import { t } from './i18n'
 // 词典注册（导入管线文案）
@@ -628,4 +630,305 @@ export async function importBook(fileName : string, tempPath : string, size : nu
 		}
 		applyPendingImport(bookTitle, ext.toUpperCase(), size, chapterCount, hasPreface, bodyPath)
 	}
+}
+
+// ==================== 云端同步（书架一键双向同步 + 空书架云端恢复） ====================
+// 口径：差异=单边存在——本地有正文且云端无同名对象 → 上传；本地无正文且云端有 → 下载；
+// 云端有对象但本地无书行 → 反向建档（下载→解析→登记）下载；两边都有同名书视为已一致跳过
+// （无可靠文件级比对依据，且避免互相覆盖）。
+
+/** 云端清单条目（title/format 为后端已剥离用户目录前缀的解析结果；匹配键 = sanitizeTitle(title).小写扩展名） */
+type CloudItem = {
+	title: string
+	format: string
+	size: number
+}
+
+/** 同步结果统计 */
+export type SyncResult = {
+	/** 上传成功本数 */
+	uploaded: number
+	/** 下载成功本数 */
+	downloaded: number
+	/** 反向建档恢复本数（云端有对象而本地无书行） */
+	restored: number
+	/** 失败本数（单本失败不中断整体，继续同步其余） */
+	failed: number
+}
+
+/** 单本上传（取预签名 → 读本地字节 → PUT 直传；失败抛错） */
+async function uploadBook(book : LocalBook) : Promise<void> {
+	const urlRes = await fetchUploadUrl(sanitizeTitle(book.title), book.format.toLowerCase())
+	if (urlRes.code != 0 || urlRes.data == null) {
+		throw new Error(urlRes.msg)
+	}
+	const url = urlRes.data!.getString('url') ?? ''
+	if (url.length == 0) {
+		throw new Error('empty upload url')
+	}
+	const buf = await readBookBytes(book.path)
+	await cosPut(url, buf)
+}
+
+/** 单本下载到已有书行（取预签名 → 直取字节 → 落盘 → 本机正文回写；失败/云端缺失抛错，缺失抛哨兵） */
+async function downloadBook(book : LocalBook) : Promise<void> {
+	const urlRes = await fetchDownloadUrl(sanitizeTitle(book.title), book.format.toLowerCase())
+	if (urlRes.code != 0 || urlRes.data == null) {
+		throw new Error(urlRes.msg)
+	}
+	const url = urlRes.data!.getString('url') ?? ''
+	if (url.length == 0) {
+		throw new Error('empty download url')
+	}
+	const buf = await cosGetBytesOrNull(url)
+	if (buf == null) {
+		throw new Error(CLOUD_MISSING_ERR)
+	}
+	// 与导入管线同构的沙盒目录（Web 端为 IndexedDB 键命名空间）
+	let dir = ''
+	// #ifdef WEB
+	dir = 'webbooks'
+	// #endif
+	// #ifndef WEB
+	dir = uni.env.USER_DATA_PATH + '/books'
+	// #endif
+	const path = dir + '/' + book.id.toString() + '.' + book.format.toLowerCase()
+	await writeBookBytes(path, buf)
+	setBookFileLocal(book.id, path, buf.byteLength)
+}
+
+/** 单本下载落盘（不登记；restoreBookFromCloud 内部用） */
+async function downloadBytesToWork(title : string, format : string) : Promise<string | null> {
+	const ext = format.toLowerCase()
+	const urlRes = await fetchDownloadUrl(sanitizeTitle(title), ext)
+	if (urlRes.code != 0 || urlRes.data == null) {
+		return null
+	}
+	const url = urlRes.data!.getString('url') ?? ''
+	if (url.length == 0) {
+		return null
+	}
+	const buf = await cosGetBytesOrNull(url)
+	if (buf == null) {
+		throw new Error(CLOUD_MISSING_ERR)
+	}
+	let dir = ''
+	// #ifdef WEB
+	dir = 'webbooks'
+	// #endif
+	// #ifndef WEB
+	dir = uni.env.USER_DATA_PATH + '/books'
+	// #endif
+	await ensureBooksDir(dir)
+	// 随机后缀防批量恢复同毫秒自撞（与导入管线临时名同策略）
+	const workPath = dir + '/_restore_' + Date.now().toString() + '_' + Math.floor(Math.random() * 100000).toString() + '.' + ext
+	await writeBookBytes(workPath, buf)
+	return workPath
+}
+
+/**
+ * 云端恢复建档（三态）：0=成功；1=云端对象实际不存在（404，删除竞态/孤儿行，静默跳过）；
+ * 2=失败（网络/登记/解析等）
+ */
+export async function restoreBookFromCloud(title : string, format : string, size : number) : Promise<number> {
+	try {
+		const ok = await restoreBookFromCloudInner(title, format, size)
+		return ok ? 0 : 2
+	} catch (e) {
+		if (isCloudMissingError(e)) {
+			return 1
+		}
+		console.warn('云端恢复建档失败', title, e)
+		return 2
+	}
+}
+
+/** 恢复建档主流程：下载 → 解析元数据（txt 章节数/序章，PDF 取页数）→ 登记业务库 → 以云端 id 命名入库 */
+async function restoreBookFromCloudInner(title : string, format : string, size : number) : Promise<boolean> {
+	const ext = format.toLowerCase()
+	const workPath = await downloadBytesToWork(title, format)
+	if (workPath == null) {
+		return false
+	}
+	// 元数据解析（与导入管线同口径）
+	let chapterCount = 0
+	let hasPreface = false
+	if (ext == 'txt') {
+		let text = ''
+		try {
+			text = await readTextFile(workPath)
+		} catch (e) {
+			discardFile(workPath)
+			return false
+		}
+		const parsed = parseChapters(text, title)
+		chapterCount = parsed.length
+		hasPreface = parsed.length > 0 && parsed[0].preface
+	} else {
+		// PDF：仅 App 端取页数用于书架展示（其余端 PDF 无法阅读，不恢复）
+		// #ifdef APP
+		try {
+			const session = await openPdfSession(workPath)
+			chapterCount = session.pageCount
+		} catch (e) {
+			discardFile(workPath)
+			return false
+		}
+		// #endif
+		// #ifndef APP
+		discardFile(workPath)
+		return false
+		// #endif
+	}
+	// 登记业务库（同用户同名书复用行并回填元数据）
+	let registered : UTSJSONObject | null = null
+	try {
+		const res = await registerBook(title, format.toUpperCase(), size, chapterCount, hasPreface)
+		if (res.code == 0 && res.data != null) {
+			registered = res.data
+		}
+	} catch (e) {
+		registered = null
+	}
+	if (registered == null) {
+		discardFile(workPath)
+		return false
+	}
+	const bookId = registered!.getNumber('id') ?? 0
+	if (bookId <= 0) {
+		discardFile(workPath)
+		return false
+	}
+	// 以云端 id 命名入库（换格式残留清理与导入管线同口径）
+	let dir = ''
+	// #ifdef WEB
+	dir = 'webbooks'
+	// #endif
+	// #ifndef WEB
+	dir = uni.env.USER_DATA_PATH + '/books'
+	// #endif
+	const bodyPath = dir + '/' + bookId.toString() + '.' + ext
+	if (bodyPath != workPath) {
+		await copyToSandbox(workPath, bodyPath)
+		discardFile(workPath)
+	}
+	if (ext == 'txt') {
+		discardFile(dir + '/' + bookId.toString() + '.pdf')
+	} else {
+		discardFile(dir + '/' + bookId.toString() + '.txt')
+	}
+	applyRegisteredBook(registered!, bodyPath)
+	return true
+}
+
+/** 一次性双向同步（书架「云端同步」入口调用）：返回统计结果，云端清单拉取失败整体抛错 */
+export async function runBookSync() : Promise<SyncResult> {
+	const res = await fetchCloudObjects()
+	if (res.code != 0 || res.data == null) {
+		throw new Error(res.msg)
+	}
+	// 云端对象清单（title/format 为后端已剥离用户目录前缀的解析结果）
+	const cloud : CloudItem[] = []
+	const arr = res.data!.getArray('items')
+	if (arr != null) {
+		for (let i = 0; i < arr.length; i++) {
+			const obj = arr[i] as UTSJSONObject
+			const title = obj.getString('title') ?? ''
+			const format = (obj.getString('format') ?? '').toUpperCase()
+			if (title.length == 0 || (format != 'TXT' && format != 'PDF')) {
+				continue
+			}
+			cloud.push({ title: title, format: format, size: obj.getNumber('size') ?? 0 } as CloudItem)
+		}
+	}
+	// 本地书行按匹配键索引（键 = 书名.小写扩展名，与云端条目同构）
+	const bookByKey = new Map<string, LocalBook>()
+	const books = loadBooks()
+	for (let i = 0; i < books.length; i++) {
+		const b = books[i]
+		bookByKey.set(sanitizeTitle(b.title) + '.' + b.format.toLowerCase(), b)
+	}
+	const result : SyncResult = { uploaded: 0, downloaded: 0, restored: 0, failed: 0 }
+	for (let i = 0; i < cloud.length; i++) {
+		const matchKey = sanitizeTitle(cloud[i].title) + '.' + cloud[i].format.toLowerCase()
+		const book = bookByKey.get(matchKey)
+		try {
+			if (book == null) {
+				// 云端有、本地无书行 → 反向建档恢复（1=云端对象实际不存在，静默跳过）
+				const code = await restoreBookFromCloud(cloud[i].title, cloud[i].format, cloud[i].size)
+				if (code == 0) {
+					result.restored++
+				} else if (code == 2) {
+					result.failed++
+				}
+			} else if (book.path.length == 0) {
+				// 本地有书行、无正文 → 下载
+				await downloadBook(book)
+				result.downloaded++
+			}
+			// 本地有正文（无论云端有无）不在此处理：上传差异在下方本地遍历补齐
+		} catch (e) {
+			if (isCloudMissingError(e)) {
+				// 云端对象实际不存在（删除竞态/孤儿行）：静默跳过不计失败
+				continue
+			}
+			console.warn('云端同步单本失败', cloud[i].title, e)
+			result.failed++
+		}
+	}
+	// 上传差异：本地有正文且云端无同名对象
+	const cloudSet = new Map<string, boolean>()
+	for (let i = 0; i < cloud.length; i++) {
+		cloudSet.set(sanitizeTitle(cloud[i].title) + '.' + cloud[i].format.toLowerCase(), true)
+	}
+	for (let i = 0; i < books.length; i++) {
+		const book = books[i]
+		if (book.path.length == 0 || (book.format != 'TXT' && book.format != 'PDF')) {
+			continue
+		}
+		if (cloudSet.has(sanitizeTitle(book.title) + '.' + book.format.toLowerCase())) {
+			continue
+		}
+		try {
+			await uploadBook(book)
+			result.uploaded++
+		} catch (e) {
+			console.warn('云端同步单本失败', book.title, e)
+			result.failed++
+		}
+	}
+	return result
+}
+
+/** 空书架云端恢复（静默）：逐本检查本地缓存无同名书时反向建档下载，返回恢复本数 */
+export async function restoreEmptyShelfFromCloud() : Promise<number> {
+	const res = await fetchCloudObjects()
+	if (res.code != 0 || res.data == null) {
+		return 0
+	}
+	const arr = res.data!.getArray('items')
+	if (arr == null || arr.length == 0) {
+		return 0
+	}
+	const localKeys = new Map<string, boolean>()
+	const books = loadBooks()
+	for (let i = 0; i < books.length; i++) {
+		localKeys.set(sanitizeTitle(books[i].title) + '.' + books[i].format.toLowerCase(), true)
+	}
+	let restored = 0
+	for (let i = 0; i < arr.length; i++) {
+		const obj = arr[i] as UTSJSONObject
+		const title = obj.getString('title') ?? ''
+		const format = (obj.getString('format') ?? '').toUpperCase()
+		if (title.length == 0 || (format != 'TXT' && format != 'PDF')) {
+			continue
+		}
+		if (localKeys.has(sanitizeTitle(title) + '.' + format.toLowerCase())) {
+			continue
+		}
+		if ((await restoreBookFromCloud(title, format, obj.getNumber('size') ?? 0)) == 0) {
+			restored++
+		}
+	}
+	return restored
 }
