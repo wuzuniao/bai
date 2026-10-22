@@ -2,7 +2,7 @@
  * 个人信息页词典段（pages/user/profile.uvue）
  * 模块载入时注册进 i18n 全局词典；profile.uvue 引入本文件即完成注册。
  */
-import { registerDict, Dict } from '../i18n'
+import { registerDict, Dict } from '../../../utils/i18n'
 
 const zh: Dict = new Map<string, string>([
 	['profile.title', '个人信息'],

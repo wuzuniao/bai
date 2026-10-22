@@ -163,7 +163,7 @@
 	import { ApiResponse, forceRefreshToken } from '@/utils/request.uts'
 	import { t, tf } from '@/utils/i18n.uts'
 	// 词典注册（memberpay 页文案 + 公共段）
-	import '@/utils/locales/memberpay.uts'
+	import '@/pages/user/locales/memberpay.uts'
 	import '@/utils/locales/common.uts'
 
 	// 原生导航栏标题随语言切换（本页未启用自定义导航样式）

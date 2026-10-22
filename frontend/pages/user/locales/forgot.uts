@@ -2,7 +2,7 @@
  * 找回密码页词典段（pages/user/forgot-password.uvue）
  * 模块载入时注册进 i18n 全局词典；forgot-password.uvue 引入本文件即完成注册。
  */
-import { registerDict, Dict } from '../i18n'
+import { registerDict, Dict } from '../../../utils/i18n'
 
 const zh: Dict = new Map<string, string>([
 	['forgot.title', '找回密码'],

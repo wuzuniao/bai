@@ -90,7 +90,7 @@
 	import { ApiResponse } from '@/utils/request.uts'
 	import { t } from '@/utils/i18n.uts'
 	// 词典注册（login 页文案 + 公共段）
-	import '@/utils/locales/login.uts'
+	import '@/pages/user/locales/login.uts'
 	import '@/utils/locales/common.uts'
 	import { loginUser } from './api/user.uts'
 

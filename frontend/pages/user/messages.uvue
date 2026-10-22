@@ -90,7 +90,7 @@
 	import { mainTopPx } from '@/utils/layout.uts'
 	import { t } from '@/utils/i18n.uts'
 	// 词典注册（messages 页文案 + 公共段）
-	import '@/utils/locales/userinfo-pages.uts'
+	import '@/pages/user/locales/userinfo-pages.uts'
 	import '@/utils/locales/common.uts'
 
 	/** 顶部留白：返回按钮（状态栏高度 + 40px）之下再留 12px（计算逻辑见 utils/layout.uts） */

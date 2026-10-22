@@ -85,7 +85,7 @@
 	import { useUserStore, avatarPathOf } from '@/stores/user.uts'
 	import { t } from '@/utils/i18n.uts'
 	// 词典注册（settings 页文案 + 公共段）
-	import '@/utils/locales/settings.uts'
+	import '@/pages/user/locales/settings.uts'
 	import '@/utils/locales/common.uts'
 
 	const userStore = useUserStore()

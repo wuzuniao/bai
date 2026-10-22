@@ -8,7 +8,7 @@
  */
 import { t } from '@/utils/i18n.uts'
 // 词典注册（表单校验文案）
-import '@/utils/locales/validators.uts'
+import '@/pages/user/locales/validators.uts'
 
 /** 用户名：2-15 个字符，仅限中文、英文及数字 */
 export function validateUsername(v : string) : string {

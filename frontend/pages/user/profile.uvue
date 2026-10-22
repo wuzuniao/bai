@@ -159,7 +159,7 @@
 	import { ApiResponse } from '@/utils/request.uts'
 	import { t, currentLocale, setLocale } from '@/utils/i18n.uts'
 	// 词典注册（profile 页文案 + 公共段）
-	import '@/utils/locales/profile.uts'
+	import '@/pages/user/locales/profile.uts'
 	import '@/utils/locales/common.uts'
 	// #ifdef APP
 	import { isBiometricAvailable, isBiometricEnabled, setBiometricEnabled, getBiometricToken } from '@/utils/biometric.uts'

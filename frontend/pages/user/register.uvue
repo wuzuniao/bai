@@ -65,7 +65,7 @@
 	import { validateUsername, validatePassword, validateConfirmPassword, validateEmail } from './utils/validators.uts'
 	import { t } from '@/utils/i18n.uts'
 	// 词典注册（register 页文案 + 公共段）
-	import '@/utils/locales/register.uts'
+	import '@/pages/user/locales/register.uts'
 	import '@/utils/locales/common.uts'
 
 	const usernameValue = ref('')

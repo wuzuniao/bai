@@ -35,7 +35,7 @@
 	import PageShell from '@/components/common/PageShell.uvue'
 	import { t } from '@/utils/i18n.uts'
 	// 词典注册（contact/help/delete 页文案）
-	import '@/utils/locales/userinfo-pages.uts'
+	import '@/pages/user/locales/userinfo-pages.uts'
 	import '@/utils/locales/common.uts'
 
 	// 微信小程序分享：转发好友与朋友圈（封面统一 /static/share-cover.png，复制自 yao 项目）

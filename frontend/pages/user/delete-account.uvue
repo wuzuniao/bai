@@ -52,7 +52,7 @@
 	import PageShell from '@/components/common/PageShell.uvue'
 	import { t } from '@/utils/i18n.uts'
 	// 词典注册（contact/help/delete 页文案）
-	import '@/utils/locales/userinfo-pages.uts'
+	import '@/pages/user/locales/userinfo-pages.uts'
 	import '@/utils/locales/common.uts'
 
 	/** 跳转登录页（登录后在个人信息页删除账号） */
