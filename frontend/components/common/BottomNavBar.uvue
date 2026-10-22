@@ -114,7 +114,6 @@
 		background-color: $bai-canvas;
 		border-radius: $bai-rounded-pill;
 		border: 1px solid rgba($bai-mute, 0.1);
-		box-shadow: $bai-shadow-nav;
 	}
 
 	/* 导航项：左右各留 12rpx（英文文案较宽，收紧边距保证中英文均收进胶囊宽度） */

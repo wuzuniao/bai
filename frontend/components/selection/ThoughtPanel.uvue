@@ -102,6 +102,8 @@
 		navTop: number
 		/** 引用排版模式：true=悬挂对齐式（短行诗句，各行文字左缘对齐）；false=正文流式（长文段落，段首缩进续行顶格） */
 		quoteAlign: boolean
+		/** 查看卡片最大宽度（px；0=页面满宽。宿主正文限宽时传入正文宽——首页诗行正文，卡片不超上限并随页面水平居中与正文对齐） */
+		cardMaxW: number
 	}>()
 	const emit = defineEmits(['sync', 'dismiss', 'toast', 'thoughtViewClosed'])
 
@@ -123,8 +125,13 @@
 	/** 按划线段视口几何定位：下方放得下置下方；否则取上下空间宽裕侧并钳制不出屏 */
 	function positionCard(selBottom : number, selTop : number) : void {
 		const margin = uni.upx2px(24)
-		cardLeft.value = margin
-		cardW.value = props.pageW - margin * 2
+		let w = props.pageW - margin * 2
+		// 宿主正文限宽：卡片钳制到正文宽并随页面水平居中（正文在页面内居中，中心与页面中心重合）；0=不限保持页面满宽
+		if (props.cardMaxW > 0 && props.cardMaxW < w) {
+			w = props.cardMaxW
+		}
+		cardW.value = w
+		cardLeft.value = (props.pageW - w) / 2
 		const gap = uni.upx2px(16)
 		const h = cardH > 0 ? cardH : CARD_EST_H
 		const bottomSpace = props.pageH - selBottom - gap - h

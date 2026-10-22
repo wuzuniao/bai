@@ -219,7 +219,7 @@
 	import { importBook, runBookSync, restoreEmptyShelfFromCloud } from '@/utils/bookparse.uts'
 	import { ensureBookLocal } from '@/utils/cloudsync.uts'
 	import { hasAccessToken, ApiResponse } from '@/utils/request.uts'
-	import { mpCapsuleRect, CONTENT_CAP_PX } from '@/utils/layout.uts'
+	import { mpCapsuleRect, CONTENT_CAP_PX, scheduleResizeReload } from '@/utils/layout.uts'
 	import { REWARD_TIERS, fmtRemainMinutes } from '@/utils/rewards.uts'
 	import { fetchActivitySummary, claimReadingReward } from '@/api/activity.uts'
 	import { t, tf } from '@/utils/i18n.uts'
@@ -823,6 +823,14 @@
 	onShow(() => {
 		refreshShelf()
 	})
+
+	// #ifndef APP-ANDROID || APP-IOS || APP-HARMONY
+	onResize(() : void => {
+		// 微信端折叠切换自愈（其他端空实现）：布局残留按新窗口重载
+		const win = uni.getWindowInfo()
+		scheduleResizeReload(win.windowWidth, '/pages/reading/bookshelf')
+	})
+	// #endif
 
 	/** 关闭全部浮层（点击遮罩或底部导航触发） */
 	function closeMenus() : void {

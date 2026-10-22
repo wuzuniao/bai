@@ -119,6 +119,7 @@
 			:page-h="pageH"
 			:nav-top="navTop"
 			:quote-align="quoteAlign"
+			:card-max-w="thoughtCardMaxW"
 			@sync="emit('sync')"
 			@dismiss="emit('dismiss')"
 			@toast="emit('toast', $event)"
@@ -177,6 +178,8 @@
 		navTop: number
 		/** 引用排版模式（下行想法编辑器：true=悬挂对齐式短行诗句，false=正文流式长文段落） */
 		quoteAlign: boolean
+		/** 想法查看卡片最大宽度（px；0=页面满宽，透传 ThoughtPanel，宿主正文限宽时下行） */
+		thoughtCardMaxW: number
 		/** 页面宽高（px，钳制与双行判定） */
 		pageW: number
 		pageH: number
@@ -482,33 +485,41 @@
 		// 切片内字符索引（首行容量 perLine-2）加切片偏移 = 整段坐标（流式分页段落跨页时 pr.from 非 0）
 		const sliceIdx = row == 0 ? col : (m.perLine - 2) + (row - 1) * m.perLine + col
 		const charIdx = Math.min(sliceIdx, len - 1) + pr.from
+		// 合并行（首页诗宽屏"每行一句"：一个渲染行并置两个笔记段）——超过前段长度的字符索引
+		// 归入后段（secondOrigin），段内列 = 字符索引 - 前段长度；无合并（-1）按单段原样
+		let effOrigin = pr.origin
+		let effCharIdx = charIdx
+		if (pr.secondOrigin > 0 && charIdx >= pr.firstLen) {
+			effOrigin = pr.secondOrigin
+			effCharIdx = charIdx - pr.firstLen
+		}
 		if (isEnd) {
 			// 终点柄：新位置在起点之前则互换端点，否则更新终点
-			if (comparePos(pr.cid, pr.origin, charIdx, span.fromCid, span.fromOrigin, span.fromStart) >= 0) {
+			if (comparePos(pr.cid, effOrigin, effCharIdx, span.fromCid, span.fromOrigin, span.fromStart) >= 0) {
 				span.toCid = pr.cid
-				span.toOrigin = pr.origin
-				span.toEnd = charIdx
+				span.toOrigin = effOrigin
+				span.toEnd = effCharIdx
 			} else {
 				span.toCid = span.fromCid
 				span.toOrigin = span.fromOrigin
 				span.toEnd = span.fromStart
 				span.fromCid = pr.cid
-				span.fromOrigin = pr.origin
-				span.fromStart = charIdx
+				span.fromOrigin = effOrigin
+				span.fromStart = effCharIdx
 			}
 		} else {
 			// 起点柄：新位置在终点之后则互换端点，否则更新起点
-			if (comparePos(pr.cid, pr.origin, charIdx, span.toCid, span.toOrigin, span.toEnd) <= 0) {
+			if (comparePos(pr.cid, effOrigin, effCharIdx, span.toCid, span.toOrigin, span.toEnd) <= 0) {
 				span.fromCid = pr.cid
-				span.fromOrigin = pr.origin
-				span.fromStart = charIdx
+				span.fromOrigin = effOrigin
+				span.fromStart = effCharIdx
 			} else {
 				span.fromCid = span.toCid
 				span.fromOrigin = span.toOrigin
 				span.fromStart = span.toEnd
 				span.toCid = pr.cid
-				span.toOrigin = pr.origin
-				span.toEnd = charIdx
+				span.toOrigin = effOrigin
+				span.toEnd = effCharIdx
 			}
 		}
 		const hotH = uni.upx2px(HANDLE_HOT_RPX)

@@ -14,12 +14,16 @@ export const CONTENT_CAP_PX = 480
 export const CONTENT_CAP_PX = 750
 // #endif
 
-/** 次级页面内容区顶部留白（px）：返回按钮（状态栏高度 + 40px）之下再留 12px；Web 端无状态栏回退 96 */
+/** 次级页面内容区顶部留白（px）：返回按钮（状态栏高度 + 40px）之下再留 12px；
+ *  Web 端不渲染返回键（浏览器自带返回），页头距顶收紧 */
 export function mainTopPx() : number {
 	const win = uni.getWindowInfo()
 	if (win.statusBarHeight > 0) {
 		return win.statusBarHeight + 52
 	}
+	// #ifdef WEB
+	return 32
+	// #endif
 	return 96
 }
 
@@ -42,4 +46,35 @@ export function mpCapsuleRect() : CapsuleRect | null {
 	}
 	// #endif
 	return null
+}
+
+/** 折叠屏窗口宽度变化自愈（微信端专属实现，其他端空实现）：折叠/展开切换后 wxss rpx 基准、
+ *  JS 度量与滚动位置三方同步不可靠，实测出现布局残留错乱（内容上下压叠、行被底部导航叠住）。
+ *  防抖 400ms 且宽度变化超阈值后 redirectTo 重载当前页，全部按新窗口重新初始化；
+ *  阅读进度经持久化恢复，无数据损失。reloadUrl 由调用页传入自身完整路径（含参数）。 */
+// #ifdef MP-WEIXIN
+let resizeReloadTimer = -1
+let resizeReloadW = 0
+let resizeReloadInited = false
+// #endif
+export function scheduleResizeReload(width : number, reloadUrl : string) : void {
+	// #ifdef MP-WEIXIN
+	// 首次调用仅记录基准（页面 onShow 也会触发，避免冷启动误重载）
+	if (!resizeReloadInited) {
+		resizeReloadInited = true
+		resizeReloadW = width
+		return
+	}
+	if (Math.abs(width - resizeReloadW) < 8) {
+		return
+	}
+	resizeReloadW = width
+	if (resizeReloadTimer >= 0) {
+		clearTimeout(resizeReloadTimer)
+	}
+	resizeReloadTimer = setTimeout(() : void => {
+		resizeReloadTimer = -1
+		uni.redirectTo({ url: reloadUrl })
+	}, 400)
+	// #endif
 }

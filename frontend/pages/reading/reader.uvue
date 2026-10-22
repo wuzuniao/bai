@@ -193,6 +193,7 @@
 			:nav-top="navTop"
 			:page-w="pageW"
 			:quote-align="false"
+			:thought-card-max-w="0"
 			:page-h="pageH"
 			:metrics="metrics"
 			:segs="selSegs"
@@ -304,7 +305,7 @@
 	import { buildParaLayout } from '@/utils/textlayout.uts'
 	// #endif
 	import { flipCurrentLayerStyle, flipPrevLayerStyle, flipNextLayerStyle, flipCoverNextOpacity, flipCoverCurrentOpacity } from '@/utils/flipstyle.uts'
-	import { mpCapsuleRect } from '@/utils/layout.uts'
+	import { mpCapsuleRect, scheduleResizeReload } from '@/utils/layout.uts'
 	import SelectionPopover from '@/components/selection/SelectionPopover.uvue'
 	import ReaderControl from '@/components/reader/ReaderControl.uvue'
 	import ReaderFooterBar from '@/components/reader/ReaderFooterBar.uvue'
@@ -1506,6 +1507,8 @@
 		invalidateLayoutMeasure()
 		clampPageIndex()
 		clearSelection()
+		// 微信端折叠切换自愈（其他端空实现）：分页排版度量按新窗口重载（进度持久化自动恢复）
+		scheduleResizeReload(win.windowWidth, '/pages/reading/reader?bookId=' + bookId.value)
 	})
 	// #endif
 

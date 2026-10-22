@@ -3,42 +3,48 @@
 		<scroll-view class="scroll" direction="vertical" :show-scrollbar="false" @scroll="onScrollClear">
 			<view class="main" :style="'padding-top:' + topInset + 'px'">
 				<!-- 诗文卡片（令牌 poem-card: 白底 圆角 xl 24px 内边距 24x16） -->
-				<view class="poem-card">
-					<!-- 诗文主体：16 行，每行 7 字（拼音 + 汉字）+ 行尾标点；长按整行选中（诗行即句）弹出划词气泡 -->
+				<view class="poem-card" :style="cardStyle">
+					<!-- 诗文主体：渲染行模型（窄屏 16 行每行 7 字；宽屏 8 行每行一句=并置两个笔记行 16 单元），
+					     单元 id 恒按笔记行号编码（poem-unit-<origin>-<col>），划词协议跨模式一致 -->
 					<view class="poem-body">
 						<view
-							v-for="(line, li) in poemLines"
-							:key="li"
+							v-for="(rl, ri) in renderLines"
+							:key="ri"
 							class="poem-line"
-							:class="lineClass(li)"
-							:id="'poem-line-' + li"
-							@longpress="onLineLongPress(li, $event)"
-							@click="onPoemTap(li, $event)"
+							:class="rl.gapClass"
+							:id="'poem-line-' + ri"
+							@longpress="onLineLongPress(ri, $event)"
+							@click="onPoemTap(ri, $event)"
 						>
-							<view v-if="lineSelRange(li) != null" class="poem-sel-band" :style="lineSelStyle(li)"></view>
 							<view
-								v-for="(ub, ui) in lineUnderlineBands(li)"
+								v-for="(sb, si) in rl.selStyles"
+								:key="'s' + si"
+								class="poem-sel-band"
+								:style="sb"
+							></view>
+							<view
+								v-for="(ub, ui) in rl.underlineStyles"
 								:key="'u' + ui"
 								class="poem-line-band poem-line-band-underline"
-								:style="bandStyle(ub)"
+								:style="ub"
 							></view>
 							<view
-								v-for="(tb, ti) in lineThoughtBands(li)"
+								v-for="(tb, ti) in rl.thoughtStyles"
 								:key="'t' + ti"
 								class="poem-line-band poem-line-band-thought"
-								:style="bandStyle(tb)"
+								:style="tb"
 							></view>
 							<view
-								v-for="(c, ci) in line.chars"
+								v-for="(u, ci) in rl.units"
 								:key="ci"
 								class="poem-unit"
-								:id="'poem-unit-' + li + '-' + ci"
+								:class="u.isPunct ? 'poem-unit--punct' : ''"
+								:style="u.unitStyle"
+								:id="'poem-unit-' + u.origin + '-' + u.col"
 							>
-								<text class="poem-pinyin">{{ c.pinyin }}</text>
-								<text class="poem-char">{{ c.char }}</text>
-							</view>
-							<view class="poem-punct-wrap" :id="'poem-unit-' + li + '-7'">
-								<text class="poem-punct">{{ line.punct }}</text>
+								<text class="poem-pinyin" :style="u.pinyinStyle">{{ u.isPunct ? '' : u.pinyin }}</text>
+								<text v-if="u.isPunct" class="poem-punct" :style="u.textStyle">{{ u.punct }}</text>
+								<text v-else class="poem-char" :style="u.textStyle">{{ u.char }}</text>
 							</view>
 						</view>
 					</view>
@@ -56,6 +62,7 @@
 			:nav-top="topInset"
 			:page-w="pageW"
 			:quote-align="true"
+			:thought-card-max-w="thoughtCardMaxW"
 			:page-h="pageH"
 			:metrics="poemMetrics"
 			:segs="selSegs"
@@ -86,6 +93,7 @@
 	import { useUserStore, avatarSrcOf } from '@/stores/user.uts'
 	import { SelSpan, SpanSeg, TextMetrics, ParaRect, ShareQuoteCtx, Thought, UnderlineEntry, Paragraph, normalizeSpan, setActiveBookId, loadUnderlines, loadThoughts, fetchNotesToCache, VIRTUAL_BOOK_ID, SENTENCE_END_CHARS, thoughtAt, spanOfThought, thoughtTextOfSpan, buildSpanSegs } from '@/utils/readerTypes.uts'
 	import { POEM_LINES, PoemLine } from '@/utils/poem.uts'
+	import { scheduleResizeReload } from '@/utils/layout.uts'
 	import { t } from '@/utils/i18n.uts'
 	// 词典注册（首页文案；诗词内容不翻译）
 	import '@/utils/locales/index.uts'
@@ -130,6 +138,8 @@
 		pageH.value = win.windowHeight
 		poemMetrics.value = buildPoemMetrics()
 		clearSelection()
+		// 微信端折叠切换自愈（其他端空实现）：布局残留错乱按新窗口重载
+		scheduleResizeReload(pageW.value, '/pages/index/index')
 	}
 	// #ifndef APP-ANDROID || APP-IOS || APP-HARMONY
 	onResize(() : void => {
@@ -152,14 +162,6 @@
 		loadHomeNotes()
 	})
 
-	/** 行间距：联内行 12px，联首行 20px（首行无间距） */
-	function lineClass(index: number) : string {
-		if (index === 0) {
-			return ''
-		}
-		return index % 2 === 1 ? 'poem-line-gap-inner' : 'poem-line-gap-outer'
-	}
-
 	/** ===== 首页诗划词气泡（复用阅读页 SelectionPopover：选区/手柄/拖动与五项动作内聚组件） ===== */
 	/** 诗行字符容量：7 字 + 行尾标点（选区/划线/想法统一坐标口径，标点占每行末位 idx=7） */
 	const LINE_CHAR_COUNT = 8
@@ -175,21 +177,183 @@
 	const contentColor = READER_THEME_LIGHT.titleColor
 	const panelShadow = READER_THEME_LIGHT.panelShadow
 
-	/** 排版度量构建（划词换算）：诗行单行无缩进，行盒高 = 拼音区 27rpx + 汉字行高 50rpx = 77rpx；
+	/** ===== 宽屏行合并（每行放一句）：窗口宽 ≥640px 时 16 行并置为 8 行（一行 = 一句 = 两个笔记行）。
+	 *  判定基于窗口宽（诗卡突破内容列限宽自适应扩展）；微信小程序窗口宽不受页面控制，
+	 *  窗口不变（约 390-470px）则恒窄屏。 */
+	const WIDE_MIN_W = 640
+	const WIDE_CARD_MAX_W = 720
+	const WIDE_CARD_PAD = 24
+	const isWide = computed(() : boolean => pageW.value >= WIDE_MIN_W)
+	const wideCardW = computed(() : number => Math.min(pageW.value - 40, WIDE_CARD_MAX_W))
+	const wideUnitW = computed(() : number => Math.floor((wideCardW.value - WIDE_CARD_PAD * 2) / (LINE_CHAR_COUNT * 2)))
+	const cardStyle = computed(() : string => isWide.value ? 'width:' + wideCardW.value + 'px;padding:' + WIDE_CARD_PAD + 'px' : '')
+
+	/** rpx→px 换算因子（按端派生，禁用 uni.upx2px——uni-app x H5 端无此 API（实测 undefined），
+	 *  微信端原生 rpx=窗口宽/750；App 端 rpx 冻结上限 750；Web 端 rpx 冻结上限 480，因子须与
+	 *  pages.json globalStyle 的冻结基准一致，否则划词换算与 CSS 渲染错位） */
+	const rpxF = computed(() : number => {
+		let base = pageW.value
+		// #ifdef WEB
+		base = Math.min(base, 480)
+		// #endif
+		// #ifdef APP-ANDROID || APP-IOS || APP-HARMONY
+		base = Math.min(base, 750)
+		// #endif
+		return base / 750
+	})
+
+	/** 排版度量构建（划词换算，窄屏）：诗行单行无缩进，行盒高 = 拼音区 27rpx + 汉字行高 50rpx = 77rpx；
 	 *  字步进 69rpx（单元 54 + 右距 15）均匀映射前 7 列，行尾标点区 27rpx 收敛于末列；
 	 *  perLine 借用阅读页「首行容量 = perLine - 2」公式：首页无缩进容量恒满行，取行字符数 + 2，
 	 *  使拖动映射的行数钳制恒为 0（否则行底触点会被误判到第二行、字符恒收敛到行尾标点，手柄不跟字） */
 	function buildPoemMetrics() : TextMetrics {
+		const f = rpxF.value
 		return {
 			perLine: LINE_CHAR_COUNT + 2,
-			lineH: uni.upx2px(77),
-			charW: uni.upx2px(69),
-			fullCharW: uni.upx2px(69),
+			lineH: 77 * f,
+			charW: 69 * f,
+			fullCharW: 69 * f,
 			indentPx: 0
 		} as TextMetrics
 	}
-	/** 排版度量（ref：窗口尺寸变化后重建，rpx 换算系数随窗口宽变化） */
-	const poemMetrics = ref(buildPoemMetrics())
+	/** 排版度量（computed：窗口尺寸变化后随 isWide/单元宽重建，rpx 换算系数随窗口宽变化） */
+	const poemMetrics = computed<TextMetrics>(() : TextMetrics => {
+		if (!isWide.value) {
+			return buildPoemMetrics()
+		}
+		// 宽屏合并行：行盒高 = 拼音区 + 汉字行高，单元等宽无右距
+		return {
+			perLine: LINE_CHAR_COUNT * 2 + 2,
+			lineH: widePinyinLH.value + wideCharLH.value,
+			charW: wideUnitW.value,
+			fullCharW: wideUnitW.value,
+			indentPx: 0
+		} as TextMetrics
+	})
+
+	/** 想法查看卡片宽度上限（px）：诗行正文宽——窄屏行宽 510rpx（7 字步进 69rpx + 标点 27rpx，
+	 *  与划线条带换算同口径）、宽屏合并行 16 单元宽；正文在页面内居中，卡片居中即与正文对齐 */
+	const thoughtCardMaxW = computed(() : number => {
+		if (!isWide.value) {
+			return 510 * rpxF.value
+		}
+		return wideUnitW.value * (LINE_CHAR_COUNT * 2)
+	})
+
+	/** ===== 渲染行模型（窄屏与宽屏同一套模板/协议） ===== */
+	type PoemRenderUnit = {
+		/** 笔记行号（origin 空间 0-15，单元 id 与划线/想法数据按此编码） */
+		origin : number
+		/** origin 内字符列（0-6 字 / 7 标点） */
+		col : number
+		char : string
+		pinyin : string
+		punct : string
+		isPunct : boolean
+		unitStyle : string
+		pinyinStyle : string
+		textStyle : string
+	}
+	type PoemRenderLine = {
+		units : PoemRenderUnit[]
+		gapClass : string
+		/** 条带样式串（renderLines 内预计算：选区高亮/划线/想法，宽屏合并行内两 origin 各一段） */
+		selStyles : string[]
+		underlineStyles : string[]
+		thoughtStyles : string[]
+	}
+
+	/** 宽屏单元内联样式（覆盖窄屏 rpx CSS：等宽单元无右距，字号/行高随单元宽派生——
+	 *  触发阈值到卡片上限之间窗口跨度大，固定 px 会在窄内容列溢出单元）。
+	 *  标点排版：标点单元贴单元底（flex-end），底部与汉字底对齐（无下坠区） */
+	const wideCharFs = computed(() : number => Math.round(wideUnitW.value * 0.8))
+	const widePinyinFs = computed(() : number => Math.max(10, Math.round(wideUnitW.value * 0.32)))
+	const wideCharLH = computed(() : number => Math.round(wideUnitW.value * 1.24))
+	const widePinyinLH = computed(() : number => Math.max(12, Math.round(wideUnitW.value * 0.48)))
+	const wideUnitStyle = computed(() : string => 'width:' + wideUnitW.value + 'px;margin-right:0px')
+	const widePinyinStyle = computed(() : string => 'width:100%;text-align:center;font-size:' + widePinyinFs.value + 'px;line-height:' + widePinyinLH.value + 'px;padding-top:0px;padding-bottom:0px')
+	const wideCharStyle = computed(() : string => 'font-size:' + wideCharFs.value + 'px;line-height:' + wideCharLH.value + 'px')
+	const widePunctStyle = computed(() : string => 'font-size:' + wideCharFs.value + 'px;line-height:' + wideCharLH.value + 'px')
+	/** 宽屏标点单元：贴单元底（与汉字底对齐），显式高度覆盖窄屏修饰类的 38rpx 定高（防大字号被裁剪成小点） */
+	const widePunctUnitStyle = computed(() : string => 'width:' + wideUnitW.value + 'px;margin-right:0px;justify-content:flex-end;height:' + (widePinyinLH.value + wideCharLH.value) + 'px;padding-bottom:0px')
+
+	/** 渲染行条带样式预计算（vapor 模板对「函数调用作 v-for 源」的循环变量遮蔽不可靠，
+	 *  条带样式在 computed 内算好，模板仅遍历数据属性） */
+	type PoemLineBands = {
+		sel : string[]
+		underline : string[]
+		thought : string[]
+	}
+
+	function bandStylesForUnits(units : PoemRenderUnit[]) : PoemLineBands {
+		const origins : number[] = [] as number[]
+		for (const u of units) {
+			if (origins.indexOf(u.origin) < 0) {
+				origins.push(u.origin)
+			}
+		}
+		const sel : string[] = [] as string[]
+		const underline : string[] = [] as string[]
+		const thought : string[] = [] as string[]
+		for (const origin of origins) {
+			let s = -1
+			let e = -1
+			for (let i = 0; i < units.length; i++) {
+				if (units[i].origin == origin) {
+					if (s < 0) {
+						s = i
+					}
+					e = i
+				}
+			}
+			const r = lineSelRange(origin)
+			if (r != null) {
+				sel.push(selBandStyleOf(s + r[0], s + r[1]))
+			}
+			for (const b of lineUnderlineBands(origin)) {
+				underline.push(decoBandStyleOf(s + b[0], s + b[1]))
+			}
+			for (const b of lineThoughtBands(origin)) {
+				thought.push(decoBandStyleOf(s + b[0], s + b[1]))
+			}
+		}
+		return { sel: sel, underline: underline, thought: thought } as PoemLineBands
+	}
+
+	/** 渲染行序列：窄屏 = 16 行（每行 7 字 + 标点单元）；宽屏 = 8 行（每行一句 = 两笔记行并置 16 单元） */
+	const renderLines = computed<PoemRenderLine[]>(() : PoemRenderLine[] => {
+		const lines : PoemRenderLine[] = []
+		const src = poemLines.value
+		if (!isWide.value) {
+			for (let li = 0; li < src.length; li++) {
+				const line = src[li]
+				const units : PoemRenderUnit[] = []
+				for (let ci = 0; ci < line.chars.length; ci++) {
+					units.push({ origin: li, col: ci, char: line.chars[ci].char, pinyin: line.chars[ci].pinyin, punct: '', isPunct: false, unitStyle: '', pinyinStyle: '', textStyle: '' } as PoemRenderUnit)
+				}
+				units.push({ origin: li, col: LINE_CHAR_COUNT - 1, char: '', pinyin: '', punct: line.punct, isPunct: true, unitStyle: '', pinyinStyle: '', textStyle: '' } as PoemRenderUnit)
+				const bands = bandStylesForUnits(units)
+				lines.push({ units: units, gapClass: li == 0 ? '' : (li % 2 == 1 ? 'poem-line-gap-inner' : 'poem-line-gap-outer'), selStyles: bands.sel, underlineStyles: bands.underline, thoughtStyles: bands.thought } as PoemRenderLine)
+			}
+			return lines
+		}
+		for (let k = 0; k * 2 + 1 < src.length; k++) {
+			const a = src[k * 2]
+			const b = src[k * 2 + 1]
+			const units : PoemRenderUnit[] = []
+			for (let ci = 0; ci < a.chars.length; ci++) {
+				units.push({ origin: k * 2, col: ci, char: a.chars[ci].char, pinyin: a.chars[ci].pinyin, punct: '', isPunct: false, unitStyle: wideUnitStyle.value, pinyinStyle: widePinyinStyle.value, textStyle: wideCharStyle.value } as PoemRenderUnit)
+			}
+			units.push({ origin: k * 2, col: LINE_CHAR_COUNT - 1, char: '', pinyin: '', punct: a.punct, isPunct: true, unitStyle: widePunctUnitStyle.value, pinyinStyle: widePinyinStyle.value, textStyle: widePunctStyle.value } as PoemRenderUnit)
+			for (let ci = 0; ci < b.chars.length; ci++) {
+				units.push({ origin: k * 2 + 1, col: ci, char: b.chars[ci].char, pinyin: b.chars[ci].pinyin, punct: '', isPunct: false, unitStyle: wideUnitStyle.value, pinyinStyle: widePinyinStyle.value, textStyle: wideCharStyle.value } as PoemRenderUnit)
+			}
+			units.push({ origin: k * 2 + 1, col: LINE_CHAR_COUNT - 1, char: '', pinyin: '', punct: b.punct, isPunct: true, unitStyle: widePunctUnitStyle.value, pinyinStyle: widePinyinStyle.value, textStyle: widePunctStyle.value } as PoemRenderUnit)
+			const bands = bandStylesForUnits(units)
+			lines.push({ units: units, gapClass: k % 2 == 0 ? 'poem-line-gap-outer' : 'poem-line-gap-inner', selStyles: bands.sel, underlineStyles: bands.underline, thoughtStyles: bands.thought } as PoemRenderLine)
+		}
+		return lines
+	})
 
 	/** 划词选区镜像（选区真源在气泡组件，spanChanged 同步驱动行内高亮） */
 	const selSpan = ref<SelSpan | null>(null)
@@ -272,46 +436,62 @@
 	const userStore = useUserStore()
 	const shareLogoSrc = computed(() : string => avatarSrcOf(userStore.userInfo))
 
-	/** ===== 渲染函数（模板调用：选区高亮与划线/想法装饰） ===== */
+	/** ===== 渲染函数（选区高亮与划线/想法装饰；条带样式经 renderLines 预计算，模板直读属性） ===== */
 
-	/** 行选区覆盖区间（该行被覆盖的字符闭区间 [start, end]；无覆盖返回 null） */
-	function lineSelRange(li : number) : number[] | null {
+	/** 笔记行号 → 渲染行索引（宽屏合并行：两 origin 同属一个渲染行） */
+	function lineIndexOfOrigin(origin : number) : number {
+		return isWide.value ? Math.floor(origin / 2) : origin
+	}
+
+	/** 选区高亮条内联样式（渲染单元索引空间；纵向盖汉字行盒——拼音区不着色，top/height 显式绑定；
+	 *  窄屏行尾标点区右缘=行内容宽 510rpx 特判） */
+	function selBandStyleOf(ciStart : number, ciEnd : number) : string {
+		const step = poemMetrics.value.charW
+		if (isWide.value) {
+			return 'left:' + ciStart * step + 'px;top:' + widePinyinLH.value + 'px;width:' + (ciEnd - ciStart + 1) * step + 'px;height:' + wideCharLH.value + 'px'
+		}
+		const f = rpxF.value
+		const right = ciEnd >= LINE_CHAR_COUNT - 1 ? 510 * f : (ciEnd + 1) * step
+		return 'left:' + ciStart * step + 'px;top:' + 27 * f + 'px;width:' + (right - ciStart * step) + 'px;height:' + 50 * f + 'px'
+	}
+
+	/** 划线/想法下划线内联样式（只含 left/width——纵向「贴行底细线」由 .poem-line-band 类固定；
+	 *  宽屏合并行单元等宽纯线性——窄屏「行尾标点区右缘=行内容宽 510rpx」特判仅适用于窄屏
+	 *  行索引空间，合并行索引≥7 不代表行尾） */
+	function decoBandStyleOf(ciStart : number, ciEnd : number) : string {
+		const step = poemMetrics.value.charW
+		if (isWide.value) {
+			return 'left:' + ciStart * step + 'px;width:' + (ciEnd - ciStart + 1) * step + 'px'
+		}
+		const f = rpxF.value
+		const right = ciEnd >= LINE_CHAR_COUNT - 1 ? 510 * f : (ciEnd + 1) * step
+		return 'left:' + ciStart * step + 'px;width:' + (right - ciStart * step) + 'px'
+	}
+
+	/** 行选区覆盖区间（origin 空间：该行被覆盖的字符闭区间 [start, end]；无覆盖返回 null） */
+	function lineSelRange(origin : number) : number[] | null {
 		const s = selSpan.value
 		if (s == null) {
 			return null
 		}
 		const n = normalizeSpan(s)
-		if (li < n.fromOrigin || li > n.toOrigin) {
+		if (origin < n.fromOrigin || origin > n.toOrigin) {
 			return null
 		}
-		return [li == n.fromOrigin ? n.fromStart : 0, li == n.toOrigin ? n.toEnd : LINE_CHAR_COUNT - 1]
+		return [origin == n.fromOrigin ? n.fromStart : 0, origin == n.toOrigin ? n.toEnd : LINE_CHAR_COUNT - 1]
 	}
 
-	/** 行选区高亮条内联样式（px；行内连续横向条带，纵向只盖汉字行盒——拼音区不着色。
-	 *  字符横向步进 69rpx 为显式布局值精确换算，行尾标点区右缘=行内容宽 510rpx；
-	 *  依赖行盒宽=内容宽（poem-body 交叉轴居中不拉伸），条 left=0 即首字左缘） */
-	function lineSelStyle(li : number) : string {
-		const r = lineSelRange(li)
-		if (r == null) {
-			return ''
-		}
-		const step = poemMetrics.value.charW
-		const right = r[1] >= LINE_CHAR_COUNT - 1 ? uni.upx2px(510) : (r[1] + 1) * step
-		const left = r[0] * step
-		return 'left:' + left + 'px;top:' + uni.upx2px(27) + 'px;width:' + (right - left) + 'px;height:' + uni.upx2px(50) + 'px'
-	}
-
-	/** 行内划线条带区间（划线记录的字符区间对剔除想法覆盖段——想法优先，
+	/** 行内划线条带区间（origin 空间：划线记录的字符区间对剔除想法覆盖段——想法优先，
 	 *  被想法覆盖的区域只显示正蓝想法线、不残留灰色划线） */
-	function lineUnderlineBands(li : number) : number[][] {
+	function lineUnderlineBands(origin : number) : number[][] {
 		let ranges : number[][] = [] as number[][]
 		for (const e of underlines.value) {
-			if (e.cid == 0 && e.origin == li) {
+			if (e.cid == 0 && e.origin == origin) {
 				ranges = e.ranges
 				break
 			}
 		}
-		for (const b of lineThoughtBands(li)) {
+		for (const b of lineThoughtBands(origin)) {
 			const next : number[][] = [] as number[][]
 			for (const r of ranges) {
 				if (r[1] < b[0] || r[0] > b[1]) {
@@ -330,22 +510,15 @@
 		return ranges
 	}
 
-	/** 行内想法条带区间（跨行想法在该行的投影，单段闭区间） */
-	function lineThoughtBands(li : number) : number[][] {
+	/** 行内想法条带区间（origin 空间：跨行想法在该行的投影，单段闭区间） */
+	function lineThoughtBands(origin : number) : number[][] {
 		const bands : number[][] = []
 		for (const t of thoughts.value) {
-			if (t.fromOrigin <= li && li <= t.toOrigin) {
-				bands.push([t.fromOrigin == li ? t.fromStart : 0, t.toOrigin == li ? t.toEnd : LINE_CHAR_COUNT - 1])
+			if (t.fromOrigin <= origin && origin <= t.toOrigin) {
+				bands.push([t.fromOrigin == origin ? t.fromStart : 0, t.toOrigin == origin ? t.toEnd : LINE_CHAR_COUNT - 1])
 			}
 		}
 		return bands
-	}
-
-	/** 装饰条带内联样式（横向几何与选区高亮条同口径：left/width，纵向位置固定于样式类） */
-	function bandStyle(band : number[]) : string {
-		const step = poemMetrics.value.charW
-		const right = band[1] >= LINE_CHAR_COUNT - 1 ? uni.upx2px(510) : (band[1] + 1) * step
-		return 'left:' + band[0] * step + 'px;width:' + (right - band[0] * step) + 'px'
 	}
 
 	/** ===== 划词协议（选区状态在气泡组件，锚点实测与拖动行矩形由本页查询回传） ===== */
@@ -369,19 +542,37 @@
 		return [start, end]
 	}
 
-	/** 行矩形 → 拖动映射缓存项（行间 margin 空隙以上一行下界补齐消除死区） */
+	/** 行矩形 → 拖动映射缓存项（行间 margin 空隙以上一行下界补齐消除死区）。
+	 *  宽屏合并行：一个渲染行并置两个笔记段——len=16、firstLen=8、secondOrigin=后段行号，
+	 *  气泡组件触点字符索引超前段长度时切分到后段（无合并时字段缺省行为不变） */
 	function buildDragRects(rects : NodeInfo[]) : ParaRect[] {
 		const dragRects : ParaRect[] = []
-		for (let i = 0; i < rects.length && i < poemLines.value.length; i++) {
-			dragRects.push({
-				cid: 0,
-				origin: i,
-				left: rects[i].left,
-				top: rects[i].top,
-				bottom: rects[i].bottom,
-				len: LINE_CHAR_COUNT,
-				from: 0
-			} as ParaRect)
+		const lines = renderLines.value
+		for (let ri = 0; ri < rects.length && ri < lines.length; ri++) {
+			const units = lines[ri].units
+			if (isWide.value && units.length > LINE_CHAR_COUNT) {
+				dragRects.push({
+					cid: 0,
+					origin: units[0].origin,
+					left: rects[ri].left,
+					top: rects[ri].top,
+					bottom: rects[ri].bottom,
+					len: units.length,
+					from: 0,
+					firstLen: LINE_CHAR_COUNT,
+					secondOrigin: units[units.length - 1].origin
+				} as ParaRect)
+			} else {
+				dragRects.push({
+					cid: 0,
+					origin: ri,
+					left: rects[ri].left,
+					top: rects[ri].top,
+					bottom: rects[ri].bottom,
+					len: LINE_CHAR_COUNT,
+					from: 0
+				} as ParaRect)
+			}
 		}
 		for (let i = 1; i < dragRects.length; i++) {
 			if (dragRects[i].top > dragRects[i - 1].bottom) {
@@ -391,31 +582,33 @@
 		return dragRects
 	}
 
-	/** 长按诗行：整行选中（诗行即句，对齐阅读页句间吸附语义），选区在气泡组件内建立；
+	/** 长按诗行：整行选中（窄屏诗行即句、宽屏合并行即一句，对齐阅读页句间吸附语义），选区在气泡组件内建立；
 	 *  同批次预查全部行矩形回传拖动映射缓存——拖动开始事件里的异步查询回来前 touchmove
 	 *  会因映射为空被丢弃（表现为主柄拖不动），长按时预查使拖动首帧即跟手 */
-	function onLineLongPress(li : number, e : UniTouchEvent) : void {
+	function onLineLongPress(ri : number, e : UniTouchEvent) : void {
 		if (e.touches.length == 0) {
 			return
 		}
-		onLineLongPressAt(li, e.touches[0].clientX)
+		onLineLongPressAt(ri, e.touches[0].clientX)
 	}
 
-	/** 长按核心（触摸与 Web 鼠标桥接共用；pressX 为按点视口横坐标，列命中换算用） */
-	function onLineLongPressAt(li : number, pressX : number) : void {
+	/** 长按核心（触摸与 Web 鼠标桥接共用；pressX 为按点视口横坐标，列命中按渲染单元查表换算 origin/列） */
+	function onLineLongPressAt(ri : number, pressX : number) : void {
 		const clientX = pressX
 		uni.createSelectorQuery().selectAll('.poem-line').boundingClientRect((rects : NodeInfo[]) : void => {
-			if (rects == null || li >= rects.length) {
+			if (rects == null || ri >= rects.length) {
 				return
 			}
 			popoverRef.value?.setDragRects(buildDragRects(rects))
-			// 长按字符列命中想法区间时恢复该想法的完整选区（含划线区域，默认高亮想法选区，
+			// 长按字符单元命中想法区间时恢复该想法的完整选区（含划线区域，默认高亮想法选区，
 			// 与阅读页「句间吸附前判定想法」同语义）；否则按句选取——句号结尾的才是一句，
 			// 逗号行与句号行构成一联一起选中（与阅读页句间吸附同语义）
-			const col = Math.max(0, Math.min(Math.floor((clientX - rects[li].left) / poemMetrics.value.charW), LINE_CHAR_COUNT - 1))
-			const range = sentenceRangeOf(li)
+			const units = renderLines.value[ri].units
+			const ci = Math.max(0, Math.min(Math.floor((clientX - rects[ri].left) / poemMetrics.value.charW), units.length - 1))
+			const unit = units[ci]
+			const range = sentenceRangeOf(unit.origin)
 			let span : SelSpan
-			const hit = thoughtAt(thoughts.value, 0, li, col)
+			const hit = thoughtAt(thoughts.value, 0, unit.origin, unit.col)
 			if (hit != null) {
 				// 长按列命中想法区间：恢复该想法的完整选区（含划线区域，与阅读页「句间吸附前判定想法」同语义）
 				span = spanOfThought(hit)
@@ -432,13 +625,15 @@
 			}
 			// 起点段矩形按选区起点行取（跨行想法的估算基准落在起点行；锚点实测以端点动态查询为准）
 			const sn = normalizeSpan(span)
-			popoverRef.value?.beginSelection(span, rects[sn.fromOrigin].left, rects[sn.fromOrigin].top, clientX, LINE_CHAR_COUNT, 0)
+			const fromRi = lineIndexOfOrigin(sn.fromOrigin)
+			popoverRef.value?.beginSelection(span, rects[fromRi].left, rects[fromRi].top, clientX, LINE_CHAR_COUNT, 0)
 		}).exec()
 	}
 
 	/** 锚点实测（组件 emit queryAnchors）：同批次查询选区两端字符单元与所在行矩形回传差分定位；
-	 *  锚点按选区端点动态取字符单元（idx 0-6 字单元 / 7 行尾标点单元）：组件起点取左缘=字符左边界，
-	 *  终点取右缘（字盒右缘与下一字符左界差单元右距 15rpx，标点包盒右缘=行尾），手柄随拖动后端点吸附 */
+	 *  锚点按选区端点动态取字符单元（idx 0-6 字单元 / 7 行尾标点单元，id 恒按笔记行号编码）：
+	 *  组件起点取左缘=字符左边界，终点取右缘（字盒右缘与下一字符左界差单元右距 15rpx，
+	 *  标点包盒右缘=行尾），手柄随拖动后端点吸附 */
 	function measureAnchors() : void {
 		const s = selSpan.value
 		if (s == null) {
@@ -448,8 +643,8 @@
 		uni.createSelectorQuery()
 			.select('#poem-unit-' + n.fromOrigin + '-' + n.fromStart).boundingClientRect()
 			.select('#poem-unit-' + n.toOrigin + '-' + n.toEnd).boundingClientRect()
-			.select('#poem-line-' + n.fromOrigin).boundingClientRect()
-			.select('#poem-line-' + n.toOrigin).boundingClientRect()
+			.select('#poem-line-' + lineIndexOfOrigin(n.fromOrigin)).boundingClientRect()
+			.select('#poem-line-' + lineIndexOfOrigin(n.toOrigin)).boundingClientRect()
 			.exec((res) => {
 				const arr = res as Array<NodeInfo | null>
 				if (arr[0] == null || arr[1] == null) {
@@ -548,8 +743,8 @@
 	// #endif
 
 	/** 行点击：选区打开时清除（长按松手不触发 click，无冲突）；无选区时行级预筛想法后
-	 *  按点击字符列精判命中——弹查看卡片（锚定该行上下，与阅读页点击查看同语义） */
-	function onPoemTap(li : number, e : UniPointerEvent) : void {
+	 *  按点击字符单元查表换算 origin/列精判命中——弹查看卡片（锚定该行上下，与阅读页点击查看同语义） */
+	function onPoemTap(ri : number, e : UniPointerEvent) : void {
 		// #ifdef WEB
 		// 鼠标长按命中时吞掉随后的合成 click（防止气泡出现即被行点击清除选区）
 		if (webLineTapSuppressed) {
@@ -562,21 +757,29 @@
 			return
 		}
 		let hasThought = false
-		for (const t of thoughts.value) {
-			if (t.fromOrigin <= li && li <= t.toOrigin) {
-				hasThought = true
+		const tapUnits = renderLines.value[ri].units
+		for (const u of tapUnits) {
+			for (const t of thoughts.value) {
+				if (t.fromOrigin <= u.origin && u.origin <= t.toOrigin) {
+					hasThought = true
+					break
+				}
+			}
+			if (hasThought) {
 				break
 			}
 		}
 		if (!hasThought) {
 			return
 		}
-		uni.createSelectorQuery().select('#poem-line-' + li).boundingClientRect((rect : NodeInfo | null) : void => {
+		uni.createSelectorQuery().select('#poem-line-' + ri).boundingClientRect((rect : NodeInfo | null) : void => {
 			if (rect == null) {
 				return
 			}
-			const col = Math.max(0, Math.min(Math.floor((e.clientX - rect.left) / poemMetrics.value.charW), LINE_CHAR_COUNT - 1))
-			const hit = thoughtAt(thoughts.value, 0, li, col)
+			const units = renderLines.value[ri].units
+			const ci = Math.max(0, Math.min(Math.floor((e.clientX - rect.left) / poemMetrics.value.charW), units.length - 1))
+			const unit = units[ci]
+			const hit = thoughtAt(thoughts.value, 0, unit.origin, unit.col)
 			if (hit != null) {
 				popoverRef.value?.showThoughtView(hit.quote, hit.content, rect.bottom, rect.top)
 			}
@@ -626,15 +829,10 @@
 	}
 
 	/* 主内容容器（Figma: 左右边距 16px；底部预留悬浮导航区，滚动到底时卡片与导航保持 24px 间距；
-	   宽屏限宽居中，折叠屏展开态不摊满） */
+	   限宽居中——首页主内容仅诗卡，WEB 端放宽到 750 以承载宽屏「每行一句」诗卡自适应扩展） */
 	.main {
 		width: 100%;
-		/* #ifdef WEB */
-		max-width: 480px;
-		/* #endif */
-		/* #ifndef WEB */
 		max-width: 750px;
-		/* #endif */
 		margin-left: auto;
 		margin-right: auto;
 		box-sizing: border-box;
@@ -688,14 +886,15 @@
 		justify-content: center;
 	}
 
-	/* 拼音（Figma: 10px/10px 灰 #868685 衬线，上下留白 1.5/2.5px） */
+	/* 拼音（Figma: 10px/10px 灰 #868685，上下留白 1.5/2.5px；字体为拼音注音黑体栈——
+	 * 衬线宋体缺音标字形会回退他字体致拼音与汉字错位，两模式统一） */
 	.poem-pinyin {
 		font-size: 19rpx;
 		line-height: 19rpx;
 		padding-top: 3rpx;
 		padding-bottom: 5rpx;
 		color: $bai-mute;
-		font-family: $bai-font-serif;
+		font-family: $bai-font-pinyin;
 	}
 
 	/* 汉字（Figma: 字面 16px 墨黑 #0E0F0C 衬线；行高 1.5em≥字号，官方建议防原生端字形上缘裁剪） */
@@ -706,12 +905,12 @@
 		font-family: $bai-font-serif;
 	}
 
-	/* 行尾标点单元（Figma: 14x19.66px，内容贴底、整体行内居中） */
-	.poem-punct-wrap {
+	/* 行尾标点单元（Figma: 14x19.66px，内容贴底、整体行内居中；
+	 * 统一渲染单元模型后标点即为 poem-unit 加窄宽修饰类，保持行内容总宽 510rpx 口径） */
+	.poem-unit--punct {
 		width: 27rpx;
+		margin-right: 0;
 		height: 38rpx;
-		flex-direction: column;
-		align-items: center;
 		justify-content: flex-end;
 		padding-bottom: 4rpx;
 	}
@@ -740,11 +939,12 @@
 		border-radius: 4rpx;
 	}
 
-	/* 行内装饰条带：划线/想法的连续下划线（贴汉字行盒底，想法条带后渲染覆盖划线；几何由 bandStyle 计算） */
+	/* 行内装饰条带：划线/想法的连续下划线（贴汉字行盒底，想法条带后渲染覆盖划线；几何由 bandStyle 计算。
+	 *  高度用 2px 固定值：原 3rpx≈1.9px 处于 H5 亚像素临界，不同行渲染粗细不一） */
 	.poem-line-band {
 		position: absolute;
-		bottom: 4rpx;
-		height: 3rpx;
+		bottom: 2px;
+		height: 2px;
 	}
 
 	.poem-line-band-underline {

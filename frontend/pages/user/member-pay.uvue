@@ -171,7 +171,7 @@
 		uni.setNavigationBarTitle({ title: t('memberpay.title') })
 	})
 
-	/** 顶部定位：返回按钮取状态栏高度，内容再避让 */
+	/** 顶部定位：返回按钮取状态栏高度，内容再避让；Web 端不渲染返回键，内容距顶收紧 */
 	const backTop = ref(44)
 	const mainTop = ref(90)
 	const win = uni.getWindowInfo()
@@ -179,6 +179,9 @@
 		backTop.value = win.statusBarHeight - 5 + win.windowHeight * 0.006
 		mainTop.value = win.statusBarHeight + 90
 	}
+	// #ifdef WEB
+	mainTop.value = 32
+	// #endif
 
 	/** 返回上一页：页面栈为空（如分享直达）时回退首页 */
 	function goBack() : void {

@@ -37,7 +37,7 @@
 </template>
 
 <script setup lang="uts">
-	import { mpCapsuleRect, CONTENT_CAP_PX } from '@/utils/layout.uts'
+	import { mpCapsuleRect, CONTENT_CAP_PX, scheduleResizeReload } from '@/utils/layout.uts'
 	import { findBook, loadPdfProgress, savePdfProgress, updateBookReading, addReadingSession } from '@/utils/books.uts'
 	import { openPdfSession } from '@/utils/pdfrender.uts'
 	import { t, tf } from '@/utils/i18n.uts'
@@ -153,6 +153,8 @@
 			return
 		}
 		winW.value = w
+		// 微信端折叠切换自愈（其他端空实现）：页图布局按新窗口重载（进度持久化自动恢复）
+		scheduleResizeReload(win.windowWidth, '/pages/reading/pdfreader?bookId=' + bookId.value)
 	})
 	// #endif
 

@@ -113,6 +113,13 @@ typography:
     fontWeight: 400
     lineHeight: 44px
     letterSpacing: 1.5px
+  # 拼音注音：统一用思源黑体栈——黑体的拉丁/音标字形（ì è ó ā 等预组合音标字符）完整，
+  # 衬线宋体缺音标字形会回退他字体导致拼音与汉字错位（令牌 $bai-font-pinyin）
+  poem-pinyin:
+    fontFamily: "Source Han Sans SC", "Noto Sans SC", "Noto Sans", sans-serif
+    fontSize: 13px
+    fontWeight: 400
+    lineHeight: 20px
   poem-meta:
     fontFamily: "Source Han Sans SC", "Noto Sans SC", "思源黑体", Inter, system-ui, sans-serif
     fontSize: 14px
@@ -229,6 +236,7 @@ components:
     textColor: "{colors.ink}"
     titleTypography: "{typography.poem-title}"
     bodyTypography: "{typography.poem-body}"
+    pinyinTypography: "{typography.poem-pinyin}"
     metaTypography: "{typography.poem-meta}"
     metaColor: "{colors.body}"
     rounded: "{rounded.xl}"
@@ -321,7 +329,7 @@ components:
 
 显示字体是品牌第二个决定性的声音。**思源黑体**字体族在最大首屏上以 900 字重、64 px 到 126 px 的尺度承载首屏显示。品牌将思源黑体 900 与字重 600 的 **Inter** 搭配用于次级显示 —— 这种厚实、自带专属气质的字体面与 Inter 的中性之间形成的对比，构建出独特的层级：思源黑体 900 用于品牌高光时刻，Inter 600 用于其余一切。
 
-**思源宋体**是系统唯一的衬线之声，且只出现在诗词卡片内部。诗句正文一律以思源宋体渲染（次要兼容通用宋体），以衬线的笔触还原纸上阅读的古典质感；而诗词卡片内的标题与作者元信息，连同卡片之外的导航、按钮、表单与说明文字，全部保持思源黑体 —— 宋体只属于诗句正文，黑体属于其余一切。
+**思源宋体**是系统唯一的衬线之声，且只出现在诗词卡片内部。诗句正文一律以思源宋体渲染（次要兼容通用宋体），以衬线的笔触还原纸上阅读的古典质感；而诗词卡片内的标题与作者元信息，连同卡片之外的导航、按钮、表单与说明文字，全部保持思源黑体 —— 宋体只属于诗句正文，黑体属于其余一切。拼音注音统一使用思源黑体栈（`poem-pinyin`）—— 黑体的拉丁与音标字形完整，避免衬线字体缺音标字形时拼音与汉字错位。
 
 卡片普遍采用胶囊圆角 —— `{rounded.xl}` 24 px 是品牌标志性的卡片圆角。按钮采用同样的 24 px 胶囊矩形造型。品牌绝不在 UI 元素上使用尖角；这种视觉上的柔和感正是其友好调性的一部分。
 

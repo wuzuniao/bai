@@ -51,6 +51,7 @@ $bai-rounded-pill: 9999px; // 状态胶囊/圆形
 /* ─── 字体族（DESIGN_bai.md typography；小程序端降级系统字体） ─── */
 $bai-font-ui: 'Source Han Sans SC', 'Noto Sans SC', sans-serif; // 界面思源黑体
 $bai-font-serif: 'Songti SC', 'Noto Serif SC', serif;           // 诗句正文宋体（仅诗句）
+$bai-font-pinyin: 'Source Han Sans SC', 'Noto Sans SC', 'Noto Sans', sans-serif; // 诗词拼音注音（黑体拉丁/音标字形完整，防回退错位）
 
 /* ─── 阴影（层级规范：静态卡片无阴影靠表层对比；以下仅浮层/悬浮件提升阴影） ─── */
 $bai-shadow-nav: 0rpx 15rpx 58rpx rgba($bai-black, 0.06);       // 底部悬浮导航
