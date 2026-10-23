@@ -828,8 +828,9 @@ generate_backend_env() {
 
   local env_file="$INSTALL_DIR/backend/.env"
 
-  # 保留已有的 微信 / auth 配置（若 .env 已存在）
+  # 保留已有的 微信 / auth / COS 配置（若 .env 已存在）
   local wx_appid="" wx_secret="" auth_token=""
+  local cos_secret_id="" cos_secret_key="" cos_bucket="" cos_region="" cos_appid="" cos_custom_domain=""
   local project_name="" api_v1=""
   if [[ -f "$env_file" ]]; then
     project_name=$(grep -E "^PROJECT_NAME=" "$env_file" 2>/dev/null | cut -d= -f2- || true)
@@ -837,13 +838,20 @@ generate_backend_env() {
     wx_appid=$(grep -E "^WX_APPID="             "$env_file" 2>/dev/null | cut -d= -f2- || true)
     wx_secret=$(grep -E "^WX_APP_SECRET="       "$env_file" 2>/dev/null | cut -d= -f2- || true)
     auth_token=$(grep -E "^AUTH_SERVICE_TOKEN=" "$env_file" 2>/dev/null | cut -d= -f2- || true)
+    cos_secret_id=$(grep -E "^COS_SECRET_ID="         "$env_file" 2>/dev/null | cut -d= -f2- || true)
+    cos_secret_key=$(grep -E "^COS_SECRET_KEY="       "$env_file" 2>/dev/null | cut -d= -f2- || true)
+    cos_bucket=$(grep -E "^COS_BUCKET="               "$env_file" 2>/dev/null | cut -d= -f2- || true)
+    cos_region=$(grep -E "^COS_REGION="               "$env_file" 2>/dev/null | cut -d= -f2- || true)
+    cos_appid=$(grep -E "^COS_APPID="                 "$env_file" 2>/dev/null | cut -d= -f2- || true)
+    cos_custom_domain=$(grep -E "^COS_CUSTOM_DOMAIN=" "$env_file" 2>/dev/null | cut -d= -f2- || true)
     cp "$env_file" "${env_file}.bak.$(date +%s)"
-    log_info "已备份原 .env，并保留 微信 / auth 配置"
+    log_info "已备份原 .env，并保留 微信 / auth / COS 配置"
   fi
 
   # 项目基本信息：与 .env.example / config.py 字段对齐，缺失时填代码默认值
   : "${project_name:=无足鸟古诗词学习助手}"
   : "${api_v1:=/api/v1}"
+  : "${cos_region:=ap-guangzhou}"
 
   # 服务间通信令牌：复用已有令牌 → 回读 auth 服务 .env 的 SERVICE_TOKEN → 新生成
   # （跨服务自动对齐：auth 侧部署脚本同样回读本服务 .env，任一先部署均收敛为同一令牌；
@@ -886,6 +894,15 @@ AUTH_ISSUER=https://auth.wuzuniao.com
 AUTH_SERVICE_TOKEN=${auth_token}
 AUTH_CLIENT_ID=bai
 REVOCATION_SYNC_INTERVAL_SECONDS=300
+
+# 腾讯云 COS 对象存储（书籍文件云端同步；SecretId/Key 留空则云端同步接口不可用）
+COS_SECRET_ID=${cos_secret_id}
+COS_SECRET_KEY=${cos_secret_key}
+COS_BUCKET=${cos_bucket}
+COS_REGION=${cos_region}
+COS_APPID=${cos_appid}
+COS_CRED_SECONDS=1800
+COS_CUSTOM_DOMAIN=${cos_custom_domain}
 
 # CORS 跨域配置（本地开发源由 main.py 的 allow_origin_regex 统一放行）
 CORS_ALLOW_ORIGINS=https://bai.wuzuniao.com
