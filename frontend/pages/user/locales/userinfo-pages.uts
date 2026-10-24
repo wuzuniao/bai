@@ -38,7 +38,7 @@ const zh: Dict = new Map<string, string>([
 	['messages.shareTitle', '站内信'],
 	['messages.tab', '公告'],
 	['messages.markAll', '全部已读'],
-	['messages.loading', '加载中…'],
+	['messages.loading', '加载中...'],
 	['messages.loadFail', '加载失败，点击重试'],
 	['messages.empty', '暂无公告'],
 	['messages.noMore', '没有更多了'],

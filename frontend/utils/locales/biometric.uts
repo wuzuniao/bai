@@ -5,7 +5,7 @@
 import { registerDict, Dict } from '../i18n'
 
 const zh: Dict = new Map<string, string>([
-	['biometric.authContent', '指纹验证已登录']
+	['biometric.authContent', '请验证指纹以登录']
 ])
 
 const en: Dict = new Map<string, string>([

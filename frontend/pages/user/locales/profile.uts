@@ -50,9 +50,9 @@ const zh: Dict = new Map<string, string>([
 	['profile.confirmCancelDeletion', '确定要取消账号删除吗？'],
 	['profile.deletionCancelled', '账号删除已取消'],
 	['profile.deleteAccountTitle', '删除账号'],
-	['profile.deleteAccountContent', '账号将在24小时后自动删除，业务数据将无法恢复；删除后仍可通过「忘记密码」找回账号'],
+	['profile.deleteAccountContent', '账号将在 24 小时后自动删除，业务数据将无法恢复；删除后仍可通过「忘记密码」找回账号'],
 	['profile.confirmDelete', '确认删除'],
-	['profile.deletionScheduled', '已计划删除，24小时后自动删除'],
+	['profile.deletionScheduled', '已计划删除，24 小时后自动删除'],
 	['profile.confirmLogout', '确定要退出登录吗？'],
 	['profile.loggedOut', '已退出登录']
 ])

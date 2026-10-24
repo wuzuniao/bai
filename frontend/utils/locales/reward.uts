@@ -94,7 +94,7 @@ const en: Dict = new Map<string, string>([
 	['reward.btnClaim', 'Claim'],
 	['reward.btnRead', 'Read'],
 	['toast.dayCheckedAlready', 'Already checked in that day'],
-	['toast.dayNotArrived', 'Not available yet'],
+	['toast.dayNotArrived', 'That day is not open for check-in yet'],
 	['toast.todayCheckedAlready', 'Already checked in today'],
 	['toast.loginFirst', 'Sign in to check in'],
 	['toast.checkinOkN', 'Checked in, +{0} copper'],

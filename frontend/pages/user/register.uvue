@@ -190,6 +190,8 @@
 			}, 1500)
 		}).catch((e) => {
 			const err = e as Error
+			// auth 服务无业务错误码，按错误文案含「验证码」识别验证码类错误并映射本地化文案
+			// （依赖 auth 侧措辞，auth 调整验证码错误提示时此处需联动）
 			const msg = err.message.includes('验证码') ? t('register.codeWrong') : err.message
 			uni.showToast({ title: msg, icon: 'none' })
 		}).finally(() => {

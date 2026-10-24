@@ -521,9 +521,9 @@
 	const deleteConfirmOpen = ref(false)
 	const deleteCloudToo = ref(false)
 
-	/** 所选中是否含云端书籍（已登录且含 id>0）：确认框据此显示云端删除勾选行（离线导入负数 id 书无云端数据） */
+	/** 所选中是否含云端书籍（已登录且黑铁及以上会员，含 id>0）：确认框据此显示云端删除勾选行（离线导入负数 id 书无云端数据；非会员删除云端对象会被后端 403 拒绝，不展示该选项） */
 	const hasCloudSelected = computed(() : boolean => {
-		if (!hasAccessToken()) {
+		if (!hasAccessToken() || !isSyncMember.value) {
 			return false
 		}
 		for (let i = 0; i < books.value.length; i++) {
@@ -972,7 +972,7 @@
 		searchFocused.value = false
 	}
 
-	/** 点击书籍进入阅读：txt 进文本阅读器，PDF 进原文件渲染页（携带书籍 id）；本设备无正文时先尝试从云端下载（会员），失败提示重导 */
+	/** 点击书籍进入阅读：txt 进文本阅读器，PDF 进原文件渲染页（携带书籍 id）；本设备无正文时先尝试从云端下载（会员），下载失败提示重试、无权限提示重导 */
 	async function openBook(book: LocalBook) : Promise<void> {
 		if (book.path.length == 0) {
 			if (userStore.userInfo == null || !isSyncMember.value) {
@@ -983,7 +983,7 @@
 			const ok = await ensureBookLocal(book)
 			uni.hideLoading()
 			if (!ok) {
-				uni.showToast({ title: t('bookshelf.fileMissing'), icon: 'none', duration: 2500 })
+				uni.showToast({ title: t('bookshelf.cloudDownloadFail'), icon: 'none', duration: 2500 })
 				return
 			}
 			books.value = loadBooks()

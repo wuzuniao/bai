@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from ...core.deps import get_current_payload, get_current_user_id
+from ...core.deps import get_current_payload
 from ...core.response import response_service
 from ...schemas.cos import CloudBookRequest
 from ...services.cos_service import cos_service as svc
@@ -65,13 +65,14 @@ async def create_download_url(
 @router.post("/delete")
 async def delete_cloud_object(
     data: CloudBookRequest,
-    user_id: int = Depends(get_current_user_id),
+    payload: dict = Depends(get_current_payload),
 ) -> dict:
     """
     删除云端书籍对象（幂等：对象不存在亦成功）
-    登录即可调用（非会员无法产生云端对象，删除幂等无害）：书架删除勾选
-    「同时删除云端数据」时随业务库删除一并触发，同步移除清单条目
+    与其余对象存储接口同口径：黑铁及以上会员方可操作；
+    书架删除勾选「同时删除云端数据」时随业务库删除一并触发，同步移除清单条目
     """
+    user_id = _member_guard(payload)
     user_dir = await svc.get_user_dir(user_id)
     await svc.delete_cloud_book(user_dir, data.title, data.format)
     return response_service.ok()

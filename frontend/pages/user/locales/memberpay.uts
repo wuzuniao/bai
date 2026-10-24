@@ -29,7 +29,7 @@ const zh: Dict = new Map<string, string>([
 	['memberpay.coinsN', '{0} 金币'],
 	['memberpay.methodLabel', '支付方式'],
 	['memberpay.balanceN', '金币余额（{0} 金币）'],
-	['memberpay.paying', '支付中…'],
+	['memberpay.paying', '支付中...'],
 	['memberpay.confirmPay', '确认支付'],
 	['memberpay.insufficient', '金币不足'],
 	['memberpay.sheetTip', '支付将从金币余额中扣除 {0} 金币，会员权益即时生效'],
