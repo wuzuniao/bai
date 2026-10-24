@@ -81,17 +81,9 @@
 		if (items[index].key === props.active) {
 			return
 		}
-		const target : BottomNavItem = items[index]
-		const targetRoute : string = target.path.substring(1)
-		// 目标页已在页面栈中则回退到该层，否则替换当前页，页面栈深恒定不增长
-		const pages = getCurrentPages()
-		for (let i = pages.length - 1; i >= 0; i--) {
-			if (pages[i].route === targetRoute) {
-				uni.navigateBack({ delta: pages.length - 1 - i })
-				return
-			}
-		}
-		uni.redirectTo({ url: target.path })
+		// 统一经 reLaunch 进入目标页：关闭全部页面后重开目标，任一入口均为全新实例、
+		// 页面栈恒为单层（无栈残留导致的回退旧实例/动画方向不一），与 BackButton 空栈回首页同模式
+		uni.reLaunch({ url: items[index].path })
 	}
 </script>
 
