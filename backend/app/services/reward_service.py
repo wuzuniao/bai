@@ -1,12 +1,13 @@
 """
 活动奖励服务层（货币账户 / 签到 / 阅读时长档位奖励，面向对象：RewardService 类）
 --------------------------------------------------------------------------
-- 业务规则（与 backend/sql/add_activity_coins.sql 头注一致）：
+- 业务规则：
   - 签到：自然周口径，周一~周五 +5 铜币、周六 +10、周日大礼 +20；
     「已连续签到」= 本周从周一起的连续签到天数（断签从缺口次日重计，
     新的一周自然重计，与「断签或领奖后重新计算」文案一致）
   - 阅读档位：按日独立领取，5'/30'/120'/360'/720' 五档，档内奖励=基础+额外赠送；
-    时长上报确认后自动发放已达成的未领取档位（auto_claim_reached），无需手动领取；
+    时长上报确认后自动发放已达成的未领取档位（auto_claim_reached），无需手动领取，
+    发生自动发放时顺带自动签到（当日已签到则静默跳过）；
     领取记录按 (user, date, tier) 唯一——余额被兑换/消费扣除后不影响
     当日领取状态，不会随阅读时长重复发放
   - 自动兑换：铜满 100 进 1 银、银满 100 进 1 金，入账时服务端自动进位，
@@ -512,12 +513,14 @@ class RewardService:
         }
 
 
-    async def auto_claim_reached(self, db: AsyncSession, user_id: int) -> list[dict[str, int]]:
+    async def auto_claim_reached(self, db: AsyncSession, user_id: int) -> dict[str, Any]:
         """
-        自动领取今日已达成且未领取的全部阅读档位奖励（时长上报确认后调用，无需手动领取）
+        自动领取今日已达成且未领取的全部阅读档位奖励（时长上报确认后调用，无需手动领取），
+        发生自动发放时顺带自动签到（当日已签到则静默跳过）
         - 先一次查齐今日分钟数与已领取档位，只对可领档位逐个发放（复用 claim_reading_reward，
           各自提交事务；并发重复领取由唯一约束兜底，业务异常静默跳过待下次发放）
-        - 返回本次实际发放清单（tier_minutes + reward），供前端提示到账
+        - 返回 {"claimed": 本次实际发放清单, "checkin": 本次自动签到结果}，供前端提示到账；
+          checkin 为 None 表示未发生发放或当日已签到
         """
         today = TimezoneUtil.today()
         minutes_row = await db.execute(
@@ -543,7 +546,14 @@ class RewardService:
             except ValueError:
                 continue  # 已领取（并发）/未达标（统计滞后）等业务异常，跳过待下次
             issued.append({"tier_minutes": tier_minutes, "reward": int(result["reward"])})
-        return issued
+        # 发生自动发放时顺带自动签到（每日首次即 5 分钟档达成）；已签到抛业务异常静默跳过
+        checkin_result: dict[str, Any] | None = None
+        if issued:
+            try:
+                checkin_result = await self.checkin(db, user_id)
+            except ValueError:
+                pass
+        return {"claimed": issued, "checkin": checkin_result}
 
 
 # 模块级单例

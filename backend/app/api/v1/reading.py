@@ -2,7 +2,7 @@
 阅读行为路由（/api/v1/reading）
 --------------------------------------------------------------------------
 - 阅读时长：前端按次结算上报（onHide/onUnload），服务端按东八区按日累加；
-  上报确认后自动发放已达成的阅读档位奖励（签到仍由用户手动点击）
+  上报确认后自动发放已达成的阅读档位奖励，发放时顺带自动签到（当日已签到静默跳过）
 - 统计：书架统计卡与福利页的今日/累计分钟数
 - 响应统一经 core/response.py 的 response_service 包装 {code, msg, data}
 """
@@ -28,10 +28,10 @@ async def report_minutes(
     user_id: int = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """单次阅读结算上报（分钟数累加至今日）；随后自动发放已达成的阅读档位奖励"""
+    """单次阅读结算上报（分钟数累加至今日）；随后自动发放已达成的阅读档位奖励，发放时顺带自动签到"""
     stats = await svc.add_minutes(db, user_id, data.minutes)
-    claimed = await reward_svc.auto_claim_reached(db, user_id)
-    return response_service.ok({**stats, "claimed": claimed})
+    auto = await reward_svc.auto_claim_reached(db, user_id)
+    return response_service.ok({**stats, **auto})
 
 
 @router.post("/sessions")

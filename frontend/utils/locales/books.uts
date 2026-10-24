@@ -10,7 +10,8 @@ const zh: Dict = new Map<string, string>([
 	['books.fileMoveFail', '文件迁移失败'],
 	['books.cloudIdInvalid', '云端书籍 id 无效'],
 	['books.cloudParseFail', '云端书籍记录解析失败'],
-	['books.rewardAutoN', '阅读奖励自动领取 +{0} 铜币']
+	['books.rewardAutoN', '阅读奖励自动领取 +{0} 铜币'],
+	['books.rewardAutoCheckinN', '阅读奖励自动领取 +{0}、签到 +{1} 铜币']
 ])
 
 const en: Dict = new Map<string, string>([
@@ -18,7 +19,8 @@ const en: Dict = new Map<string, string>([
 	['books.fileMoveFail', 'Failed to move file'],
 	['books.cloudIdInvalid', 'Invalid cloud book id'],
 	['books.cloudParseFail', 'Failed to parse cloud book record'],
-	['books.rewardAutoN', 'Reading reward auto-claimed +{0} copper']
+	['books.rewardAutoN', 'Reading reward auto-claimed +{0} copper'],
+	['books.rewardAutoCheckinN', 'Reading reward auto-claimed +{0}, check-in +{1} copper']
 ])
 
 registerDict(zh, en)
