@@ -1,0 +1,8 @@
+# 后端代码格式化配置（项目规范 3.1：black 行宽 100 + isort black profile）
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.isort]
+profile = "black"
+line_length = 100

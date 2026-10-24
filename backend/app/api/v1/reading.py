@@ -6,6 +6,7 @@
 - 统计：书架统计卡与福利页的今日/累计分钟数
 - 响应统一经 core/response.py 的 response_service 包装 {code, msg, data}
 """
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -13,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...core.db import get_db
 from ...core.deps import get_current_user_id
+from ...core.exceptions import BusinessError
 from ...core.response import response_service
 from ...schemas.reading import MinutesReport, ReportQuery, SessionsReport
 from ...services.reading_service import reading_service as svc
@@ -28,7 +30,7 @@ async def report_minutes(
     user_id: int = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """单次阅读结算上报（分钟数累加至今日）；随后自动发放已达成的阅读档位奖励，发放时顺带自动签到"""
+    """单次阅读结算上报（分钟数累加至今日，按日封顶 1440 并经节奏校验）；随后自动发放已达成的阅读档位奖励，发放时顺带自动签到"""
     stats = await svc.add_minutes(db, user_id, data.minutes)
     auto = await reward_svc.auto_claim_reached(db, user_id)
     return response_service.ok({**stats, **auto})
@@ -40,7 +42,7 @@ async def report_sessions(
     user_id: int = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """阅读会话流水批量上报（按书/时段明细账；书籍无效的条目跳过），返回落库条数"""
+    """阅读会话流水批量上报（按书/时段明细账；书籍无效或超出日期窗口的条目跳过），返回落库条数"""
     return response_service.ok({"accepted": await svc.add_sessions(db, user_id, data)})
 
 
@@ -63,6 +65,6 @@ async def get_reading_report(
     anchor_date = params.anchor if params.anchor is not None else TimezoneUtil.today()
     try:
         report = await svc.get_report(db, user_id, params.period, anchor_date)
-    except ValueError as e:
+    except BusinessError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return response_service.ok(report)

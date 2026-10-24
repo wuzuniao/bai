@@ -6,6 +6,7 @@
 - 读取从未保存过时 prefs 为 null（前端走本地默认值）
 - 响应统一经 core/response.py 的 response_service 包装 {code, msg, data}
 """
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends

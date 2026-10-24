@@ -5,9 +5,10 @@
 - checkin：今日签到（按星期定档发放铜币）
 - reading-claim：领取阅读档位奖励（当日已读达标且未领过）
 - makeup：会员补签（黑铁及以上每月 3 次，按令牌 roles 声明本地判定）
-- 业务规则错误由服务层抛 ValueError，此处统一转 400
+- 业务规则错误由服务层抛 BusinessError，此处统一转 400
 - 响应统一经 core/response.py 的 response_service 包装 {code, msg, data}
 """
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -15,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...core.db import get_db
 from ...core.deps import get_current_payload, get_current_user_id
+from ...core.exceptions import BusinessError
 from ...core.response import response_service
 from ...schemas.reward import MakeupRequest, ReadingClaimRequest
 from ...services.reward_service import reward_service as svc
@@ -39,7 +41,7 @@ async def checkin(
     """今日签到（重复签到返回 400）"""
     try:
         return response_service.ok(await svc.checkin(db, user_id))
-    except ValueError as e:
+    except BusinessError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
@@ -52,7 +54,7 @@ async def claim_reading_reward(
     """领取阅读档位奖励（未达标/已领取返回 400）"""
     try:
         return response_service.ok(await svc.claim_reading_reward(db, user_id, data.tier_minutes))
-    except ValueError as e:
+    except BusinessError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
@@ -67,5 +69,5 @@ async def makeup_checkin(
     roles = [str(r) for r in (payload.get("roles") or [])]
     try:
         return response_service.ok(await svc.makeup_checkin(db, user_id, data.date, roles))
-    except ValueError as e:
+    except BusinessError as e:
         raise HTTPException(status_code=400, detail=str(e))

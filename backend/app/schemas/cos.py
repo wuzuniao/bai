@@ -1,4 +1,5 @@
 """云端同步接口校验模型（COS 书籍直传/下载/删除）"""
+
 from __future__ import annotations
 
 from pydantic import BaseModel, field_validator

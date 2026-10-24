@@ -1,11 +1,12 @@
 """Pydantic 校验模型聚合"""
+
 from .reading import (
     BookCreate,
+    BookmarkItem,
     BookmarksReplace,
     BookOrderBatch,
     BookOrderItem,
     BookProgressUpdate,
-    BookmarkItem,
     MinutesReport,
     PrefsPut,
     ThoughtCreate,

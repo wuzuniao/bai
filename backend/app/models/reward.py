@@ -5,6 +5,7 @@
 - 外键不设物理约束（项目规范）；金币=100 银、银=100 铜（发放时服务端自动进位）
 - 领取记录按 (user, date, tier) 唯一：余额被兑换/消费不影响当日领取状态、不重复发放
 """
+
 from __future__ import annotations
 
 from datetime import date, datetime
@@ -14,6 +15,7 @@ from sqlalchemy.dialects.mysql import TINYINT
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..core.db import Base
+from ..utils.timezone import TimezoneUtil
 
 
 class CoinAccount(Base):
@@ -24,12 +26,20 @@ class CoinAccount(Base):
 
     id: Mapped[int] = mapped_column(BIGINT, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(BIGINT, nullable=False, comment="业务用户 id（JWT sub）")
-    copper: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0", comment="铜币余额（进位后恒 0-99）")
-    silver: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0", comment="银币余额（进位后恒 0-99）")
-    gold: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0", comment="金币余额")
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default="CURRENT_TIMESTAMP")
+    copper: Mapped[int] = mapped_column(
+        nullable=False, default=0, server_default="0", comment="铜币余额（进位后恒 0-99）"
+    )
+    silver: Mapped[int] = mapped_column(
+        nullable=False, default=0, server_default="0", comment="银币余额（进位后恒 0-99）"
+    )
+    gold: Mapped[int] = mapped_column(
+        nullable=False, default=0, server_default="0", comment="金币余额"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default="CURRENT_TIMESTAMP"
+    )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, server_default="CURRENT_TIMESTAMP", onupdate=datetime.now
+        DateTime, nullable=False, server_default="CURRENT_TIMESTAMP", onupdate=TimezoneUtil.now
     )
 
 
@@ -49,18 +59,24 @@ class CoinTransaction(Base):
         VARCHAR(32), nullable=False, comment="来源 checkin/reading/exchange/consume"
     )
     source_id: Mapped[str] = mapped_column(
-        VARCHAR(64), nullable=False, default="", server_default="", comment="来源单据 id（签到/领取记录 id）"
+        VARCHAR(64),
+        nullable=False,
+        default="",
+        server_default="",
+        comment="来源单据 id（签到/领取记录 id）",
     )
     remark: Mapped[str] = mapped_column(
         VARCHAR(100), nullable=False, default="", server_default="", comment="变动说明"
     )
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default="CURRENT_TIMESTAMP")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default="CURRENT_TIMESTAMP"
+    )
 
 
 class CheckinRecord(Base):
     """每日签到记录（一人一日一行；连续天数由本周记录推导，不落冗余字段）
 
-    会员补签行 is_makeup=1、reward=0（不发奖励，仅恢复签到状态）。
+    会员补签行 is_makeup=1，按被补日期星期基准档足额发放铜币（入当日已获汇总）。
     """
 
     __tablename__ = "checkin_records"
@@ -69,14 +85,21 @@ class CheckinRecord(Base):
     id: Mapped[int] = mapped_column(BIGINT, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(BIGINT, nullable=False)
     checkin_date: Mapped[date] = mapped_column(DATE, nullable=False, comment="签到日期（东八区）")
-    reward: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0", comment="发放铜币数（按星期定档）")
+    reward: Mapped[int] = mapped_column(
+        nullable=False, default=0, server_default="0", comment="发放铜币数（按星期定档）"
+    )
     is_makeup: Mapped[int] = mapped_column(
-        TINYINT(1), nullable=False, default=0, server_default="0",
+        TINYINT(1),
+        nullable=False,
+        default=0,
+        server_default="0",
         comment="是否补签 0=正常签到 1=会员补签（不发奖励，仅恢复签到状态）",
     )
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default="CURRENT_TIMESTAMP")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default="CURRENT_TIMESTAMP"
+    )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, server_default="CURRENT_TIMESTAMP", onupdate=datetime.now
+        DateTime, nullable=False, server_default="CURRENT_TIMESTAMP", onupdate=TimezoneUtil.now
     )
 
 
@@ -91,9 +114,15 @@ class ReadingRewardClaim(Base):
     id: Mapped[int] = mapped_column(BIGINT, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(BIGINT, nullable=False)
     claim_date: Mapped[date] = mapped_column(DATE, nullable=False, comment="达成统计日期（东八区）")
-    tier_minutes: Mapped[int] = mapped_column(nullable=False, comment="档位阈值分钟数（5/30/120/360/720）")
-    reward: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0", comment="发放铜币数（基础+额外赠送）")
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default="CURRENT_TIMESTAMP")
+    tier_minutes: Mapped[int] = mapped_column(
+        nullable=False, comment="档位阈值分钟数（5/30/120/360/720）"
+    )
+    reward: Mapped[int] = mapped_column(
+        nullable=False, default=0, server_default="0", comment="发放铜币数（基础+额外赠送）"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default="CURRENT_TIMESTAMP"
+    )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, server_default="CURRENT_TIMESTAMP", onupdate=datetime.now
+        DateTime, nullable=False, server_default="CURRENT_TIMESTAMP", onupdate=TimezoneUtil.now
     )

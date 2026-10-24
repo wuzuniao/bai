@@ -7,6 +7,7 @@
   前端持 URL 直传/直取 COS，文件字节不经本服务中转
 - 响应统一经 core/response.py 的 response_service 包装 {code, msg, data}
 """
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query

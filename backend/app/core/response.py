@@ -11,6 +11,7 @@
 
     return response_service.ok(await svc.get_summary(db, user_id))
 """
+
 from __future__ import annotations
 
 from typing import Any

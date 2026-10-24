@@ -1,4 +1,5 @@
 """会员购买 Pydantic 校验模型（校验逻辑集中本层，路由不散写）"""
+
 from __future__ import annotations
 
 from pydantic import BaseModel, Field

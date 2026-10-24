@@ -17,6 +17,7 @@
 前端拿不到列举能力；上传/下载走预签名 URL 前端直传直取。删书勾选「同时删除云端数据」
 时经 POST /cos/delete 同步删除云端对象（幂等 204）。
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -30,6 +31,7 @@ from xml.etree import ElementTree
 import httpx
 
 from ..core.config import settings
+from ..core.exceptions import BusinessError
 from ..utils.logger import logger
 
 
@@ -68,8 +70,7 @@ class CosService:
     def sanitize_segment(value: str) -> str:
         """目录/文件名段清洗：剥离路径分隔符与控制字符（保持桶内单层目录约定）"""
         cleaned = "".join(
-            ch for ch in (value or "").strip()
-            if ch.isprintable() and ch not in "/\\"
+            ch for ch in (value or "").strip() if ch.isprintable() and ch not in "/\\"
         )
         return cleaned.strip()
 
@@ -120,15 +121,11 @@ class CosService:
     def _sha256_hex(data: bytes) -> str:
         return hashlib.sha256(data).hexdigest()
 
-    @staticmethod
-    def _hmac_sha256_hex(key: bytes, msg: str) -> str:
-        return hmac.new(key, msg.encode("utf-8"), hashlib.sha256).hexdigest()
-
     async def issue_temp_credentials(self, user_dir: str) -> dict[str, str]:
         """
         调用 STS GetFederationToken 换取限定 user_dir 的临时密钥（内存缓存复用）
         :return: {secret_id, secret_key, token}（均为临时凭证）
-        :raises RuntimeError: STS 调用失败或响应异常
+        :raises BusinessError: STS 调用失败或响应异常（文案面向用户，转 400）
         """
         cached = self._cred_cache.get(user_dir)
         if cached and time.time() < cached[1] - self.CRED_REFRESH_MARGIN:
@@ -150,20 +147,24 @@ class CosService:
         ).encode("utf-8")
 
         # TC3 规范请求（POST JSON：content-type + host 两头参与签名）
-        canonical_request = "\n".join([
-            "POST",
-            "/",
-            "",
-            f"content-type:application/json\nhost:{host}\n",
-            "content-type;host",
-            self._sha256_hex(body),
-        ])
-        string_to_sign = "\n".join([
-            "TC3-HMAC-SHA256",
-            str(now),
-            f"{date}/{service}/tc3_request",
-            self._sha256_hex(canonical_request.encode("utf-8")),
-        ])
+        canonical_request = "\n".join(
+            [
+                "POST",
+                "/",
+                "",
+                f"content-type:application/json\nhost:{host}\n",
+                "content-type;host",
+                self._sha256_hex(body),
+            ]
+        )
+        string_to_sign = "\n".join(
+            [
+                "TC3-HMAC-SHA256",
+                str(now),
+                f"{date}/{service}/tc3_request",
+                self._sha256_hex(canonical_request.encode("utf-8")),
+            ]
+        )
         k_date = hmac.new(
             ("TC3" + settings.COS_SECRET_KEY).encode("utf-8"), date.encode("utf-8"), hashlib.sha256
         ).digest()
@@ -194,7 +195,7 @@ class CosService:
                 data = resp.json()
         except Exception as e:
             logger.warning(f"STS 临时凭证换取失败（user_dir={user_dir}）：{e}")
-            raise RuntimeError("云存储凭证服务暂不可用，请稍后重试")
+            raise BusinessError("云存储凭证服务暂不可用，请稍后重试")
 
         resp_body = data.get("Response") or {}
         err = resp_body.get("Error")
@@ -202,7 +203,7 @@ class CosService:
             logger.warning(
                 f"STS 返回错误（user_dir={user_dir}）：{err.get('Code')} {err.get('Message')}"
             )
-            raise RuntimeError("云存储凭证服务暂不可用，请稍后重试")
+            raise BusinessError("云存储凭证服务暂不可用，请稍后重试")
         cred = resp_body.get("Credentials") or {}
         expired = int(resp_body.get("ExpiredTime") or 0)
         creds = {
@@ -211,7 +212,7 @@ class CosService:
             "token": str(cred.get("Token") or ""),
         }
         if not creds["secret_id"] or not creds["secret_key"] or expired <= 0:
-            raise RuntimeError("云存储凭证服务响应异常，请稍后重试")
+            raise BusinessError("云存储凭证服务响应异常，请稍后重试")
         self._cred_cache[user_dir] = (creds, expired)
         return creds
 
@@ -252,8 +253,7 @@ class CosService:
             creds["secret_key"].encode("utf-8"), key_time.encode("utf-8"), hashlib.sha1
         ).hexdigest()
         pairs = sorted(
-            (self._cos_quote(k.lower()), self._cos_quote(v))
-            for k, v in (params or {}).items()
+            (self._cos_quote(k.lower()), self._cos_quote(v)) for k, v in (params or {}).items()
         )
         param_list = ";".join(k for k, _ in pairs)
         http_params = "&".join(f"{k}={v}" for k, v in pairs)
@@ -296,17 +296,18 @@ class CosService:
         按书名定位用户目录内真实对象 key（扩展名大小写不敏感）
         桶内对象扩展名大小写不保证与业务一致（如手动上传的 .TXT），下载/删除前须定位真实 key
         :return: 真实完整 key；未找到返回 None
-        :raises ValueError: 列举失败（转 400 业务错误）
+        :raises BusinessError: 列举失败（转 400 业务错误）
         """
         clean_title = self.sanitize_segment(title)
         if not clean_title:
             return None
         prefix = f"{user_dir}/{clean_title}."
         status, content = await self._server_cos_request(
-            "GET", "/", {"prefix": prefix, "max-keys": "100"})
+            "GET", "/", {"prefix": prefix, "max-keys": "100"}
+        )
         if status != 200:
             logger.warning(f"COS 对象定位列举失败（user_dir={user_dir}）：HTTP {status}")
-            raise ValueError("云端清单查询失败，请稍后重试")
+            raise BusinessError("云端清单查询失败，请稍后重试")
         want = ext.lower()
         root = ElementTree.fromstring(content)
         fallback: str | None = None
@@ -316,10 +317,10 @@ class CosService:
             dot = name.rfind(".")
             if dot <= 0:
                 continue
-            if name[dot + 1:].lower() != want:
+            if name[dot + 1 :].lower() != want:
                 continue
             # 扩展名精确小写优先（上传恒小写，保证下载到最新上传内容）；其余大小写变体兜底
-            if name[dot + 1:] == ext.lower():
+            if name[dot + 1 :] == ext.lower():
                 return key
             if fallback is None:
                 fallback = key
@@ -360,7 +361,7 @@ class CosService:
                     resp = await client.get(url, timeout=self.HTTP_TIMEOUT)
         except Exception as e:
             logger.warning(f"COS 服务端直调失败（{method} {raw_path}）：{e}")
-            raise ValueError("云端同步服务暂不可用，请稍后重试")
+            raise BusinessError("云端同步服务暂不可用，请稍后重试")
         return resp.status_code, resp.content
 
     # ==================== 云端书籍清单（桶列举直查） ====================
@@ -370,14 +371,15 @@ class CosService:
         查询用户目录下的对象（服务端持永久密钥直查后只回传该目录结果，
         前端拿不到跨目录列举能力）
         :return: [{key, title, format, size, last_modified}]（COS 清单字典序）
-        :raises ValueError: 查询失败（转 400 业务错误）
+        :raises BusinessError: 查询失败（转 400 业务错误）
         """
         prefix = f"{user_dir}/"
         status, content = await self._server_cos_request(
-            "GET", "/", {"prefix": prefix, "max-keys": str(self.LIST_MAX_KEYS)})
+            "GET", "/", {"prefix": prefix, "max-keys": str(self.LIST_MAX_KEYS)}
+        )
         if status != 200:
             logger.warning(f"COS 目录清单查询失败（user_dir={user_dir}）：HTTP {status}")
-            raise ValueError("云端清单查询失败，请稍后重试")
+            raise BusinessError("云端清单查询失败，请稍后重试")
 
         # COS GetBucket 响应 XML 无命名空间（实测），直接按裸标签解析
         root = ElementTree.fromstring(content)
@@ -386,39 +388,41 @@ class CosService:
             key = node.findtext("Key") or ""
             if not key.startswith(prefix) or key == prefix:
                 continue  # 跳过目录占位对象
-            name = key[len(prefix):]
+            name = key[len(prefix) :]
             if "/" in name or name.startswith("."):
                 continue  # 跳过子前缀与隐藏对象（历史 .books-index.json 残留）
             dot = name.rfind(".")
             if dot <= 0:
                 continue  # 无扩展名，非书籍对象
-            fmt = name[dot + 1:].upper()
+            fmt = name[dot + 1 :].upper()
             if fmt not in ("TXT", "PDF"):
                 continue  # 仅收录书籍对象
-            items.append({
-                "key": key,
-                "title": name[:dot],
-                "format": fmt,
-                "size": int(node.findtext("Size") or "0"),
-                "last_modified": (node.findtext("LastModified") or "").strip(),
-            })
+            items.append(
+                {
+                    "key": key,
+                    "title": name[:dot],
+                    "format": fmt,
+                    "size": int(node.findtext("Size") or "0"),
+                    "last_modified": (node.findtext("LastModified") or "").strip(),
+                }
+            )
         return items
 
     async def delete_cloud_book(self, user_dir: str, title: str, ext: str) -> None:
         """
         删除云端书籍对象（幂等：对象不存在 COS 亦返回 204；扩展名大小写不敏感定位真实 key）
-        :raises ValueError: 删除请求失败（转 400 业务错误）
+        :raises BusinessError: 删除请求失败（转 400 业务错误）
         """
         clean_title = self.sanitize_segment(title)
         if not clean_title:
-            raise ValueError("书名不能为空")
+            raise BusinessError("书名不能为空")
         key = await self.resolve_object_key(user_dir, clean_title, ext)
         if key is None:
             return
         status, _ = await self._server_cos_request("DELETE", f"/{key}")
         if status not in (200, 204):
             logger.warning(f"云端对象删除失败（user_dir={user_dir} key={key}）：HTTP {status}")
-            raise ValueError("云端对象删除失败，请稍后重试")
+            raise BusinessError("云端对象删除失败，请稍后重试")
 
 
 # 模块级单例（全项目经 cos_service 使用）

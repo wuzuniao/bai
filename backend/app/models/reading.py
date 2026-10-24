@@ -4,6 +4,7 @@
 - 书籍正文文件不落库（仅存用户端沙盒），本组模型只承载元数据
 - 外键不设物理约束（项目规范），书籍删除时笔记/书签由应用层级联清理
 """
+
 from __future__ import annotations
 
 from datetime import date, datetime
@@ -14,6 +15,7 @@ from sqlalchemy.dialects.mysql import DECIMAL, JSON, TINYINT
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..core.db import Base
+from ..utils.timezone import TimezoneUtil
 
 
 class UserBook(Base):
@@ -28,21 +30,45 @@ class UserBook(Base):
     id: Mapped[int] = mapped_column(BIGINT, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(BIGINT, nullable=False, comment="业务用户 id（JWT sub）")
     title: Mapped[str] = mapped_column(VARCHAR(200), nullable=False, comment="书名")
-    author: Mapped[str] = mapped_column(VARCHAR(100), nullable=False, default="", server_default="", comment="作者")
+    author: Mapped[str] = mapped_column(
+        VARCHAR(100), nullable=False, default="", server_default="", comment="作者"
+    )
     format: Mapped[str] = mapped_column(VARCHAR(10), nullable=False, comment="TXT / PDF")
-    size: Mapped[int] = mapped_column(BIGINT, nullable=False, default=0, server_default="0", comment="文件字节数")
-    chapter_count: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0", comment="章节数（PDF=页数）")
-    has_preface: Mapped[bool] = mapped_column(TINYINT(1), nullable=False, default=False, server_default="0", comment="txt 序章存在性")
-    sort_order: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0", comment="书架手动排序（越小越前）")
-    last_read_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None, comment="最近阅读时刻（NULL=未读）")
-    last_chapter: Mapped[int] = mapped_column(nullable=False, default=-1, server_default="-1", comment="最近章 id（-1=未读）")
-    last_page_index: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0", comment="章内页码 0-based")
-    last_scroll_top: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0", comment="滚动位置 px")
-    last_percent: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0", comment="阅读百分比 0-100（仅 PDF）")
-    pdf_ratio: Mapped[float] = mapped_column(DECIMAL(10, 4), nullable=False, default=0, server_default="0", comment="PDF 首页高/宽比")
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default="CURRENT_TIMESTAMP")
+    size: Mapped[int] = mapped_column(
+        BIGINT, nullable=False, default=0, server_default="0", comment="文件字节数"
+    )
+    chapter_count: Mapped[int] = mapped_column(
+        nullable=False, default=0, server_default="0", comment="章节数（PDF=页数）"
+    )
+    has_preface: Mapped[bool] = mapped_column(
+        TINYINT(1), nullable=False, default=False, server_default="0", comment="txt 序章存在性"
+    )
+    sort_order: Mapped[int] = mapped_column(
+        nullable=False, default=0, server_default="0", comment="书架手动排序（越小越前）"
+    )
+    last_read_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True, default=None, comment="最近阅读时刻（NULL=未读）"
+    )
+    last_chapter: Mapped[int] = mapped_column(
+        nullable=False, default=-1, server_default="-1", comment="最近章 id（-1=未读）"
+    )
+    last_page_index: Mapped[int] = mapped_column(
+        nullable=False, default=0, server_default="0", comment="章内页码 0-based"
+    )
+    last_scroll_top: Mapped[int] = mapped_column(
+        nullable=False, default=0, server_default="0", comment="滚动位置 px"
+    )
+    last_percent: Mapped[int] = mapped_column(
+        nullable=False, default=0, server_default="0", comment="阅读百分比 0-100（仅 PDF）"
+    )
+    pdf_ratio: Mapped[float] = mapped_column(
+        DECIMAL(10, 4), nullable=False, default=0, server_default="0", comment="PDF 首页高/宽比"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default="CURRENT_TIMESTAMP"
+    )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, server_default="CURRENT_TIMESTAMP", onupdate=datetime.now
+        DateTime, nullable=False, server_default="CURRENT_TIMESTAMP", onupdate=TimezoneUtil.now
     )
 
 
@@ -56,24 +82,38 @@ class ReadingNote(Base):
 
     id: Mapped[int] = mapped_column(BIGINT, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(BIGINT, nullable=False)
-    book_id: Mapped[int] = mapped_column(BIGINT, nullable=False, comment="所属书籍（user_books.id）")
+    book_id: Mapped[int] = mapped_column(
+        BIGINT, nullable=False, comment="所属书籍（user_books.id）"
+    )
     note_type: Mapped[int] = mapped_column(TINYINT(1), nullable=False, comment="0=划线 1=想法")
     # 划线定位（type=0）
-    cid: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0", comment="划线章 id")
-    origin: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0", comment="划线段索引")
-    ranges: Mapped[list[list[int]] | None] = mapped_column(JSON, nullable=True, comment="段内字符闭区间")
+    cid: Mapped[int] = mapped_column(
+        nullable=False, default=0, server_default="0", comment="划线章 id"
+    )
+    origin: Mapped[int] = mapped_column(
+        nullable=False, default=0, server_default="0", comment="划线段索引"
+    )
+    ranges: Mapped[list[list[int]] | None] = mapped_column(
+        JSON, nullable=True, comment="段内字符闭区间"
+    )
     # 想法选区（type=1，跨章起点/终点）
-    from_cid: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0", comment="选区起点章 id")
+    from_cid: Mapped[int] = mapped_column(
+        nullable=False, default=0, server_default="0", comment="选区起点章 id"
+    )
     from_origin: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0")
     from_start: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0")
-    to_cid: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0", comment="选区终点章 id")
+    to_cid: Mapped[int] = mapped_column(
+        nullable=False, default=0, server_default="0", comment="选区终点章 id"
+    )
     to_origin: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0")
     to_end: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0")
     quote: Mapped[str | None] = mapped_column(TEXT, nullable=True, comment="划线文本快照（type=1）")
     content: Mapped[str | None] = mapped_column(TEXT, nullable=True, comment="想法正文（type=1）")
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default="CURRENT_TIMESTAMP")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default="CURRENT_TIMESTAMP"
+    )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, server_default="CURRENT_TIMESTAMP", onupdate=datetime.now
+        DateTime, nullable=False, server_default="CURRENT_TIMESTAMP", onupdate=TimezoneUtil.now
     )
 
 
@@ -88,12 +128,18 @@ class ReadingBookmark(Base):
 
     id: Mapped[int] = mapped_column(BIGINT, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(BIGINT, nullable=False)
-    book_id: Mapped[int] = mapped_column(BIGINT, nullable=False, comment="所属书籍（user_books.id）")
+    book_id: Mapped[int] = mapped_column(
+        BIGINT, nullable=False, comment="所属书籍（user_books.id）"
+    )
     chapter_id: Mapped[int] = mapped_column(nullable=False, comment="章 id")
-    page_index: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0", comment="章内页码 0-based")
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default="CURRENT_TIMESTAMP")
+    page_index: Mapped[int] = mapped_column(
+        nullable=False, default=0, server_default="0", comment="章内页码 0-based"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default="CURRENT_TIMESTAMP"
+    )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, server_default="CURRENT_TIMESTAMP", onupdate=datetime.now
+        DateTime, nullable=False, server_default="CURRENT_TIMESTAMP", onupdate=TimezoneUtil.now
     )
 
 
@@ -101,17 +147,25 @@ class ReadingDailyStat(Base):
     """每日阅读时长统计（按日 upsert 累加）"""
 
     __tablename__ = "reading_daily_stats"
-    __table_args__ = (
-        UniqueConstraint("user_id", "stat_date", name="uk_rds_user_date"),
-    )
+    __table_args__ = (UniqueConstraint("user_id", "stat_date", name="uk_rds_user_date"),)
 
     id: Mapped[int] = mapped_column(BIGINT, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(BIGINT, nullable=False)
     stat_date: Mapped[date] = mapped_column(DATE, nullable=False, comment="统计日期（东八区）")
-    minutes: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0", comment="当日累计阅读分钟数")
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default="CURRENT_TIMESTAMP")
+    minutes: Mapped[int] = mapped_column(
+        nullable=False, default=0, server_default="0", comment="当日累计阅读分钟数（按日封顶 1440）"
+    )
+    # 节奏校验锚点（口径见 reading_service）：仅 /minutes 与今日离线聚合写入，历史日补传不写
+    last_report_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+        comment="节奏校验锚点：最近一次受理时长上报的服务器时刻（NULL=尚无上报）",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default="CURRENT_TIMESTAMP"
+    )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, server_default="CURRENT_TIMESTAMP", onupdate=datetime.now
+        DateTime, nullable=False, server_default="CURRENT_TIMESTAMP", onupdate=TimezoneUtil.now
     )
 
 
@@ -126,17 +180,38 @@ class ReadingSession(Base):
 
     id: Mapped[int] = mapped_column(BIGINT, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(BIGINT, nullable=False)
-    book_id: Mapped[int] = mapped_column(BIGINT, nullable=False, comment="书籍 id（user_books.id；删书后保留孤儿行，阅读历史属用户）")
-    book_title: Mapped[str] = mapped_column(
-        VARCHAR(200), nullable=False, default="", server_default="", comment="书名快照（落库时从 user_books.title 取，删书后按书统计展示用）"
+    book_id: Mapped[int] = mapped_column(
+        BIGINT, nullable=False, comment="书籍 id（user_books.id；删书后保留孤儿行，阅读历史属用户）"
     )
-    source: Mapped[str] = mapped_column(VARCHAR(10), nullable=False, default="txt", server_default="txt", comment="阅读器类型 txt / pdf")
-    started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, comment="会话起算时刻（客户端本地时刻）")
+    book_title: Mapped[str] = mapped_column(
+        VARCHAR(200),
+        nullable=False,
+        default="",
+        server_default="",
+        comment="书名快照（落库时从 user_books.title 取，删书后按书统计展示用）",
+    )
+    source: Mapped[str] = mapped_column(
+        VARCHAR(10),
+        nullable=False,
+        default="txt",
+        server_default="txt",
+        comment="阅读器类型 txt / pdf",
+    )
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, comment="会话起算时刻（客户端本地时刻）"
+    )
     ended_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, comment="会话结算时刻")
-    minutes: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0", comment="会话分钟数（向下取整，<1 分钟不入账）")
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default="CURRENT_TIMESTAMP")
+    minutes: Mapped[int] = mapped_column(
+        nullable=False,
+        default=0,
+        server_default="0",
+        comment="会话分钟数（向下取整，<1 分钟不入账）",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default="CURRENT_TIMESTAMP"
+    )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, server_default="CURRENT_TIMESTAMP", onupdate=datetime.now
+        DateTime, nullable=False, server_default="CURRENT_TIMESTAMP", onupdate=TimezoneUtil.now
     )
 
 
@@ -144,14 +219,14 @@ class UserPreference(Base):
     """用户阅读偏好（单行 JSON：阅读设置 + 书架样式）"""
 
     __tablename__ = "user_preferences"
-    __table_args__ = (
-        UniqueConstraint("user_id", name="uk_up_user"),
-    )
+    __table_args__ = (UniqueConstraint("user_id", name="uk_up_user"),)
 
     id: Mapped[int] = mapped_column(BIGINT, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(BIGINT, nullable=False)
     prefs: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, comment="偏好配置 JSON")
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default="CURRENT_TIMESTAMP")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default="CURRENT_TIMESTAMP"
+    )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, server_default="CURRENT_TIMESTAMP", onupdate=datetime.now
+        DateTime, nullable=False, server_default="CURRENT_TIMESTAMP", onupdate=TimezoneUtil.now
     )

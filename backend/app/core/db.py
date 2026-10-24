@@ -15,6 +15,7 @@
     async def demo(db: AsyncSession = Depends(get_db)):
         ...
 """
+
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator

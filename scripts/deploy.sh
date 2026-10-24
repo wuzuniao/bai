@@ -498,9 +498,7 @@ server {
     root /var/www/bai;
     index index.html;
 
-    # 后端 API（路径保持不变：/api/v1/...）
-    # 注意：X-Real-IP 与 X-Forwarded-For 是后端限流器（rate_limit.py）识别真实客户端 IP 的关键，
-    #       缺失会导致限流被 X-Forwarded-For 伪造绕过。切勿删除以下两个 proxy_set_header。
+    # 后端 API（路径保持不变：/api/v1/...）；proxy_set_header 透传真实客户端 IP，属标准反代配置
     set $bai_upstream http://bai-backend:11001;
 
     location /api/ {
@@ -880,6 +878,8 @@ generate_backend_env() {
 PROJECT_NAME=${project_name}
 # API 路由前缀（一般无需修改）
 API_V1_STR=${api_v1}
+# 接口文档开关（生产关闭 /docs /redoc /openapi.json，公网不暴露接口清单；nginx 层亦只反代 /api/ 与 /health）
+DOCS_ENABLED=false
 
 # 数据库连接（使用后端专用用户，连接 mariadb 容器服务名）
 DATABASE_URL=${db_url}
@@ -904,8 +904,9 @@ COS_APPID=${cos_appid}
 COS_CRED_SECONDS=1800
 COS_CUSTOM_DOMAIN=${cos_custom_domain}
 
-# CORS 跨域配置（本地开发源由 main.py 的 allow_origin_regex 统一放行）
+# CORS 跨域配置（生产不放行本地开发源；开发环境经 CORS_ALLOW_LOCALHOST=true 开启 localhost 放行）
 CORS_ALLOW_ORIGINS=https://bai.wuzuniao.com
+CORS_ALLOW_LOCALHOST=false
 EOF
 
   chmod 600 "$env_file"

@@ -6,6 +6,7 @@
 - 全部入库文本字段经 SecuritySanitizer 清洗（控制/零宽字符剥离 + 长度收口），
   清洗器位于 core/sanitizer.py（接口输入安全唯一入口）
 """
+
 from __future__ import annotations
 
 from datetime import date, datetime
@@ -134,7 +135,8 @@ class SessionItem(BaseModel):
     source: str = Field(default="txt", max_length=10)
     started_at: str
     ended_at: str
-    minutes: int = Field(ge=1, le=43200)
+    # 单条上限=单日物理上限（24h）：onHide 结算决定了真实单会话远小于一天（防流水注水）
+    minutes: int = Field(ge=1, le=1440)
     # 离线补传条目为 True（未经过 /reading/minutes 上报链路，服务层按起算日聚合进时长统计）；
     # 在线直传条目为 False（时长已由 /reading/minutes 计入，聚合会双计）
     aggregate_minutes: bool = False

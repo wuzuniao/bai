@@ -5,6 +5,7 @@
 - 书籍正文不落库：后端仅存元数据与阅读进度，正文文件由前端沙盒持有
 - 响应统一经 core/response.py 的 response_service 包装 {code, msg, data}
 """
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException

@@ -1,4 +1,5 @@
 """应用日志工厂（面向对象封装：统一格式与轮转策略，全项目经模块级单例 logger 使用）"""
+
 from __future__ import annotations
 
 import logging

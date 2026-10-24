@@ -4,6 +4,7 @@
 - 字段命名与接口 JSON 保持 snake_case（与既有接口风格一致）
 - 必填项缺失/越界由 Pydantic 抛 422，业务规则错误由服务层抛 ValueError 转 400
 """
+
 from __future__ import annotations
 
 from datetime import date

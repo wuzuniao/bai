@@ -20,6 +20,7 @@
             raise ValueError("书名不能为空")
         return v
 """
+
 from __future__ import annotations
 
 import re
@@ -102,9 +103,7 @@ class SecuritySanitizer:
             if len(value) > items:
                 raise ValueError("配置条目数超出限制")
             return [
-                cls.clean_dict(
-                    item, max_depth=depth - 1, max_items=items, max_str_len=str_len
-                )
+                cls.clean_dict(item, max_depth=depth - 1, max_items=items, max_str_len=str_len)
                 for item in value
             ]
         raise ValueError("配置包含不支持的值类型")

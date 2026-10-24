@@ -6,6 +6,7 @@
 「auth 签发的令牌在本服务可正常本地验签」，后续业务接口经
 Depends(get_current_user_id) 获取当前用户。
 """
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends

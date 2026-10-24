@@ -18,6 +18,7 @@ FastAPI 依赖：认证依赖（面向对象：AuthGuard 守卫类 + 依赖函�
     async def me(user_id: int = Depends(get_current_user_id)):
         ...
 """
+
 from __future__ import annotations
 
 from typing import Any

@@ -2,19 +2,30 @@
 阅读业务服务层（书籍元数据 / 笔记 / 书签 / 时长 / 偏好，面向对象：ReadingService 类）
 --------------------------------------------------------------------------
 - 全部按 user_id 隔离查询；书籍不存在等资源缺失由调用方（路由层）判空转 404
-- 业务规则错误抛 ValueError（路由层统一转 400）
+- 业务规则错误抛 BusinessError（路由层统一转 400）
 - 时间统一东八区（数据库会话已 SET time_zone='+08:00'，此处写入 naive 东八区值）
 """
+
 from __future__ import annotations
 
-from datetime import date, datetime, time as dtime, timedelta
+from datetime import date, datetime
+from datetime import time as dtime
+from datetime import timedelta
 from typing import Any
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models import ReadingBookmark, ReadingDailyStat, ReadingNote, ReadingSession, UserBook, UserPreference
+from ..core.exceptions import BusinessError
+from ..models import (
+    ReadingBookmark,
+    ReadingDailyStat,
+    ReadingNote,
+    ReadingSession,
+    UserBook,
+    UserPreference,
+)
 from ..schemas.reading import (
     BookCreate,
     BookmarksReplace,
@@ -25,26 +36,37 @@ from ..schemas.reading import (
     ThoughtCreate,
     UnderlineUpsert,
 )
+from ..utils.logger import logger
 from ..utils.timezone import TimezoneUtil
-
-# 书籍删除时应用层级联清理的子资源（外键不设物理约束，规范约定）
-NOTE_TYPE_UNDERLINE = 0
-NOTE_TYPE_THOUGHT = 1
-
-# 首页诗词《无题》虚拟书 id：内容全局固定，无 user_books 行（不进书架、无进度），
-# 划线/想法以 book_id=0 落 reading_notes，按 user_id 天然隔离；坐标约定 cid=0 唯一章、
-# origin=诗行序号（0-15）、字符区间含行尾标点（每行 7 字 + 标点共 8 位）
-VIRTUAL_BOOK_ID = 0
 
 
 class ReadingService:
     """阅读业务服务（书籍 / 划线想法 / 书签 / 时长 / 偏好 / 统计报告）"""
 
+    # 笔记类型编码（reading_notes.note_type；书籍删除时应用层级联清理，外键不设物理约束）
+    NOTE_TYPE_UNDERLINE = 0
+    NOTE_TYPE_THOUGHT = 1
+
+    # 首页诗词《无题》虚拟书 id：内容全局固定，无 user_books 行（不进书架、无进度），
+    # 划线/想法以 book_id=0 落 reading_notes，按 user_id 天然隔离；坐标约定 cid=0 唯一章、
+    # origin=诗行序号（0-15）、字符区间含行尾标点（每行 7 字 + 标点共 8 位）
+    VIRTUAL_BOOK_ID = 0
+
+    # 每日阅读分钟数物理上限（24h）：聚合真源按日封顶，超出部分截断（防统计注水）
+    DAILY_MINUTES_CAP = 1440
+
+    # 时长上报节奏校验容差：受理增量 ≤ 距上次上报间隔（分钟）× 系数 + 基础容差。
+    # 系数 2 容纳双设备并发阅读；防批量伪造上报，防不了挂机（离线优先的固有边界）
+    REPORT_TOLERANCE_FACTOR = 2
+    REPORT_BASE_TOLERANCE = 5
+
+    # 会话流水最早日期窗口（天）：起算日早于今日-该天数的条目视为无效跳过
+    SESSION_MAX_AGE_DAYS = 366
+
     @staticmethod
     def fmt_dt(dt: datetime | None) -> str | None:
         """DATETIME → 接口时间格式（YYYY-MM-DD HH:mm:ss）"""
         return None if dt is None else dt.strftime("%Y-%m-%d %H:%M:%S")
-
 
     @staticmethod
     def book_to_dict(book: UserBook) -> dict[str, Any]:
@@ -68,14 +90,12 @@ class ReadingService:
             "updated_at": ReadingService.fmt_dt(book.updated_at),
         }
 
-
     async def get_book(self, db: AsyncSession, user_id: int, book_id: int) -> UserBook | None:
         """按 id 取当前用户的书籍（不存在/非本人返回 None）"""
         result = await db.execute(
             select(UserBook).where(UserBook.id == book_id, UserBook.user_id == user_id)
         )
         return result.scalar_one_or_none()
-
 
     async def list_books(self, db: AsyncSession, user_id: int) -> list[UserBook]:
         """书架列表（按手动排序序返回，本地缓存顺序即该顺序）"""
@@ -86,8 +106,9 @@ class ReadingService:
         )
         return list(result.scalars().all())
 
-
-    async def register_book(self, db: AsyncSession, user_id: int, data: BookCreate) -> tuple[UserBook, bool]:
+    async def register_book(
+        self, db: AsyncSession, user_id: int, data: BookCreate
+    ) -> tuple[UserBook, bool]:
         """
         导入登记：同用户同名书复用已有行（跨设备按书名关联），否则新建
         :return: (书籍, 是否新建)
@@ -135,9 +156,8 @@ class ReadingService:
             await db.commit()
             return book, False
 
-
-    async def update_book(self, 
-        db: AsyncSession, user_id: int, book_id: int, data: BookProgressUpdate
+    async def update_book(
+        self, db: AsyncSession, user_id: int, book_id: int, data: BookProgressUpdate
     ) -> UserBook | None:
         """
         阅读进度回写：任一进度字段出现即视作一次阅读（刷新 last_read_at）
@@ -167,7 +187,6 @@ class ReadingService:
             await db.commit()
         return book
 
-
     async def update_order(self, db: AsyncSession, user_id: int, data: BookOrderBatch) -> int:
         """批量更新书架手动排序（不存在的 id 跳过），返回实际更新行数"""
         updated = 0
@@ -184,7 +203,6 @@ class ReadingService:
             await db.commit()
         return updated
 
-
     async def delete_book(self, db: AsyncSession, user_id: int, book_id: int) -> bool:
         """
         删除书籍（笔记/书签应用层级联），书籍不存在返回 False
@@ -194,12 +212,19 @@ class ReadingService:
         book = await self.get_book(db, user_id, book_id)
         if book is None:
             return False
-        await db.execute(delete(ReadingNote).where(ReadingNote.book_id == book_id, ReadingNote.user_id == user_id))
-        await db.execute(delete(ReadingBookmark).where(ReadingBookmark.book_id == book_id, ReadingBookmark.user_id == user_id))
+        await db.execute(
+            delete(ReadingNote).where(
+                ReadingNote.book_id == book_id, ReadingNote.user_id == user_id
+            )
+        )
+        await db.execute(
+            delete(ReadingBookmark).where(
+                ReadingBookmark.book_id == book_id, ReadingBookmark.user_id == user_id
+            )
+        )
         await db.delete(book)
         await db.commit()
         return True
-
 
     # ==================== 划线与想法 ====================
 
@@ -211,11 +236,14 @@ class ReadingService:
             flat.extend(pair)
         return flat
 
-
     @staticmethod
     def underline_to_dict(note: ReadingNote) -> dict[str, Any]:
-        return {"id": note.id, "cid": note.cid, "origin": note.origin, "ranges": ReadingService._flatten_ranges(note.ranges)}
-
+        return {
+            "id": note.id,
+            "cid": note.cid,
+            "origin": note.origin,
+            "ranges": ReadingService._flatten_ranges(note.ranges),
+        }
 
     @staticmethod
     def thought_to_dict(note: ReadingNote) -> dict[str, Any]:
@@ -231,10 +259,11 @@ class ReadingService:
             "content": note.content or "",
         }
 
-
-    async def list_notes(self, db: AsyncSession, user_id: int, book_id: int) -> dict[str, list[dict[str, Any]]] | None:
+    async def list_notes(
+        self, db: AsyncSession, user_id: int, book_id: int
+    ) -> dict[str, list[dict[str, Any]]] | None:
         """书籍的划线与想法列表（书籍不存在返回 None；虚拟书 0 为首页诗，直接放行）"""
-        if book_id != VIRTUAL_BOOK_ID and await self.get_book(db, user_id, book_id) is None:
+        if book_id != self.VIRTUAL_BOOK_ID and await self.get_book(db, user_id, book_id) is None:
             return None
         result = await db.execute(
             select(ReadingNote)
@@ -243,25 +272,32 @@ class ReadingService:
         )
         notes = list(result.scalars().all())
         return {
-            "underlines": [ReadingService.underline_to_dict(n) for n in notes if n.note_type == NOTE_TYPE_UNDERLINE],
-            "thoughts": [ReadingService.thought_to_dict(n) for n in notes if n.note_type == NOTE_TYPE_THOUGHT],
+            "underlines": [
+                ReadingService.underline_to_dict(n)
+                for n in notes
+                if n.note_type == self.NOTE_TYPE_UNDERLINE
+            ],
+            "thoughts": [
+                ReadingService.thought_to_dict(n)
+                for n in notes
+                if n.note_type == self.NOTE_TYPE_THOUGHT
+            ],
         }
 
-
-    async def upsert_underline(self, 
-        db: AsyncSession, user_id: int, book_id: int, data: UnderlineUpsert
+    async def upsert_underline(
+        self, db: AsyncSession, user_id: int, book_id: int, data: UnderlineUpsert
     ) -> dict[str, Any] | None:
         """
         划线按「章+段」upsert：ranges 空表示整段取消（删行），否则更新/写入
         返回 {id, deleted}；书籍不存在返回 None（虚拟书 0 为首页诗，直接放行）
         """
-        if book_id != VIRTUAL_BOOK_ID and await self.get_book(db, user_id, book_id) is None:
+        if book_id != self.VIRTUAL_BOOK_ID and await self.get_book(db, user_id, book_id) is None:
             return None
         result = await db.execute(
             select(ReadingNote).where(
                 ReadingNote.user_id == user_id,
                 ReadingNote.book_id == book_id,
-                ReadingNote.note_type == NOTE_TYPE_UNDERLINE,
+                ReadingNote.note_type == self.NOTE_TYPE_UNDERLINE,
                 ReadingNote.cid == data.cid,
                 ReadingNote.origin == data.origin,
             )
@@ -278,7 +314,7 @@ class ReadingService:
             note = ReadingNote(
                 user_id=user_id,
                 book_id=book_id,
-                note_type=NOTE_TYPE_UNDERLINE,
+                note_type=self.NOTE_TYPE_UNDERLINE,
                 cid=data.cid,
                 origin=data.origin,
                 ranges=pairs,
@@ -289,17 +325,16 @@ class ReadingService:
         await db.commit()
         return {"id": note.id, "deleted": False}
 
-
-    async def create_thought(self, 
-        db: AsyncSession, user_id: int, book_id: int, data: ThoughtCreate
+    async def create_thought(
+        self, db: AsyncSession, user_id: int, book_id: int, data: ThoughtCreate
     ) -> dict[str, Any] | None:
         """写入想法（含划线文本快照），返回 {id}；书籍不存在返回 None（虚拟书 0 为首页诗，直接放行）"""
-        if book_id != VIRTUAL_BOOK_ID and await self.get_book(db, user_id, book_id) is None:
+        if book_id != self.VIRTUAL_BOOK_ID and await self.get_book(db, user_id, book_id) is None:
             return None
         note = ReadingNote(
             user_id=user_id,
             book_id=book_id,
-            note_type=NOTE_TYPE_THOUGHT,
+            note_type=self.NOTE_TYPE_THOUGHT,
             from_cid=data.from_cid,
             from_origin=data.from_origin,
             from_start=data.from_start,
@@ -313,10 +348,11 @@ class ReadingService:
         await db.commit()
         return {"id": note.id}
 
-
     # ==================== 书签 ====================
 
-    async def list_bookmarks(self, db: AsyncSession, user_id: int, book_id: int) -> list[dict[str, Any]] | None:
+    async def list_bookmarks(
+        self, db: AsyncSession, user_id: int, book_id: int
+    ) -> list[dict[str, Any]] | None:
         """书签列表（书籍不存在返回 None）"""
         if await self.get_book(db, user_id, book_id) is None:
             return None
@@ -325,23 +361,32 @@ class ReadingService:
             .where(ReadingBookmark.user_id == user_id, ReadingBookmark.book_id == book_id)
             .order_by(ReadingBookmark.chapter_id.asc(), ReadingBookmark.page_index.asc())
         )
-        return [{"chapter_id": b.chapter_id, "page_index": b.page_index} for b in result.scalars().all()]
+        return [
+            {"chapter_id": b.chapter_id, "page_index": b.page_index} for b in result.scalars().all()
+        ]
 
-
-    async def replace_bookmarks(self, 
-        db: AsyncSession, user_id: int, book_id: int, data: BookmarksReplace
+    async def replace_bookmarks(
+        self, db: AsyncSession, user_id: int, book_id: int, data: BookmarksReplace
     ) -> bool:
         """书签整表替换（前端本地列表即真源快照）；书籍不存在返回 False"""
         if await self.get_book(db, user_id, book_id) is None:
             return False
         await db.execute(
-            delete(ReadingBookmark).where(ReadingBookmark.book_id == book_id, ReadingBookmark.user_id == user_id)
+            delete(ReadingBookmark).where(
+                ReadingBookmark.book_id == book_id, ReadingBookmark.user_id == user_id
+            )
         )
         for item in data.items:
-            db.add(ReadingBookmark(user_id=user_id, book_id=book_id, chapter_id=item.chapter_id, page_index=item.page_index))
+            db.add(
+                ReadingBookmark(
+                    user_id=user_id,
+                    book_id=book_id,
+                    chapter_id=item.chapter_id,
+                    page_index=item.page_index,
+                )
+            )
         await db.commit()
         return True
-
 
     # ==================== 阅读时长 ====================
 
@@ -349,47 +394,113 @@ class ReadingService:
         """(今日分钟数, 总分钟数)；当日无记录时该行不存在，须用 scalar_one_or_none 容错"""
         today = TimezoneUtil.today()
         today_row = await db.execute(
-            select(ReadingDailyStat.minutes).where(ReadingDailyStat.user_id == user_id, ReadingDailyStat.stat_date == today)
+            select(ReadingDailyStat.minutes).where(
+                ReadingDailyStat.user_id == user_id, ReadingDailyStat.stat_date == today
+            )
         )
         total_row = await db.execute(
-            select(func.coalesce(func.sum(ReadingDailyStat.minutes), 0)).where(ReadingDailyStat.user_id == user_id)
+            select(func.coalesce(func.sum(ReadingDailyStat.minutes), 0)).where(
+                ReadingDailyStat.user_id == user_id
+            )
         )
         return int(today_row.scalar_one_or_none() or 0), int(total_row.scalar_one() or 0)
 
-
     async def add_minutes(self, db: AsyncSession, user_id: int, minutes: int) -> dict[str, int]:
-        """单次阅读结算累加（按东八区今日），返回累加后的今日与总分钟数"""
+        """
+        单次阅读结算累加（按东八区今日），返回累加后的今日与总分钟数
+        - 按日封顶：当日累计不超过 DAILY_MINUTES_CAP（24h 物理上限），超出截断
+        - 节奏校验：受理增量经 _pacing_accepted 约束，超出截断记告警；锚点随每次
+          上报刷新（含被截断的尝试），批量快速上报自限
+        """
         today = TimezoneUtil.today()
-        result = await db.execute(
-            select(ReadingDailyStat).where(ReadingDailyStat.user_id == user_id, ReadingDailyStat.stat_date == today)
-        )
-        row = result.scalar_one_or_none()
-        if row is None:
-            db.add(ReadingDailyStat(user_id=user_id, stat_date=today, minutes=minutes))
-        else:
-            row.minutes += minutes
+        now = TimezoneUtil.now()
+        row = await self._get_or_create_today_stat(db, user_id, today)
+        anchor = await self._report_anchor(db, user_id, row, today)
+        accepted = self._pacing_accepted(minutes, anchor, now)
+        if accepted < minutes:
+            logger.warning(
+                f"阅读时长上报触发节奏截断：user_id={user_id} "
+                f"上报 {minutes} 分钟、受理 {accepted} 分钟"
+            )
+        accepted = max(min(accepted, self.DAILY_MINUTES_CAP - row.minutes), 0)
+        row.minutes += accepted
+        row.last_report_at = now
         await db.commit()
         today_total, total = await self._stats_pair(db, user_id)
         return {"today_minutes": today_total, "total_minutes": total}
 
+    async def _get_or_create_today_stat(
+        self, db: AsyncSession, user_id: int, today: date
+    ) -> ReadingDailyStat:
+        """取当日统计行（FOR UPDATE 锁行防并发丢失更新；并发首建由唯一约束兜底重查）"""
+        result = await db.execute(
+            select(ReadingDailyStat)
+            .where(ReadingDailyStat.user_id == user_id, ReadingDailyStat.stat_date == today)
+            .with_for_update()
+        )
+        row = result.scalar_one_or_none()
+        if row is not None:
+            return row
+        row = ReadingDailyStat(user_id=user_id, stat_date=today, minutes=0)
+        db.add(row)
+        try:
+            await db.flush()
+        except IntegrityError:
+            await db.rollback()
+            result = await db.execute(
+                select(ReadingDailyStat)
+                .where(ReadingDailyStat.user_id == user_id, ReadingDailyStat.stat_date == today)
+                .with_for_update()
+            )
+            row = result.scalar_one()
+        return row
+
+    async def _report_anchor(
+        self, db: AsyncSession, user_id: int, row: ReadingDailyStat | None, today: date
+    ) -> datetime | None:
+        """节奏校验锚点：当日行最近上报时刻；无则回溯该用户历史最近一次（跨天/存量行场景）"""
+        if row is not None and row.last_report_at is not None:
+            return row.last_report_at
+        result = await db.execute(
+            select(func.max(ReadingDailyStat.last_report_at)).where(
+                ReadingDailyStat.user_id == user_id, ReadingDailyStat.stat_date < today
+            )
+        )
+        return result.scalar_one()
+
+    def _pacing_accepted(self, minutes: int, anchor: datetime | None, now: datetime) -> int:
+        """
+        节奏校验：本次受理增量（防批量伪造上报；防不了挂机——离线优先的固有边界）
+        无锚点（首次上报/新账户）不限节奏，仅受按日封顶约束
+        """
+        if anchor is None:
+            return minutes
+        elapsed_minutes = (now - anchor).total_seconds() / 60
+        allowance = int(elapsed_minutes * self.REPORT_TOLERANCE_FACTOR) + self.REPORT_BASE_TOLERANCE
+        return max(min(minutes, allowance), 0)
 
     async def get_stats(self, db: AsyncSession, user_id: int) -> dict[str, int]:
         """今日与累计阅读分钟数（书架统计卡/福利页用）"""
         today_total, total = await self._stats_pair(db, user_id)
         return {"today_minutes": today_total, "total_minutes": total}
 
-
     async def add_sessions(self, db: AsyncSession, user_id: int, data: SessionsReport) -> int:
         """
         批量写入阅读会话流水（按书/时段明细账，在线直传与离线补传共用）
-        - 书籍不存在/非本人的条目跳过（离线期负数本地 id 未及迁移等场景），返回实际落库条数
+        - 书籍不存在/非本人的条目跳过（离线期负数本地 id 未及迁移等场景），返回实际落库条数；
+          起算日早于今日 SESSION_MAX_AGE_DAYS 天的条目视为无效跳过（防历史注水）
         - 先集合查询合法书籍 id+title 防 N+1；title 落库为书名快照，删书后按书统计仍能展示
         - aggregate_minutes=True 的条目（离线补传，未经过分钟上报链路）按起算日（东八区，客户端
           本地时刻即东八区）聚合进 daily_stats；False 条目时长已由 /reading/minutes 计入不重复聚合
+        - 聚合按日封顶 DAILY_MINUTES_CAP；今日部分额外经节奏校验（档位奖励只看今日分钟数，
+          防经补传通道绕过 /minutes 的节奏限制），历史日仅封顶不校节奏（与奖励无关）
         """
+        today = TimezoneUtil.today()
         ids = {item.book_id for item in data.sessions}
         rows = await db.execute(
-            select(UserBook.id, UserBook.title).where(UserBook.user_id == user_id, UserBook.id.in_(ids))
+            select(UserBook.id, UserBook.title).where(
+                UserBook.user_id == user_id, UserBook.id.in_(ids)
+            )
         )
         title_map = {row.id: row.title for row in rows.fetchall()}
         accepted = 0
@@ -398,6 +509,12 @@ class ReadingService:
             if item.book_id not in title_map:
                 continue
             started = datetime.strptime(item.started_at, "%Y-%m-%d %H:%M:%S")
+            if (today - started.date()).days > self.SESSION_MAX_AGE_DAYS:
+                logger.warning(
+                    f"会话流水超出最早日期窗口被跳过：user_id={user_id} "
+                    f"book_id={item.book_id} started_at={item.started_at}"
+                )
+                continue
             db.add(
                 ReadingSession(
                     user_id=user_id,
@@ -414,6 +531,7 @@ class ReadingService:
                 day_minutes[day] = day_minutes.get(day, 0) + item.minutes
             accepted += 1
         if accepted > 0:
+            now = TimezoneUtil.now()
             for day, mins in day_minutes.items():
                 result = await db.execute(
                     select(ReadingDailyStat).where(
@@ -421,13 +539,37 @@ class ReadingService:
                     )
                 )
                 row = result.scalar_one_or_none()
+                current = row.minutes if row is not None else 0
+                increment = mins
+                if day == today:
+                    anchor = await self._report_anchor(db, user_id, row, today)
+                    increment = self._pacing_accepted(increment, anchor, now)
+                    if increment < mins:
+                        logger.warning(
+                            f"离线补传今日聚合触发节奏截断：user_id={user_id} "
+                            f"上报 {mins} 分钟、受理 {increment} 分钟"
+                        )
+                target = min(current + increment, self.DAILY_MINUTES_CAP)
+                if target < current + increment:
+                    logger.warning(
+                        f"阅读时长按日封顶截断：user_id={user_id} day={day} "
+                        f"{current + increment} → {target} 分钟"
+                    )
                 if row is None:
-                    db.add(ReadingDailyStat(user_id=user_id, stat_date=day, minutes=mins))
+                    db.add(
+                        ReadingDailyStat(
+                            user_id=user_id,
+                            stat_date=day,
+                            minutes=target,
+                            last_report_at=now if day == today else None,
+                        )
+                    )
                 else:
-                    row.minutes += mins
+                    row.minutes = target
+                    if day == today:
+                        row.last_report_at = now
             await db.commit()
         return accepted
-
 
     # ==================== 偏好 ====================
 
@@ -436,7 +578,6 @@ class ReadingService:
         result = await db.execute(select(UserPreference).where(UserPreference.user_id == user_id))
         row = result.scalar_one_or_none()
         return None if row is None else dict(row.prefs)
-
 
     async def put_prefs(self, db: AsyncSession, user_id: int, data: PrefsPut) -> dict[str, Any]:
         """偏好整包写入（upsert），返回写入后的配置"""
@@ -450,7 +591,6 @@ class ReadingService:
         await db.commit()
         return dict(row.prefs)
 
-
     # ==================== 阅读报告（统计页） ====================
 
     REPORT_PERIODS = ("week", "month", "year", "total")
@@ -463,7 +603,6 @@ class ReadingService:
         ("夜间", 18, 23),
     ]
 
-
     @staticmethod
     def _month_range(anchor: date) -> tuple[date, date]:
         """锚点所在自然月的 (月初, 月末)"""
@@ -472,8 +611,9 @@ class ReadingService:
         nm = 1 if start.month == 12 else start.month + 1
         return start, date(ny, nm, 1) - timedelta(days=1)
 
-
-    async def get_report(self, db: AsyncSession, user_id: int, period: str, anchor: date) -> dict[str, Any]:
+    async def get_report(
+        self, db: AsyncSession, user_id: int, period: str, anchor: date
+    ) -> dict[str, Any]:
         """
         阅读统计报告（周期 = week 本周 / month 本月 / year 本年 / total 全部，anchor 为周期内锚点日期）
         - 趋势与时长来自 reading_daily_stats（聚合真源）；书籍榜与时段分布来自 reading_sessions
@@ -481,7 +621,7 @@ class ReadingService:
         - 在读/完本为 user_books 累计状态（项目无按周期快照数据）；笔记数按 created_at 落区间统计
         """
         if period not in self.REPORT_PERIODS:
-            raise ValueError("无效的统计周期")
+            raise BusinessError("无效的统计周期")
         today = TimezoneUtil.today()
 
         # 周期区间与趋势点位（date, 坐标轴标签, 完整标签）
@@ -505,7 +645,9 @@ class ReadingService:
                 points.append((date(anchor.year, m, 1), f"{m}月", f"{m}月"))
         else:  # total
             first = await db.execute(
-                select(func.min(ReadingDailyStat.stat_date)).where(ReadingDailyStat.user_id == user_id)
+                select(func.min(ReadingDailyStat.stat_date)).where(
+                    ReadingDailyStat.user_id == user_id
+                )
             )
             first_date = first.scalar_one_or_none()
             start = first_date if first_date is not None else today
@@ -548,7 +690,9 @@ class ReadingService:
         active_days = sum(1 for v in day_map.values() if v > 0)
 
         notes_row = await db.execute(
-            select(func.count()).select_from(ReadingNote).where(
+            select(func.count())
+            .select_from(ReadingNote)
+            .where(
                 ReadingNote.user_id == user_id,
                 ReadingNote.created_at >= day_start,
                 ReadingNote.created_at < day_end,

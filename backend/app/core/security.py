@@ -7,6 +7,7 @@
   （JWKS 公钥经 AuthClient 缓存；issuer=AUTH_ISSUER；零逐请求网络调用）。
 - 接口输入值的通用安全清洗（控制字符/零宽字符/长度收口）见同目录 sanitizer.py。
 """
+
 from __future__ import annotations
 
 from typing import Any

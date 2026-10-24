@@ -21,6 +21,7 @@ auth 服务客户端（bai → auth 服务间通信封装，面向对象：AuthC
 性能原则（与 yao 一致）：access_token 有效期内纯本地 RS256 验签，
 不逐请求调用 auth；撤销窗口 ≈ 同步间隔（默认 300 秒，.env 可调）。
 """
+
 from __future__ import annotations
 
 import json
@@ -30,10 +31,11 @@ from typing import Any
 
 import httpx
 import jwt as pyjwt
+from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
 
-from .config import settings
 from ..utils.logger import logger
 from ..utils.timezone import TimezoneUtil
+from .config import settings
 
 
 class AuthClient:
@@ -118,9 +120,7 @@ class AuthClient:
     def _save_jwks_to_disk(self, data: dict) -> None:
         """将 JWKS 原始响应写入磁盘缓存（写入失败仅告警，不影响内存缓存）"""
         try:
-            self.JWKS_CACHE_PATH.write_text(
-                json.dumps(data, ensure_ascii=False), encoding="utf-8"
-            )
+            self.JWKS_CACHE_PATH.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
         except Exception as e:
             logger.warning(f"写入 JWKS 磁盘缓存失败：{e}")
 
@@ -154,7 +154,7 @@ class AuthClient:
         logger.info(f"JWKS 已更新（{len(keys)} 把公钥）")
         return True
 
-    def get_public_key(self, kid: str | None):
+    def get_public_key(self, kid: str | None) -> RSAPublicKey | None:
         """
         按 kid 获取公钥（内存缓存命中）
         :param kid: JWT header 中的 key id
@@ -191,10 +191,7 @@ class AuthClient:
         :return: 本轮新增/更新的撤销记录数
         """
         if self._revocation_watermark is None:
-            since = (
-                TimezoneUtil.now()
-                - timedelta(days=self.REVOCATION_BACKFILL_DAYS)
-            ).isoformat()
+            since = (TimezoneUtil.now() - timedelta(days=self.REVOCATION_BACKFILL_DAYS)).isoformat()
         else:
             since = self._revocation_watermark
         try:

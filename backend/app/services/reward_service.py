@@ -15,6 +15,7 @@
 - 发放入账（_credit）不 commit，由签到/领取入口统一提交，保证记录、
   余额、流水同事务原子生效
 """
+
 from __future__ import annotations
 
 from datetime import date, timedelta
@@ -24,49 +25,56 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models import CheckinRecord, CoinAccount, CoinTransaction, ReadingRewardClaim, ReadingDailyStat
+from ..core.exceptions import BusinessError
+from ..models import (
+    CheckinRecord,
+    CoinAccount,
+    CoinTransaction,
+    ReadingDailyStat,
+    ReadingRewardClaim,
+)
 from ..utils.timezone import TimezoneUtil
 from .reading_service import reading_service
-
-# 每日签到基准奖励（索引 0=周一 ... 6=周日满勤大礼；周末两天的实际发放额按本周漏签天数顺延递减）
-CHECKIN_REWARDS: list[int] = [5, 5, 5, 5, 5, 10, 20]
-
-# 周末奖励按本周（周一~昨日）漏签天数顺延递减：周六漏 0 天 +10、漏 ≥1 天 +5；
-# 周日漏 0 天 +20、漏 1 天 +10、漏 ≥2 天 +5 保底（键=weekday，5=周六 6=周日）
-WEEKEND_REWARDS_BY_MISS: dict[int, list[int]] = {5: [10, 5], 6: [20, 10, 5]}
-
-# 阅读档位（阈值分钟, 基础奖励, 额外赠送）
-READING_TIERS: list[tuple[int, int, int]] = [
-    (5, 1, 0),
-    (30, 6, 0),
-    (120, 24, 10),
-    (360, 72, 30),
-    (720, 144, 60),
-]
-
-# 币种编码
-COIN_COPPER = 0
-COIN_SILVER = 1
-COIN_GOLD = 2
-
-# 流水来源
-SOURCE_CHECKIN = "checkin"
-SOURCE_READING = "reading"
-SOURCE_EXCHANGE = "exchange"
-SOURCE_CONSUME = "consume"
-
-# 自动兑换比率
-COPPER_PER_SILVER = 100
-SILVER_PER_GOLD = 100
-
-# 档位状态（接口取值）
-STATE_LOCKED = "locked"
-STATE_CLAIMABLE = "claimable"
-STATE_CLAIMED = "claimed"
 
 
 class RewardService:
     """活动奖励服务（余额 / 签到 / 补签 / 阅读档位奖励 / 金币支出与退款）"""
+
+    # 每日签到基准奖励（索引 0=周一 ... 6=周日满勤大礼；周末两天的实际发放额按本周漏签天数顺延递减）
+    CHECKIN_REWARDS: list[int] = [5, 5, 5, 5, 5, 10, 20]
+
+    # 周末奖励按本周（周一~昨日）漏签天数顺延递减：周六漏 0 天 +10、漏 ≥1 天 +5；
+    # 周日漏 0 天 +20、漏 1 天 +10、漏 ≥2 天 +5 保底（键=weekday，5=周六 6=周日）
+    WEEKEND_REWARDS_BY_MISS: dict[int, list[int]] = {5: [10, 5], 6: [20, 10, 5]}
+
+    # 阅读档位（阈值分钟, 基础奖励, 额外赠送）——档位数额与 frontend/utils/rewards.uts 双份同步维护
+    READING_TIERS: list[tuple[int, int, int]] = [
+        (5, 1, 0),
+        (30, 6, 0),
+        (120, 24, 10),
+        (360, 72, 30),
+        (720, 144, 60),
+    ]
+
+    # 币种编码
+    COIN_COPPER = 0
+    COIN_SILVER = 1
+    COIN_GOLD = 2
+
+    # 流水来源
+    SOURCE_CHECKIN = "checkin"
+    SOURCE_READING = "reading"
+    SOURCE_EXCHANGE = "exchange"
+    SOURCE_CONSUME = "consume"
+
+    # 自动兑换比率
+    COPPER_PER_SILVER = 100
+    SILVER_PER_GOLD = 100
+
+    # 档位状态（接口取值）
+    STATE_LOCKED = "locked"
+    STATE_CLAIMABLE = "claimable"
+    STATE_CLAIMED = "claimed"
 
     @staticmethod
     def balance_to_dict(account: CoinAccount | None) -> dict[str, int]:
@@ -75,22 +83,20 @@ class RewardService:
             return {"gold": 0, "silver": 0, "copper": 0}
         return {"gold": account.gold, "silver": account.silver, "copper": account.copper}
 
-
     async def _today_gained_copper(self, db: AsyncSession, user_id: int, today: date) -> int:
         """今日已获铜币 = 当日签到+阅读的铜币入账汇总（兑换增减不计入）"""
         result = await db.execute(
             select(func.coalesce(func.sum(CoinTransaction.amount), 0)).where(
                 CoinTransaction.user_id == user_id,
-                CoinTransaction.coin_type == COIN_COPPER,
+                CoinTransaction.coin_type == self.COIN_COPPER,
                 CoinTransaction.amount > 0,
-                CoinTransaction.source.in_((SOURCE_CHECKIN, SOURCE_READING)),
+                CoinTransaction.source.in_((self.SOURCE_CHECKIN, self.SOURCE_READING)),
                 func.date(CoinTransaction.created_at) == today,
             )
         )
         return int(result.scalar_one() or 0)
 
-
-    async def _credit(self, 
+    async def _credit(
         db: AsyncSession,
         user_id: int,
         amount: int,
@@ -112,7 +118,13 @@ class RewardService:
             db.add(account)
             await db.flush()
 
-        def _flow(coin_type: int, flow_amount: int, flow_remark: str, flow_source: str, flow_source_id: str) -> None:
+        def _flow(
+            coin_type: int,
+            flow_amount: int,
+            flow_remark: str,
+            flow_source: str,
+            flow_source_id: str,
+        ) -> None:
             db.add(
                 CoinTransaction(
                     user_id=user_id,
@@ -125,25 +137,35 @@ class RewardService:
             )
 
         account.copper += amount
-        _flow(COIN_COPPER, amount, remark, source, source_id)
-        while account.copper >= COPPER_PER_SILVER:
-            account.copper -= COPPER_PER_SILVER
+        _flow(self.COIN_COPPER, amount, remark, source, source_id)
+        while account.copper >= self.COPPER_PER_SILVER:
+            account.copper -= self.COPPER_PER_SILVER
             account.silver += 1
-            _flow(COIN_COPPER, -COPPER_PER_SILVER, "100 铜币自动兑换 1 银币", SOURCE_EXCHANGE, "")
-            _flow(COIN_SILVER, 1, "100 铜币自动兑换 1 银币", SOURCE_EXCHANGE, "")
-        while account.silver >= SILVER_PER_GOLD:
-            account.silver -= SILVER_PER_GOLD
+            _flow(
+                self.COIN_COPPER,
+                -self.COPPER_PER_SILVER,
+                "100 铜币自动兑换 1 银币",
+                self.SOURCE_EXCHANGE,
+                "",
+            )
+            _flow(self.COIN_SILVER, 1, "100 铜币自动兑换 1 银币", self.SOURCE_EXCHANGE, "")
+        while account.silver >= self.SILVER_PER_GOLD:
+            account.silver -= self.SILVER_PER_GOLD
             account.gold += 1
-            _flow(COIN_SILVER, -SILVER_PER_GOLD, "100 银币自动兑换 1 金币", SOURCE_EXCHANGE, "")
-            _flow(COIN_GOLD, 1, "100 银币自动兑换 1 金币", SOURCE_EXCHANGE, "")
-
+            _flow(
+                self.COIN_SILVER,
+                -self.SILVER_PER_GOLD,
+                "100 银币自动兑换 1 金币",
+                self.SOURCE_EXCHANGE,
+                "",
+            )
+            _flow(self.COIN_GOLD, 1, "100 银币自动兑换 1 金币", self.SOURCE_EXCHANGE, "")
 
     def _week_monday(self, today: date) -> date:
         """本周周一日期（自然周口径）"""
         return today - timedelta(days=today.weekday())
 
-
-    async def debit_gold(self, 
+    async def debit_gold(
         db: AsyncSession,
         user_id: int,
         amount: int,
@@ -152,33 +174,32 @@ class RewardService:
     ) -> dict[str, int]:
         """
         金币支出（不 commit，由调用方统一提交保证原子性）
-        - FOR UPDATE 锁账户行防并发超扣；无账户行或余额不足抛 ValueError
+        - FOR UPDATE 锁账户行防并发超扣；无账户行或余额不足抛 BusinessError
         - 金币为最高币种，扣减不产生进位/兑换流水，仅写一条负流水
         :return: 扣减后余额字典
         """
         if amount <= 0:
-            raise ValueError("扣减数额无效")
+            raise BusinessError("扣减数额无效")
         result = await db.execute(
             select(CoinAccount).where(CoinAccount.user_id == user_id).with_for_update()
         )
         account = result.scalar_one_or_none()
         if account is None or account.gold < amount:
-            raise ValueError("金币余额不足")
+            raise BusinessError("金币余额不足")
         account.gold -= amount
         db.add(
             CoinTransaction(
                 user_id=user_id,
-                coin_type=COIN_GOLD,
+                coin_type=self.COIN_GOLD,
                 amount=-amount,
-                source=SOURCE_CONSUME,
+                source=self.SOURCE_CONSUME,
                 source_id=source_id,
                 remark=remark,
             )
         )
         return {"gold": account.gold, "silver": account.silver, "copper": account.copper}
 
-
-    async def refund_gold(self, 
+    async def refund_gold(
         db: AsyncSession,
         user_id: int,
         amount: int,
@@ -187,7 +208,7 @@ class RewardService:
     ) -> None:
         """金币退款补偿（购买失败回滚；独立事务即时提交）"""
         if amount <= 0:
-            raise ValueError("退款数额无效")
+            raise BusinessError("退款数额无效")
         result = await db.execute(
             select(CoinAccount).where(CoinAccount.user_id == user_id).with_for_update()
         )
@@ -200,28 +221,25 @@ class RewardService:
         db.add(
             CoinTransaction(
                 user_id=user_id,
-                coin_type=COIN_GOLD,
+                coin_type=self.COIN_GOLD,
                 amount=amount,
-                source=SOURCE_CONSUME,
+                source=self.SOURCE_CONSUME,
                 source_id=source_id,
                 remark=remark,
             )
         )
         await db.commit()
 
-
     def _weekend_reward(self, weekday: int, missed_days: int) -> int:
         """周末签到奖励：按本周（周一~昨日）漏签天数顺延递减（周六漏 ≥1 天降至 +5；周日 0 漏 +20 / 1 漏 +10 / ≥2 漏 +5 保底）"""
-        ladder = WEEKEND_REWARDS_BY_MISS[weekday]
+        ladder = self.WEEKEND_REWARDS_BY_MISS[weekday]
         return ladder[min(missed_days, len(ladder) - 1)]
-
 
     def _missed_days_before(self, dates: set[date], today: date) -> int:
         """本周一~昨日中的漏签天数（今日未签不计漏——当天尚未结束）"""
         elapsed = (today - self._week_monday(today)).days
         signed_before = sum(1 for d in dates if d < today)
         return elapsed - signed_before
-
 
     def _streak_days(self, dates: set[date], today: date) -> int:
         """
@@ -236,9 +254,7 @@ class RewardService:
             d -= timedelta(days=1)
         return streak
 
-
     # ==================== 查询 ====================
-
 
     async def get_summary(self, db: AsyncSession, user_id: int) -> dict[str, Any]:
         """活动页聚合数据：余额 / 今日已获 / 阅读统计 / 本周签到 / 今日档位状态"""
@@ -273,22 +289,25 @@ class RewardService:
         # 本月已补签次数（自然月，按补签操作时刻计数；前端据此展示剩余次数）
         makeup_used = int(
             await db.scalar(
-                select(func.count()).select_from(CheckinRecord).where(
+                select(func.count())
+                .select_from(CheckinRecord)
+                .where(
                     CheckinRecord.user_id == user_id,
                     CheckinRecord.is_makeup == 1,
                     CheckinRecord.created_at >= today.replace(day=1),
                 )
-            ) or 0
+            )
+            or 0
         )
 
         tiers: list[dict[str, Any]] = []
-        for tier_minutes, base, bonus in READING_TIERS:
+        for tier_minutes, base, bonus in self.READING_TIERS:
             if tier_minutes in claimed_tiers:
-                state = STATE_CLAIMED
+                state = self.STATE_CLAIMED
             elif today_minutes >= tier_minutes:
-                state = STATE_CLAIMABLE
+                state = self.STATE_CLAIMABLE
             else:
-                state = STATE_LOCKED
+                state = self.STATE_LOCKED
             tiers.append(
                 {
                     "tier_minutes": tier_minutes,
@@ -310,18 +329,20 @@ class RewardService:
                 "days": [
                     {
                         "weekday": i + 1,
-                        "reward": self._weekend_reward(i, self._missed_days_before(checkin_dates, today)) if i in (5, 6) else reward,
+                        "reward": (
+                            self._weekend_reward(i, self._missed_days_before(checkin_dates, today))
+                            if i in (5, 6)
+                            else reward
+                        ),
                         "checked": (i + 1) in checked_weekdays,
                     }
-                    for i, reward in enumerate(CHECKIN_REWARDS)
+                    for i, reward in enumerate(self.CHECKIN_REWARDS)
                 ],
             },
             "reading_tiers": tiers,
         }
 
-
     # ==================== 签到 ====================
-
 
     async def checkin(self, db: AsyncSession, user_id: int) -> dict[str, Any]:
         """
@@ -335,7 +356,7 @@ class RewardService:
             )
         )
         if exists.scalar_one_or_none() is not None:
-            raise ValueError("今日已签到")
+            raise BusinessError("今日已签到")
 
         # 本周已签日期（不含今日——今日尚未签），供周日定档与签到后连续天数复用
         dates_before_rows = await db.execute(
@@ -346,19 +367,21 @@ class RewardService:
         )
         dates_before = set(dates_before_rows.scalars().all())
 
-        if today.weekday() in WEEKEND_REWARDS_BY_MISS:
-            reward = self._weekend_reward(today.weekday(), self._missed_days_before(dates_before, today))
+        if today.weekday() in self.WEEKEND_REWARDS_BY_MISS:
+            reward = self._weekend_reward(
+                today.weekday(), self._missed_days_before(dates_before, today)
+            )
         else:
-            reward = CHECKIN_REWARDS[today.weekday()]
+            reward = self.CHECKIN_REWARDS[today.weekday()]
         record = CheckinRecord(user_id=user_id, checkin_date=today, reward=reward)
         db.add(record)
         try:
             await db.flush()  # 取记录 id 供流水关联；唯一约束兜底并发双击
         except IntegrityError:
             await db.rollback()
-            raise ValueError("今日已签到")
+            raise BusinessError("今日已签到")
 
-        await self._credit(db, user_id, reward, SOURCE_CHECKIN, str(record.id), "每日签到")
+        await self._credit(db, user_id, reward, self.SOURCE_CHECKIN, str(record.id), "每日签到")
         await db.commit()
 
         acc_row = await db.execute(select(CoinAccount).where(CoinAccount.user_id == user_id))
@@ -372,9 +395,7 @@ class RewardService:
             "today_gained": await self._today_gained_copper(db, user_id, today),
         }
 
-
     # ==================== 会员补签 ====================
-
 
     # 会员每月补签次数（自然月，按补签操作时刻计数；与会员页文案「每月赠 3 次」一致）
     MAKEUP_QUOTA_PER_MONTH = 3
@@ -382,8 +403,7 @@ class RewardService:
     # 可享补签权益的角色（黑铁及以上档位 + 管理员；从令牌 roles 声明本地判定）
     MAKEUP_ROLE_CODES: list[str] = ["iron", "bronze", "silver", "gold", "admin"]
 
-
-    async def makeup_checkin(self, 
+    async def makeup_checkin(
         db: AsyncSession, user_id: int, makeup_date: date, roles: list[str]
     ) -> dict[str, Any]:
         """
@@ -396,12 +416,12 @@ class RewardService:
         """
         today = TimezoneUtil.today()
         if makeup_date >= today:
-            raise ValueError("只能补签今天之前的漏签日")
+            raise BusinessError("只能补签今天之前的漏签日")
         if makeup_date < self._week_monday(today):
-            raise ValueError("只能补签本周内的漏签日")
+            raise BusinessError("只能补签本周内的漏签日")
 
         if not any(code in roles for code in self.MAKEUP_ROLE_CODES):
-            raise ValueError("开通会员后每月可补签 3 次")
+            raise BusinessError("开通会员后每月可补签 3 次")
 
         exists = await db.execute(
             select(CheckinRecord.id).where(
@@ -409,33 +429,38 @@ class RewardService:
             )
         )
         if exists.scalar_one_or_none() is not None:
-            raise ValueError("该日已签到")
+            raise BusinessError("该日已签到")
 
         # 本月已补签次数（created_at=补签操作时刻，跨月补签日也计入操作月）
         month_start = today.replace(day=1)
         used = int(
             await db.scalar(
-                select(func.count()).select_from(CheckinRecord).where(
+                select(func.count())
+                .select_from(CheckinRecord)
+                .where(
                     CheckinRecord.user_id == user_id,
                     CheckinRecord.is_makeup == 1,
                     CheckinRecord.created_at >= month_start,
                 )
-            ) or 0
+            )
+            or 0
         )
         if used >= self.MAKEUP_QUOTA_PER_MONTH:
-            raise ValueError("本月补签次数已用完")
+            raise BusinessError("本月补签次数已用完")
 
         # 奖励按被补日期星期基准档（周一~五 +5 / 周六 +10 / 周日 +20）
-        reward = CHECKIN_REWARDS[makeup_date.weekday()]
-        record = CheckinRecord(user_id=user_id, checkin_date=makeup_date, reward=reward, is_makeup=1)
+        reward = self.CHECKIN_REWARDS[makeup_date.weekday()]
+        record = CheckinRecord(
+            user_id=user_id, checkin_date=makeup_date, reward=reward, is_makeup=1
+        )
         db.add(record)
         try:
             await db.flush()  # 取记录 id 供流水关联；唯一约束 (user_id, checkin_date) 兜底并发重复补签
         except IntegrityError:
             await db.rollback()
-            raise ValueError("该日已签到")
+            raise BusinessError("该日已签到")
 
-        await self._credit(db, user_id, reward, SOURCE_CHECKIN, str(record.id), "会员补签")
+        await self._credit(db, user_id, reward, self.SOURCE_CHECKIN, str(record.id), "会员补签")
         await db.commit()
 
         rows = await db.execute(
@@ -456,18 +481,18 @@ class RewardService:
             "today_gained": await self._today_gained_copper(db, user_id, today),
         }
 
-
     # ==================== 阅读档位奖励 ====================
 
-
-    async def claim_reading_reward(self, db: AsyncSession, user_id: int, tier_minutes: int) -> dict[str, Any]:
+    async def claim_reading_reward(
+        self, db: AsyncSession, user_id: int, tier_minutes: int
+    ) -> dict[str, Any]:
         """
         领取阅读档位奖励（须当日已读达标且未领过；唯一约束兜底并发重复领取）
         返回领取额、档位状态与最新余额
         """
-        tier = next((t for t in READING_TIERS if t[0] == tier_minutes), None)
+        tier = next((t for t in self.READING_TIERS if t[0] == tier_minutes), None)
         if tier is None:
-            raise ValueError("领取档位不存在")
+            raise BusinessError("领取档位不存在")
         base, bonus = tier[1], tier[2]
 
         today = TimezoneUtil.today()
@@ -479,7 +504,7 @@ class RewardService:
             )
         )
         if exists.scalar_one_or_none() is not None:
-            raise ValueError("该档位奖励已领取")
+            raise BusinessError("该档位奖励已领取")
 
         minutes_row = await db.execute(
             select(ReadingDailyStat.minutes).where(
@@ -488,7 +513,7 @@ class RewardService:
         )
         today_minutes = int(minutes_row.scalar_one_or_none() or 0)
         if today_minutes < tier_minutes:
-            raise ValueError("阅读时长未达标，还不能领取")
+            raise BusinessError("阅读时长未达标，还不能领取")
 
         reward = base + bonus
         record = ReadingRewardClaim(
@@ -499,9 +524,16 @@ class RewardService:
             await db.flush()  # 取记录 id 供流水关联；唯一约束兜底并发重复领取
         except IntegrityError:
             await db.rollback()
-            raise ValueError("该档位奖励已领取")
+            raise BusinessError("该档位奖励已领取")
 
-        await self._credit(db, user_id, reward, SOURCE_READING, str(record.id), f"阅读 {tier_minutes} 分钟奖励")
+        await self._credit(
+            db,
+            user_id,
+            reward,
+            self.SOURCE_READING,
+            str(record.id),
+            f"阅读 {tier_minutes} 分钟奖励",
+        )
         await db.commit()
 
         acc_row = await db.execute(select(CoinAccount).where(CoinAccount.user_id == user_id))
@@ -511,7 +543,6 @@ class RewardService:
             "balance": self.balance_to_dict(acc_row.scalar_one_or_none()),
             "today_gained": await self._today_gained_copper(db, user_id, today),
         }
-
 
     async def auto_claim_reached(self, db: AsyncSession, user_id: int) -> dict[str, Any]:
         """
@@ -530,7 +561,7 @@ class RewardService:
         )
         today_minutes = int(minutes_row.scalar_one_or_none() or 0)
         if today_minutes <= 0:
-            return []
+            return {"claimed": [], "checkin": None}
         claimed_rows = await db.execute(
             select(ReadingRewardClaim.tier_minutes).where(
                 ReadingRewardClaim.user_id == user_id, ReadingRewardClaim.claim_date == today
@@ -538,12 +569,12 @@ class RewardService:
         )
         claimed_minutes = set(claimed_rows.scalars().all())
         issued: list[dict[str, int]] = []
-        for tier_minutes, _base, _bonus in READING_TIERS:
+        for tier_minutes, _base, _bonus in self.READING_TIERS:
             if today_minutes < tier_minutes or tier_minutes in claimed_minutes:
                 continue
             try:
                 result = await self.claim_reading_reward(db, user_id, tier_minutes)
-            except ValueError:
+            except BusinessError:
                 continue  # 已领取（并发）/未达标（统计滞后）等业务异常，跳过待下次
             issued.append({"tier_minutes": tier_minutes, "reward": int(result["reward"])})
         # 发生自动发放时顺带自动签到（每日首次即 5 分钟档达成）；已签到抛业务异常静默跳过
@@ -551,7 +582,7 @@ class RewardService:
         if issued:
             try:
                 checkin_result = await self.checkin(db, user_id)
-            except ValueError:
+            except BusinessError:
                 pass
         return {"claimed": issued, "checkin": checkin_result}
 
