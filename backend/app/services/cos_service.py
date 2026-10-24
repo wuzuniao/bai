@@ -6,10 +6,11 @@
 
 安全模型：
 1. Policy 最小授权：action 仅 PutObject/GetObject，resource 精确限定到
-   qcs::cos:<region>:uid/<appid>:<桶>/<用户名>/* 六段式（桶名式；实测 STS 文档示例的
+   qcs::cos:<region>:uid/<appid>:<桶>/<用户 id>/* 六段式（桶名式；实测 STS 文档示例的
    prefix// 前缀式会被 COS 判 AccessDenied）；
-2. 用户目录 = auth 用户名（经服务间接口 /internal/users/{id} 解析，前端不可传入伪造目录）；
-3. 对象 key 规则：{用户名}/{书名}.{扩展名}（书名即对象名，桶内按用户名分目录）；
+2. 用户目录 = 业务用户 id（JWT sub：终身不变、全项目唯一，杜绝前端传入伪造目录；
+   2026-10-24 起由 auth 用户名切换，旧用户名目录残留由运维经 COS 控制台手动清理）；
+3. 对象 key 规则：{用户 id}/{书名}.{扩展名}（书名即对象名，桶内按用户 id 分目录）；
 4. 临时凭证按用户目录内存缓存复用（临近过期自动重取，避免限频）。
 
 职责边界：桶列举（GetBucket）与对象删除（DeleteObject）由本服务持永久密钥服务端直调，
@@ -28,7 +29,6 @@ from xml.etree import ElementTree
 
 import httpx
 
-from ..core.auth_client import auth_client
 from ..core.config import settings
 from ..utils.logger import logger
 
@@ -75,19 +75,15 @@ class CosService:
 
     @staticmethod
     def object_key(user_dir: str, title: str, ext: str) -> str:
-        """对象 key：{用户名}/{书名}.{扩展名}"""
+        """对象 key：{用户 id}/{书名}.{扩展名}"""
         return f"{user_dir}/{CosService.sanitize_segment(title)}.{ext}"
 
     async def get_user_dir(self, user_id: int) -> str:
         """
-        解析用户独立目录（= auth 用户名；经服务间接口解析，杜绝前端传入伪造目录）
-        :raises ValueError: 账号缺少用户名（无法构成独立目录）
+        解析用户独立目录（= 业务用户 id，即 JWT sub：终身不变、全项目唯一，
+        杜绝前端伪造目录；不再依赖 auth 服务间解析与用户名存在性）
         """
-        info = await auth_client.get_user_info(user_id)
-        username = self.sanitize_segment(str(info.get("username") or ""))
-        if not username:
-            raise ValueError("账号尚未设置用户名，暂无法使用云端同步")
-        return username
+        return str(user_id)
 
     def _require_config(self) -> None:
         if not (settings.COS_SECRET_ID and settings.COS_SECRET_KEY and settings.COS_BUCKET):
@@ -247,7 +243,7 @@ class CosService:
         生成 COS 预签名 URL（临时密钥签名；x-cos-security-token 追加查询串不参与签名）
         :param method: HTTP 方法（put/get，规范串小写）
         :param raw_path: 未编码的请求路径（参与签名——服务端按解码后路径构建规范串；
-                 对象操作形如 /<用户名>/<书名>.<ext>，桶清单为 /）
+                 对象操作形如 /<用户 id>/<书名>.<ext>，桶清单为 /）
         :param params: 参与签名的业务查询参数（字典序规范化）
         """
         now = int(time.time())
