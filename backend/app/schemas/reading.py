@@ -177,12 +177,25 @@ class SessionsReport(BaseModel):
 class ReportQuery(BaseModel):
     """阅读报告查询参数（GET /reading/report，经 Depends() 收口为查询实体；裸 Query 参数不再透传）"""
 
-    period: Literal["week", "month", "year", "total"] = Field(
-        default="month", description="统计周期 week/month/year/total"
+    period: Literal["week", "month", "year"] = Field(
+        default="month", description="统计周期 week/month/year"
     )
     anchor: date | None = Field(
         default=None, description="锚点日期 YYYY-MM-DD（周期内切换用，缺省为今天）"
     )
+
+
+class RankingQuery(BaseModel):
+    """阅读时长排行查询参数（GET /reading/ranking，分页约定见项目规范第 4 节）"""
+
+    period: Literal["week", "month", "year"] = Field(
+        default="week", description="统计周期 week/month/year"
+    )
+    anchor: date | None = Field(
+        default=None, description="锚点日期 YYYY-MM-DD（周期内切换用，缺省为今天）"
+    )
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=20, ge=1, le=50)
 
 
 class PrefsPut(BaseModel):

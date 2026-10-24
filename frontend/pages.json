@@ -18,8 +18,10 @@
 			"path": "pages/reading/reader",
 			"style": {
 				"navigationStyle": "custom",
-				"navigationBarTitleText": "阅读 - 无足鸟古诗词",
-				"swipeBackAsBackPress": true
+				// #ifdef APP
+				"swipeBackAsBackPress": true,
+				// #endif
+				"navigationBarTitleText": "阅读 - 无足鸟古诗词"
 			}
 		},
 		{
@@ -129,22 +131,24 @@
 		}
 	},
 	"globalStyle": {
-		"navigationBarTextStyle": "black",
-		"navigationBarTitleText": "无足鸟古诗词学习助手",
-		"navigationBarBackgroundColor": "#F4F4F2",
-		"backgroundColor": "#F4F4F2",
 		/* 宽屏 rpx 冻结基准（折叠屏/PC 适配）：窗口宽超上限后 rpx 按基准宽计算，防止等比放大失控。
 		 * H5 端与 index.html 模板的 body 限宽 480px 对齐（超出后内容居中于 480px 列）；
-		 * App 端与页面内容限宽 750px 对齐；微信端 rpx 由运行时原生换算不读取本配置。 */
+		 * App 端与页面内容限宽 750px 对齐；小程序端 rpx 由运行时原生换算不读取本配置，
+		 * 透传进 app.json 会触发微信 invalid window 告警，故不编译进小程序端。 */
 		// #ifdef WEB
 		"rpxCalcMaxDeviceWidth": 480,
 		"rpxCalcBaseDeviceWidth": 480,
+		"rpxCalcIncludeWidth": 0,
 		// #endif
-		// #ifndef WEB
+		// #ifdef APP
 		"rpxCalcMaxDeviceWidth": 750,
 		"rpxCalcBaseDeviceWidth": 750,
+		"rpxCalcIncludeWidth": 0,
 		// #endif
-		"rpxCalcIncludeWidth": 0
+		"navigationBarTextStyle": "black",
+		"navigationBarTitleText": "无足鸟古诗词学习助手",
+		"navigationBarBackgroundColor": "#F4F4F2",
+		"backgroundColor": "#F4F4F2"
 	},
 	"uniIdRouter": {}
 }

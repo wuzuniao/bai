@@ -228,16 +228,27 @@ class AuthClient:
 
     # ==================== 用户信息查询（服务间读调用） ====================
 
-    async def get_user_info(self, user_id: int) -> dict:
+    async def get_usernames(self, user_ids: list[int]) -> dict[int, str]:
         """
-        查询用户基本信息（GET /internal/users/{id}；入参别名解析，资料取属主行）
-        :return: auth 响应 data（{id, username, email, status, roles}）
+        批量查询用户名（GET /internal/users?ids=1,2,3；入参别名解析，资料取属主行）
+        :param user_ids: 本项目认识的 identity id 列表（上限 100，排行按页查询天然满足）
+        :return: {入参 id: 属主用户名}；不存在的 id 不在返回中（调用方以缺席判定）
         :raises RuntimeError: auth 业务错误或网络异常（由调用方决定降级行为）
         """
-        data = await self._get_json(f"/internal/users/{user_id}")
+        if not user_ids:
+            return {}
+        data = await self._get_json(
+            "/internal/users", params={"ids": ",".join(str(uid) for uid in user_ids)}
+        )
         if data.get("code") != 0:
-            raise RuntimeError(f"auth 查询用户信息失败：{data.get('msg', '未知错误')}")
-        return data.get("data") or {}
+            raise RuntimeError(f"auth 批量查询用户名失败：{data.get('msg', '未知错误')}")
+        items = (data.get("data") or {}).get("items") or []
+        result: dict[int, str] = {}
+        for item in items:
+            uid = item.get("id")
+            if uid is not None:
+                result[int(uid)] = str(item.get("username") or "")
+        return result
 
     # ==================== 会员购买授权（服务间写调用） ====================
 

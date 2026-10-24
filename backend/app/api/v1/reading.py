@@ -16,7 +16,7 @@ from ...core.db import get_db
 from ...core.deps import get_current_user_id
 from ...core.exceptions import BusinessError
 from ...core.response import response_service
-from ...schemas.reading import MinutesReport, ReportQuery, SessionsReport
+from ...schemas.reading import MinutesReport, RankingQuery, ReportQuery, SessionsReport
 from ...services.reading_service import reading_service as svc
 from ...services.reward_service import reward_service as reward_svc
 from ...utils.timezone import TimezoneUtil
@@ -68,3 +68,20 @@ async def get_reading_report(
     except BusinessError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return response_service.ok(report)
+
+
+@router.get("/ranking")
+async def get_reading_ranking(
+    params: RankingQuery = Depends(),
+    user_id: int = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """阅读时长排行（全体用户按周期内总时长降序分页，仅含有阅读记录的用户）"""
+    anchor_date = params.anchor if params.anchor is not None else TimezoneUtil.today()
+    try:
+        ranking = await svc.get_ranking(
+            db, params.period, anchor_date, params.page, params.page_size
+        )
+    except BusinessError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return response_service.ok(ranking)

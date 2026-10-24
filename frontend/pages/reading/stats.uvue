@@ -1,19 +1,24 @@
 <template>
 	<view class="page">
-		<PageShell :title="tr('stats.title')" :desc="tr('stats.desc')">
-			<!-- 周期 Tab（周/月/年/总） -->
-			<view class="tabs">
-				<view
-					v-for="(t, ti) in PERIOD_TABS"
-					:key="t.key"
-					:class="period == t.key ? 'tab tab-on' : 'tab'"
-					@click="switchPeriod(t.key)"
-				>
-					<text :class="period == t.key ? 'tab-text-on' : 'tab-text'">{{ tr(t.label) }}</text>
+		<PageShell :title="tr('stats.title')" :desc="tr('stats.desc')" @scrolltolower="onShellBottom">
+			<!-- 周期 Tab（周/月/年）与排行榜入口 -->
+			<view class="tabs-row">
+				<view class="tabs">
+					<view
+						v-for="(t, ti) in PERIOD_TABS"
+						:key="t.key"
+						:class="period == t.key ? 'tab tab-on' : 'tab'"
+						@click="switchPeriod(t.key)"
+					>
+						<text :class="period == t.key ? 'tab-text-on' : 'tab-text'">{{ tr(t.label) }}</text>
+					</view>
+				</view>
+				<view :class="viewMode == 'rank' ? 'rank-btn rank-btn-on' : 'rank-btn'" @click="toggleRank">
+					<text :class="viewMode == 'rank' ? 'rank-btn-text-on' : 'rank-btn-text'">{{ tr('stats.rankBtn') }}</text>
 				</view>
 			</view>
-			<!-- 周期切换（总览无周期概念，隐藏） -->
-			<view v-if="period != 'total'" class="period-row">
+			<!-- 周期切换 -->
+			<view class="period-row">
 				<view class="pp-btn" @click="shiftPeriod(-1)">
 					<view class="pp-arrow pp-arrow-left"></view>
 				</view>
@@ -23,6 +28,8 @@
 				</view>
 			</view>
 
+			<!-- 统计视图：总览卡 + 分布卡 + 书籍榜 + 时段卡 -->
+			<view v-if="viewMode == 'stats'">
 			<!-- 总览卡：周期总时长 + 日均 + 四项指标 -->
 			<view class="card">
 				<text class="total-text">{{ totalText }}</text>
@@ -45,10 +52,10 @@
 				</view>
 			</view>
 
-			<!-- 阅读时长分布（周=逐日条形 / 月=实际月历灰度 / 年=逐月条形 / 总=逐年条形） -->
+			<!-- 阅读时长分布（周=逐日条形 / 月=实际月历灰度 / 年=逐月条形） -->
 			<view class="card">
 				<text class="card-title">{{ tr('stats.distTitle') }}</text>
-				<!-- 条形图（周/年/总）：右侧纵坐标刻度 -->
+				<!-- 条形图（周/年）：右侧纵坐标刻度 -->
 				<view v-if="period != 'month'" class="chart-wrap">
 					<view class="chart">
 						<view v-for="(p, i) in trendBars" :key="i" class="chart-col">
@@ -117,6 +124,30 @@
 					</view>
 				</view>
 			</view>
+			</view>
+
+			<!-- 阅读时长排行（全体用户按当前所选周期总时长降序；触底懒加载至全部显示完） -->
+			<view v-if="viewMode == 'rank'" class="card">
+				<text class="card-title">{{ tr('stats.rankTitle') }}</text>
+				<view v-if="!loggedIn" class="empty-row">
+					<text class="empty-text">{{ tr('stats.rankLogin') }}</text>
+				</view>
+				<view v-else-if="rankList.length == 0" class="empty-row">
+					<text class="empty-text">{{ rankLoadingMore ? tr('stats.loadingMore') : tr('stats.empty') }}</text>
+				</view>
+				<view v-for="(r, i) in rankList" :key="r.userId" :class="i > 0 ? 'rank-item rank-item-gap' : 'rank-item'">
+					<text class="rank-name">{{ r.username.length > 0 ? r.username : tf('stats.rankAnon', [r.userId.toString()]) }}</text>
+					<text class="rank-mins">{{ r.totalText }}</text>
+				</view>
+				<view v-if="rankList.length > 0 && rankLoadingMore" class="empty-row">
+					<text class="empty-text">{{ tr('stats.loadingMore') }}</text>
+				</view>
+			</view>
+
+			<!-- 排行结束提示（卡片外居中） -->
+			<view v-if="viewMode == 'rank' && rankList.length > 0 && !rankMore" class="rank-end">
+				<text class="rank-end-text">{{ tr('stats.noMore') }}</text>
+			</view>
 		</PageShell>
 	</view>
 </template>
@@ -125,13 +156,15 @@
 	/**
 	 * 阅读时间统计页（pages/reading/stats.uvue）
 	 * --------------------------------------------------------------------------
-	 * 数据来自业务后端 GET /api/v1/reading/report（周期周/月/年/总综合报表）；
+	 * 数据来自业务后端 GET /api/v1/reading/report（周期周/月/年综合报表）；
 	 * 未登录时以本地数据兜底（暂存会话流水/书架缓存/笔记缓存构造同构报表）。
 	 * 时长趋势与指标来自 reading_daily_stats（聚合真源），书籍榜与时段分布来自
-	 * reading_sessions 明细账；柱状图为纯 view 实现（底部对齐填充块，无渐变）
+	 * reading_sessions 明细账；柱状图为纯 view 实现（底部对齐填充块，无渐变）。
+	 * 排行视图经 GET /api/v1/reading/ranking 按当前所选周期分页懒加载（触底翻页），
+	 * 未登录不展示排行（本地无他人数据，无兜底）。
 	 */
 	import PageShell from '@/components/common/PageShell.uvue'
-	import { fetchReadingReport } from '@/api/reading.uts'
+	import { fetchReadingReport, fetchReadingRanking } from '@/api/reading.uts'
 	import { hasAccessToken } from '@/utils/request.uts'
 	import { loadBooks, exportPendingSessionRows } from '@/utils/books.uts'
 	import { countCachedNotes } from '@/utils/readerTypes.uts'
@@ -167,12 +200,21 @@
 		totalText: string
 	}
 
+	/** 排行榜行（username 为空串时显示占位文案） */
+	type RankRow = {
+		userId: number
+		username: string
+		totalText: string
+	}
+
 	const PERIOD_TABS: PeriodTab[] = [
 		{ key: 'week', label: 'stats.tabWeek' } as PeriodTab,
 		{ key: 'month', label: 'stats.tabMonth' } as PeriodTab,
 		{ key: 'year', label: 'stats.tabYear' } as PeriodTab,
-		{ key: 'total', label: 'stats.tabTotal' } as PeriodTab,
 	]
+
+	/** 排行榜每页条数（触底懒加载，直至 total 显示完） */
+	const RANK_PAGE_SIZE = 20
 
 	/** 月历表头占位（渲染期经 weekChar(wi) 取词随语言切换刷新） */
 	const CAL_HEAD: string[] = ['0', '1', '2', '3', '4', '5', '6']
@@ -201,6 +243,14 @@
 	const hourBars = ref<BarCell[]>([])
 	const hourTicks = ref<string[]>(['', '', '', '', ''])
 	const hoursTitle = ref(tr('stats.hoursTitle'))
+
+	// ── 排行视图 ──
+	const viewMode = ref('stats')
+	const rankList = ref<RankRow[]>([])
+	const rankPage = ref(1)
+	const rankMore = ref(false)
+	const rankLoadingMore = ref(false)
+	const loggedIn = computed((): boolean => hasAccessToken())
 
 	// ── 文案与格式化 ──
 
@@ -281,12 +331,12 @@
 		period.value = key
 		anchor.value = todayStr()
 		loadReport()
+		if (viewMode.value == 'rank') {
+			reloadRanking()
+		}
 	}
 
 	function shiftPeriod(dir : number) : void {
-		if (period.value == 'total') {
-			return
-		}
 		if (dir > 0 && atLatest.value) {
 			return
 		}
@@ -313,6 +363,67 @@
 			anchor.value = fmtDate(y + dir, 1, 1)
 		}
 		loadReport()
+		if (viewMode.value == 'rank') {
+			reloadRanking()
+		}
+	}
+
+	/** 排行/统计视图切换（进入排行按当前所选周期重新加载） */
+	function toggleRank() : void {
+		viewMode.value = viewMode.value == 'rank' ? 'stats' : 'rank'
+		if (viewMode.value == 'rank') {
+			reloadRanking()
+		}
+	}
+
+	function reloadRanking() : void {
+		rankList.value = []
+		rankPage.value = 1
+		rankMore.value = true
+		loadRankingPage()
+	}
+
+	async function loadRankingPage() : Promise<void> {
+		if (!loggedIn.value || !rankMore.value || rankLoadingMore.value) {
+			return
+		}
+		rankLoadingMore.value = true
+		try {
+			// 整页用户均因已删号被后端剔除时自动续载下一页（guard 限 3 页防连续空页长循环）
+			for (let guard = 0; guard < 3 && rankMore.value; guard++) {
+				const res = await fetchReadingRanking(period.value, anchor.value, rankPage.value, RANK_PAGE_SIZE)
+				if (res.code != 0 || res.data == null) {
+					break
+				}
+				const rows: RankRow[] = []
+				const arr = res.data.getArray('list')
+				if (arr != null) {
+					for (let i = 0; i < arr.length; i++) {
+						const mins = arr[i].getNumber('total_minutes') ?? 0
+						rows.push({
+							userId: arr[i].getNumber('user_id') ?? 0,
+							username: arr[i].getString('username') ?? '',
+							totalText: fmtMinutes(mins)
+						} as RankRow)
+					}
+				}
+				rankList.value = rankList.value.concat(rows)
+				rankPage.value++
+				rankMore.value = res.data.getBoolean('has_more') ?? false
+				if (rows.length > 0) {
+					break
+				}
+			}
+		} catch (e) {
+			// 静默：保留已加载内容，下次触底再试
+		} finally {
+			rankLoadingMore.value = false
+		}
+	}
+
+	/** PageShell 触底：排行懒加载下一页（视图守卫在 loadRankingPage 内） */
+	function onShellBottom() : void {
+		loadRankingPage()
 	}
 
 	// ── 未登录本地报表（与后端 report 同构，渲染走同一管线） ──
@@ -379,7 +490,7 @@
 	function buildLocalReport(periodKey : string, anchorStr : string) : UTSJSONObject {
 		const now = new Date()
 		const todayKey = fmtDate(now.getFullYear(), now.getMonth() + 1, now.getDate())
-		// 周期区间（'YYYY-MM-DD' 零填充字符串可直接字典序比较；total 由流水最小日起）
+		// 周期区间（'YYYY-MM-DD' 零填充字符串可直接字典序比较）
 		let startKey = todayKey
 		let endKey = todayKey
 		if (periodKey == 'week') {
@@ -403,7 +514,6 @@
 		// 暂存会话流水聚合（未登录时全部条目均为离线流水）
 		const dayBuckets: MinuteBucket[] = []
 		const monthBuckets: MinuteBucket[] = []
-		const yearBuckets: MinuteBucket[] = []
 		const hourMins: number[] = []
 		for (let i = 0; i < 24; i++) {
 			hourMins.push(0)
@@ -418,13 +528,12 @@
 				continue
 			}
 			const day = dayKey.substring(0, 10)
-			if (periodKey != 'total' && (day < startKey || day > endKey)) {
+			if (day < startKey || day > endKey) {
 				continue
 			}
 			const mins = s.getNumber('minutes') ?? 0
 			addToBuckets(dayBuckets, day, mins)
 			addToBuckets(monthBuckets, day.substring(0, 7), mins)
-			addToBuckets(yearBuckets, day.substring(0, 4), mins)
 			const hour = parseInt(dayKey.substring(11, 13))
 			if (hour >= 0 && hour < 24) {
 				hourMins[hour] = hourMins[hour] + mins
@@ -453,15 +562,6 @@
 				aggIdx = bookAggs.length - 1
 			}
 			bookAggs[aggIdx].total = bookAggs[aggIdx].total + mins
-		}
-		if (periodKey == 'total') {
-			let minKey = todayKey
-			for (let i = 0; i < dayBuckets.length; i++) {
-				if (dayBuckets[i].key < minKey) {
-					minKey = dayBuckets[i].key
-				}
-			}
-			startKey = minKey
 		}
 
 		// 趋势点位（与后端同构：label=坐标轴标签；峰值文案单独入 peak）
@@ -509,20 +609,6 @@
 				if (mins > peakMinutes) {
 					peakMinutes = mins
 					peakFull = tr('stats.mLabel' + m.toString())
-				}
-			}
-		} else {
-			const y1 = parseInt(startKey.substring(0, 4))
-			const y2 = parseInt(endKey.substring(0, 4))
-			for (let y = y1; y <= y2; y++) {
-				const mins = bucketOf(yearBuckets, '' + y)
-				const item = {} as UTSJSONObject
-				item['label'] = '' + y
-				item['minutes'] = mins
-				trendArr.push(item)
-				if (mins > peakMinutes) {
-					peakMinutes = mins
-					peakFull = tf('stats.periodYear', [y.toString()])
 				}
 			}
 		}
@@ -725,11 +811,11 @@
 	async function loadReport() : Promise<void> {
 		if (!hasAccessToken()) {
 			// 未登录：本地数据兜底渲染（暂存会话流水 + 书架缓存 + 笔记缓存，与云端报表同构）
-			renderReport(buildLocalReport(period.value, period.value == 'total' ? '' : anchor.value))
+			renderReport(buildLocalReport(period.value, anchor.value))
 			return
 		}
 		try {
-			const res = await fetchReadingReport(period.value, period.value == 'total' ? '' : anchor.value)
+			const res = await fetchReadingReport(period.value, anchor.value)
 			if (res.code == 0 && res.data != null) {
 				renderReport(res.data)
 			}
@@ -824,14 +910,20 @@
 		background-color: $bai-canvas-soft;
 	}
 
-	/* ── 周期 Tab（白底胶囊分段，激活段墨黑底白字） ── */
+	/* ── 周期 Tab 行（白底胶囊分段，激活段墨黑底白字）+ 右侧排行榜入口 ── */
+	.tabs-row {
+		flex-direction: row;
+		align-items: center;
+		margin-top: 40rpx;
+		margin-bottom: 24rpx;
+	}
+
 	.tabs {
+		flex: 1;
 		flex-direction: row;
 		background-color: $bai-canvas;
 		border-radius: $bai-rounded-pill;
 		padding: 6rpx;
-		margin-top: 40rpx;
-		margin-bottom: 24rpx;
 	}
 
 	.tab {
@@ -865,9 +957,35 @@
 		margin-bottom: 24rpx;
 	}
 
-	.pp-btn {
-		width: 80rpx;
+	.rank-btn {
 		height: 80rpx;
+		justify-content: center;
+		align-items: center;
+		background-color: $bai-canvas;
+		border-radius: $bai-rounded-pill;
+		padding-left: 44rpx;
+		padding-right: 44rpx;
+		margin-left: 16rpx;
+	}
+
+	.rank-btn-on {
+		background-color: $bai-ink;
+	}
+
+	.rank-btn-text {
+		color: $bai-body;
+		font-size: 26rpx;
+	}
+
+	.rank-btn-text-on {
+		color: $bai-on-primary;
+		font-size: 26rpx;
+		font-weight: 600;
+	}
+
+	.pp-btn {
+		width: 64rpx;
+		height: 64rpx;
 		justify-content: center;
 		align-items: center;
 		background-color: $bai-canvas;
@@ -880,8 +998,8 @@
 
 	/* 箭头：边框折角旋转绘制（文本字形受字体度量影响无法稳定居中，改用几何绘制） */
 	.pp-arrow {
-		width: 18rpx;
-		height: 18rpx;
+		width: 16rpx;
+		height: 16rpx;
 	}
 
 	/* 左箭头：左+下边框折角（指向左下）顺时针转 45° 指向左侧 */
@@ -1156,5 +1274,42 @@
 		color: $bai-ink;
 		font-size: 32rpx;
 		font-weight: 700;
+	}
+
+	/* ── 阅读时长排行 ── */
+	.rank-item {
+		flex-direction: row;
+		align-items: center;
+	}
+
+	.rank-item-gap {
+		margin-top: 24rpx;
+	}
+
+	.rank-name {
+		flex: 1;
+		color: $bai-ink;
+		font-size: 28rpx;
+		lines: 1;
+		text-overflow: ellipsis;
+		margin-right: 16rpx;
+	}
+
+	.rank-mins {
+		color: $bai-ink;
+		font-size: 32rpx;
+		font-weight: 700;
+	}
+
+	/* ── 排行结束提示（卡片外居中） ── */
+	.rank-end {
+		flex-direction: row;
+		justify-content: center;
+		padding-top: 8rpx;
+	}
+
+	.rank-end-text {
+		color: $bai-mute;
+		font-size: 24rpx;
 	}
 </style>

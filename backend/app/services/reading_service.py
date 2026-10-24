@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import time
 from datetime import date, datetime
 from datetime import time as dtime
 from datetime import timedelta
@@ -17,6 +18,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..core.auth_client import auth_client
 from ..core.exceptions import BusinessError
 from ..models import (
     ReadingBookmark,
@@ -62,6 +64,13 @@ class ReadingService:
 
     # 会话流水最早日期窗口（天）：起算日早于今日-该天数的条目视为无效跳过
     SESSION_MAX_AGE_DAYS = 366
+
+    # 排行榜用户名缓存有效期（秒）：auth 用户名改动低频，有效期内重复出现不重查
+    USERNAME_TTL_SECONDS = 3600.0
+
+    def __init__(self) -> None:
+        # 排行榜用户名缓存：user_id -> (username, monotonic 缓存时刻)；进程内存态，重启即失效
+        self._username_cache: dict[int, tuple[str, float]] = {}
 
     @staticmethod
     def fmt_dt(dt: datetime | None) -> str | None:
@@ -593,7 +602,7 @@ class ReadingService:
 
     # ==================== 阅读报告（统计页） ====================
 
-    REPORT_PERIODS = ("week", "month", "year", "total")
+    REPORT_PERIODS = ("week", "month", "year")
 
     # 时段偏好分段（按会话流水 started_at 小时归属，分钟和最大者作为偏好标签）
     _HOUR_SEGMENTS: list[tuple[str, int, int]] = [
@@ -615,7 +624,7 @@ class ReadingService:
         self, db: AsyncSession, user_id: int, period: str, anchor: date
     ) -> dict[str, Any]:
         """
-        阅读统计报告（周期 = week 本周 / month 本月 / year 本年 / total 全部，anchor 为周期内锚点日期）
+        阅读统计报告（周期 = week 本周 / month 本月 / year 本年，anchor 为周期内锚点日期）
         - 趋势与时长来自 reading_daily_stats（聚合真源）；书籍榜与时段分布来自 reading_sessions
           明细账，按「日」等比校准到真源后聚合（两账可能漂移，详见下方书籍榜注释），保证与总时长互洽
         - 在读/完本为 user_books 累计状态（项目无按周期快照数据）；笔记数按 created_at 落区间统计
@@ -643,17 +652,6 @@ class ReadingService:
             end = date(anchor.year, 12, 31)
             for m in range(1, 13):
                 points.append((date(anchor.year, m, 1), f"{m}月", f"{m}月"))
-        else:  # total
-            first = await db.execute(
-                select(func.min(ReadingDailyStat.stat_date)).where(
-                    ReadingDailyStat.user_id == user_id
-                )
-            )
-            first_date = first.scalar_one_or_none()
-            start = first_date if first_date is not None else today
-            end = today
-            for y in range(start.year, end.year + 1):
-                points.append((date(y, 1, 1), str(y), f"{y}年"))
         # 统计区间末裁剪到今天（未来日无数据，且避免日均被未到的天数稀释）；
         # 自然周期终点单独保留用于展示（周粒度选择器显示完整一周而非截至今天）
         natural_end = end
@@ -676,12 +674,9 @@ class ReadingService:
         for d, axis, full in points:
             if period in ("week", "month"):
                 mins = day_map.get(d, 0)
-            elif period == "year":
+            else:
                 # 年粒度按自然月分桶（点位为各月 1 日）
                 mins = sum(v for k, v in day_map.items() if k.year == d.year and k.month == d.month)
-            else:
-                # 总粒度按自然年分桶
-                mins = sum(v for k, v in day_map.items() if k.year == d.year)
             trend.append({"label": axis, "minutes": mins})
             if mins > peak_minutes:
                 peak_minutes = mins
@@ -774,6 +769,101 @@ class ReadingService:
             "hours": hours,
             "peak_tag": peak_tag,
         }
+
+    # ==================== 阅读时长排行（统计页） ====================
+
+    async def get_ranking(
+        self, db: AsyncSession, period: str, anchor: date, page: int, page_size: int
+    ) -> dict[str, Any]:
+        """
+        阅读时长排行（全体用户，仅含有阅读记录者；按周期内总时长降序分页）
+        - 数据取聚合真源 reading_daily_stats 按周期区间 group by user_id 求和
+        - 用户名经 auth 服务解析（并发单查 + TTL 缓存）；已删号用户（auth 404）从排行剔除，
+          auth 临时不可达时该用户保留、用户名空串由前端占位显示
+        - 同分钟数按 user_id 升序稳定排序，保证翻页不串行；has_more 由多取一行探测
+        """
+        if period not in self.REPORT_PERIODS:
+            raise BusinessError("无效的统计周期")
+        if period == "week":
+            # 周日起始，与统计页周粒度一致
+            start = anchor - timedelta(days=(anchor.weekday() + 1) % 7)
+            natural_end = start + timedelta(days=6)
+        elif period == "month":
+            start, natural_end = self._month_range(anchor)
+        else:
+            start = date(anchor.year, 1, 1)
+            natural_end = date(anchor.year, 12, 31)
+        end = min(natural_end, TimezoneUtil.today())
+
+        agg = (
+            select(
+                ReadingDailyStat.user_id,
+                func.sum(ReadingDailyStat.minutes).label("total_minutes"),
+            )
+            .where(ReadingDailyStat.stat_date >= start, ReadingDailyStat.stat_date <= end)
+            .group_by(ReadingDailyStat.user_id)
+            .having(func.sum(ReadingDailyStat.minutes) > 0)
+            .subquery()
+        )
+        total_row = await db.execute(select(func.count()).select_from(agg))
+        # 多取一行探测下一页（已被删号剔除的用户会让当页返回数变少，总数不能用于判尽）
+        page_rows = await db.execute(
+            select(agg.c.user_id, agg.c.total_minutes)
+            .order_by(agg.c.total_minutes.desc(), agg.c.user_id.asc())
+            .offset((page - 1) * page_size)
+            .limit(page_size + 1)
+        )
+        pairs = [(int(r.user_id), int(r.total_minutes)) for r in page_rows.fetchall()]
+        has_more = len(pairs) > page_size
+        if has_more:
+            pairs = pairs[:page_size]
+        names, missing = await self._resolve_usernames([uid for uid, _ in pairs])
+        return {
+            "total": int(total_row.scalar_one()),
+            "has_more": has_more,
+            "list": [
+                {"user_id": uid, "username": names.get(uid, ""), "total_minutes": mins}
+                for uid, mins in pairs
+                if uid not in missing
+            ],
+        }
+
+    async def _resolve_usernames(self, user_ids: list[int]) -> tuple[dict[int, str], set[int]]:
+        """
+        批量解析用户名：一次调用 auth 批量接口（GET /internal/users?ids=），进程内
+        TTL 缓存兜底重复出现（排行翻页增量查询）
+        :return: (user_id → 用户名；auth 不可达等临时故障降级空串，由前端占位显示),
+                 auth 确认不存在的 user_id 集合（已删号，排行剔除并负缓存）
+        """
+        now = time.monotonic()
+        names: dict[int, str] = {}
+        missing: set[int] = set()
+        pending: list[int] = []
+        for uid in user_ids:
+            hit = self._username_cache.get(uid)
+            if hit is None or now - hit[1] >= self.USERNAME_TTL_SECONDS:
+                pending.append(uid)
+            elif hit[0]:
+                names[uid] = hit[0]
+            else:
+                missing.add(uid)
+        if pending:
+            try:
+                fetched = await auth_client.get_usernames(pending)
+            except Exception:
+                # auth 不可达/尚未部署批量接口：保留全部待查用户（用户名空串前端占位），
+                # 不缓存以便下次重试
+                return names, missing
+            for uid in pending:
+                name = fetched.get(uid)
+                if name is None:
+                    # 响应缺席 = auth 确认不存在（已删号）：负缓存并从排行剔除
+                    missing.add(uid)
+                    self._username_cache[uid] = ("", now)
+                else:
+                    names[uid] = name
+                    self._username_cache[uid] = (name, now)
+        return names, missing
 
 
 # 模块级单例
