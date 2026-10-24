@@ -165,15 +165,17 @@
 	/** ===== 首页诗划词气泡（复用阅读页 SelectionPopover：选区/手柄/拖动与五项动作内聚组件） ===== */
 	/** 诗行字符容量：7 字 + 行尾标点（选区/划线/想法统一坐标口径，标点占每行末位 idx=7） */
 	const LINE_CHAR_COUNT = 8
+	/** 诗行内容宽（rpx，行尾标点区右缘，窄屏选区/划线换算特判用） */
+	const LINE_TEXT_W_RPX = 510
 
 	/** 划词气泡与提示组件引用 */
 	const popoverRef = ref<SelectionPopover | null>(null)
 	const toastRef = ref<ReaderToast | null>(null)
 
-	/** 气泡浮层配色（首页固定日间，取自阅读日间主题真源） */
+	/** 气泡浮层配色（首页固定日间，取自阅读日间主题真源；panelBg 与阅读页想法面板同字段） */
 	const popoverBg = READER_THEME_LIGHT.popoverBg
 	const quoteColor = READER_THEME_LIGHT.mutedColor
-	const panelBg = '#ffffff'
+	const panelBg = READER_THEME_LIGHT.thoughtPanelBg
 	const contentColor = READER_THEME_LIGHT.titleColor
 	const panelShadow = READER_THEME_LIGHT.panelShadow
 
@@ -188,7 +190,7 @@
 	const wideUnitW = computed(() : number => Math.floor((wideCardW.value - WIDE_CARD_PAD * 2) / (LINE_CHAR_COUNT * 2)))
 	const cardStyle = computed(() : string => isWide.value ? 'width:' + wideCardW.value + 'px;padding:' + WIDE_CARD_PAD + 'px' : '')
 
-	/** rpx→px 换算因子（按端派生，禁用 uni.upx2px——uni-app x H5 端无此 API（实测 undefined），
+	/** rpx→px 换算因子（按端派生，与 uni.upx2px 的冻结基准换算同式；
 	 *  微信端原生 rpx=窗口宽/750；App 端 rpx 冻结上限 750；Web 端 rpx 冻结上限 480，因子须与
 	 *  pages.json globalStyle 的冻结基准一致，否则划词换算与 CSS 渲染错位） */
 	const rpxF = computed(() : number => {
@@ -235,7 +237,7 @@
 	 *  与划线条带换算同口径）、宽屏合并行 16 单元宽；正文在页面内居中，卡片居中即与正文对齐 */
 	const thoughtCardMaxW = computed(() : number => {
 		if (!isWide.value) {
-			return 510 * rpxF.value
+			return LINE_TEXT_W_RPX * rpxF.value
 		}
 		return wideUnitW.value * (LINE_CHAR_COUNT * 2)
 	})
@@ -451,7 +453,7 @@
 			return 'left:' + ciStart * step + 'px;top:' + widePinyinLH.value + 'px;width:' + (ciEnd - ciStart + 1) * step + 'px;height:' + wideCharLH.value + 'px'
 		}
 		const f = rpxF.value
-		const right = ciEnd >= LINE_CHAR_COUNT - 1 ? 510 * f : (ciEnd + 1) * step
+		const right = ciEnd >= LINE_CHAR_COUNT - 1 ? LINE_TEXT_W_RPX * f : (ciEnd + 1) * step
 		return 'left:' + ciStart * step + 'px;top:' + 27 * f + 'px;width:' + (right - ciStart * step) + 'px;height:' + 50 * f + 'px'
 	}
 
@@ -464,7 +466,7 @@
 			return 'left:' + ciStart * step + 'px;width:' + (ciEnd - ciStart + 1) * step + 'px'
 		}
 		const f = rpxF.value
-		const right = ciEnd >= LINE_CHAR_COUNT - 1 ? 510 * f : (ciEnd + 1) * step
+		const right = ciEnd >= LINE_CHAR_COUNT - 1 ? LINE_TEXT_W_RPX * f : (ciEnd + 1) * step
 		return 'left:' + ciStart * step + 'px;width:' + (right - ciStart * step) + 'px'
 	}
 

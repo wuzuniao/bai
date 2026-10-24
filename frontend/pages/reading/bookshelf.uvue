@@ -220,13 +220,13 @@
 	import { ensureBookLocal } from '@/utils/cloudsync.uts'
 	import { hasAccessToken, ApiResponse } from '@/utils/request.uts'
 	import { mpCapsuleRect, CONTENT_CAP_PX, scheduleResizeReload } from '@/utils/layout.uts'
-	import { REWARD_TIERS, fmtRemainMinutes } from '@/utils/rewards.uts'
+	import { REWARD_TIERS, fmtRemainMinutes, tierTotalReward } from '@/utils/rewards.uts'
 	import { fetchActivitySummary, claimReadingReward } from '@/api/activity.uts'
 	import { t, tf } from '@/utils/i18n.uts'
 	// 词典注册（bookshelf 页文案 + 公共段）
 	import '@/utils/locales/bookshelf.uts'
 	import '@/utils/locales/common.uts'
-	import { useUserStore } from '@/stores/user.uts'
+	import { useUserStore, hasMembershipRole } from '@/stores/user.uts'
 	// #ifdef WEB
 	import { webPickBooks } from '@/utils/webfs'
 	// #endif
@@ -282,7 +282,7 @@
 		if (i < 0) {
 			return 0
 		}
-		return REWARD_TIERS[i].base + REWARD_TIERS[i].bonus
+		return tierTotalReward(REWARD_TIERS[i])
 	})
 
 	/** 胶囊引导文案：locked 显示「再读 X 分钟」，claimable 显示「已达成」 */
@@ -477,7 +477,7 @@
 	/** 内容区左缘偏移（px）：主内容限宽（CONTENT_CAP_PX，Web 480/App 750）居中后内容左缘距视口左缘的距离（宽屏浮层菜单对齐用，窄屏恒 0） */
 	const capLeftPx = ref(0)
 
-	/** 加号弹层右缘（px）：right 锚定 .page 右缘（菜单向左伸展，不依赖单位换算 API，Web 端 upx2px 行为不可靠）。
+	/** 加号弹层右缘（px）：right 锚定 .page 右缘（菜单向左伸展，直接用已测量的限宽偏移，不做单位换算）。
 	 * 小程序端随胶囊避让（navRight=右缘距视口右距离）；其余端固定列右缘内距（38rpx≈20px，390 设计稿） */
 	const plusMenuRight = computed(() : number => {
 		return capLeftPx.value + (navRight.value > 0 ? navRight.value : 20)
@@ -738,13 +738,7 @@
 
 	/** 云端同步入口可见性：黑铁及以上会员（含管理员），与后端 cos_service 口径一致；非会员不开放入口 */
 	const isSyncMember = computed((): boolean => {
-		const info = userStore.userInfo
-		if (info == null) {
-			return false
-		}
-		const roles = info.roles
-		return roles.includes('admin') || roles.includes('iron') || roles.includes('bronze')
-			|| roles.includes('silver') || roles.includes('gold')
+		return hasMembershipRole(userStore.userInfo)
 	})
 
 	/** 加号菜单「云端同步」：登录+会员校验后执行一次双向同步（本地↔云端差异互补），结果弹窗提示 */
@@ -1042,7 +1036,7 @@
 		claimReadingReward(tier.minutes).then((res: ApiResponse) => {
 			claimBusy.value = false
 			if (res.code == 0 && res.data != null) {
-				const reward = res.data!.getNumber('reward') ?? (tier.base + tier.bonus)
+				const reward = res.data!.getNumber('reward') ?? tierTotalReward(tier)
 				uni.showToast({ title: tf('toast.claimOkN', [reward.toString()]), icon: 'none' })
 				markTierClaimed(i)
 			}

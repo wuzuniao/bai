@@ -171,7 +171,8 @@
 		uni.setNavigationBarTitle({ title: t('memberpay.title') })
 	})
 
-	/** 顶部定位：返回按钮取状态栏高度，内容再避让；Web 端不渲染返回键，内容距顶收紧 */
+	/** 顶部定位：返回按钮取状态栏高度，内容再避让；Web 端不渲染返回键，内容距顶收紧
+	 * （-5 与 windowHeight*0.006 为视觉校准微调量，改动前需真机核对返回键与胶囊/状态栏的相对位置） */
 	const backTop = ref(44)
 	const mainTop = ref(90)
 	const win = uni.getWindowInfo()
@@ -276,13 +277,8 @@
 		purchaseMembership(months.value).then((res: ApiResponse) => {
 			paying.value = false
 			if (res.code == 0 && res.data != null) {
+				applyGoldBalance(res)
 				const data = res.data!
-				const balanceRaw = data['balance']
-				if (balanceRaw != null) {
-					const b = balanceRaw as UTSJSONObject
-					const gold = b['gold']
-					balanceGold.value = gold == null ? 0 : gold as number
-				}
 				// 到期时间为 ISO 字符串（无时区后缀），展示日期部分
 				const expiresAtRaw = data['expires_at']
 				const expiresAt = expiresAtRaw == null ? '' : expiresAtRaw as string

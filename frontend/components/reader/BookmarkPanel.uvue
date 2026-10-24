@@ -17,7 +17,7 @@
 
 <script setup lang="uts">
 	import { Chapter, Bookmark, loadBookmarks, saveBookmarksToStorage, spacedChapterTitle } from '@/utils/readerTypes.uts'
-	import { ReaderTheme } from '@/utils/theme.uts'
+	import { ReaderTheme, readerThemeIcon } from '@/utils/theme.uts'
 	import { t } from '@/utils/i18n.uts'
 	// 词典注册（阅读器组件文案）
 	import '@/utils/locales/readercomp.uts'
@@ -58,7 +58,7 @@
 
 	/** 主题图标路径：夜间使用 -light 白色变体 */
 	function themeIcon(name : string) : string {
-		return '/static/icons/' + name + (props.night ? '-light' : '') + '.svg'
+		return readerThemeIcon(name, props.night)
 	}
 
 	/** 目录安全读取：越界或数据未注入时返回空壳章（书签文案兜底） */

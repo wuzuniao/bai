@@ -74,10 +74,10 @@
 				</view>
 
 				<!-- 底部注册链接 -->
-				<view v-if="loginMode === 'normal'" class="login-page__footer">
-					<text class="login-page__footer-text">{{ t('login.noAccount') }}</text>
-					<text class="login-page__footer-link" @click="goRegister">{{ t('login.goRegister') }}</text>
-			</view>
+					<view v-if="loginMode === 'normal'" class="login-page__footer">
+						<text class="login-page__footer-text">{{ t('login.noAccount') }}</text>
+						<text class="login-page__footer-link" @click="goRegister">{{ t('login.goRegister') }}</text>
+					</view>
 	</PageShell>
 </template>
 
@@ -93,6 +93,7 @@
 	import '@/pages/user/locales/login.uts'
 	import '@/utils/locales/common.uts'
 	import { loginUser } from './api/user.uts'
+	import { confirmAgreement, toastGo } from './utils/flow.uts'
 
 	// #ifdef MP-WEIXIN
 	import { wechatLogin } from './api/user.uts'
@@ -123,18 +124,30 @@
 	})
 	// #endif
 
+	// URL 显式指定 normal（注册/找回密码跳回）时不做指纹自适应
+	let urlForcedNormal = false
 	onLoad((options) => {
 		if (options != null && options['mode'] == 'normal') {
 			loginMode.value = 'normal'
+			urlForcedNormal = true
 		}
 	})
 
-	// App 端：页面显示时检测指纹能力，决定是否默认展示指纹一键登录卡片
-	// 三者同时满足才默认指纹卡片：设备支持指纹 + 本地存在凭证 + 已开启指纹开关，否则账号密码登录
+	// App 端：首次显示时检测指纹能力，决定是否默认展示指纹一键登录卡片
+	// 三者同时满足才默认指纹卡片：设备支持指纹 + 本地存在凭证 + 已开启指纹开关，否则账号密码登录；
+	// 仅首次生效，避免回前台覆盖 URL 参数或用户手选的登录方式
 	const biometricVisible = ref(false)
+	let biometricModeDecided = false
 	onShow(() => {
 		// #ifdef APP
+		if (biometricModeDecided) {
+			return
+		}
 		isBiometricAvailable().then((ok: boolean) => {
+			if (biometricModeDecided || urlForcedNormal) {
+				return
+			}
+			biometricModeDecided = true
 			biometricVisible.value = ok && getBiometricToken().length > 0 && isBiometricEnabled()
 			loginMode.value = biometricVisible.value ? 'fingerprint' : 'normal'
 		})
@@ -178,7 +191,7 @@
 	}
 
 	function onPasswordBlur() : void {
-		passwordError.value = passwordValue.value.length == 0 ? t('login.passwordEmpty') : ''
+		passwordError.value = validatePasswordValue(passwordValue.value)
 	}
 
 	/** 登录提交：前端校验 → 隐私协议确认 → 调用 auth 服务 → 写入状态 → 跳转 */
@@ -198,18 +211,7 @@
 		}
 		// 隐私协议勾选校验：未勾选时显示确认弹窗
 		if (!remember.value) {
-			uni.showModal({
-				title: t('common.tip'),
-				content: t('login.agreeContent'),
-				confirmText: t('common.ok'),
-				cancelText: t('common.cancel'),
-				success: (res) => {
-					if (res.confirm) {
-						remember.value = true
-						handleLogin()
-					}
-				}
-			})
+			confirmAgreement(t('login.agreeContent'), remember, handleLogin)
 			return
 		}
 		submitting.value = true
@@ -229,10 +231,7 @@
 				}
 				// #endif
 			}
-			uni.showToast({ title: t('login.success'), icon: 'success' })
-			setTimeout(() => {
-				uni.redirectTo({ url: '/pages/user/settings' })
-			}, 1500)
+			toastGo(t('login.success'), '/pages/user/settings')
 		}).catch((e) => {
 			const err = e as Error
 			uni.showToast({ title: err.message, icon: 'none' })
@@ -258,18 +257,7 @@
 		}
 		// 隐私协议勾选校验：未勾选时弹出确认对话框，确认后自动勾选并重入
 		if (!fingerprintAgree.value) {
-			uni.showModal({
-				title: t('common.tip'),
-				content: t('login.agreeContent'),
-				confirmText: t('common.ok'),
-				cancelText: t('common.cancel'),
-				success: (res) => {
-					if (res.confirm) {
-						fingerprintAgree.value = true
-						handleFingerprintLogin()
-					}
-				}
-			})
+			confirmAgreement(t('login.agreeContent'), fingerprintAgree, handleFingerprintLogin)
 			return
 		}
 		const token = getBiometricToken()
@@ -290,10 +278,7 @@
 			if (d != null) {
 				userStore.setUser(d)
 			}
-			uni.showToast({ title: t('login.success'), icon: 'success' })
-			setTimeout(() => {
-				uni.redirectTo({ url: '/pages/user/settings' })
-			}, 1500)
+			toastGo(t('login.success'), '/pages/user/settings')
 		} catch (e) {
 			uni.hideLoading()
 			// 用户取消指纹验证不提示错误，其余提示
@@ -317,18 +302,7 @@
 			return
 		}
 		if (!wechatAgree.value) {
-			uni.showModal({
-				title: t('common.tip'),
-				content: t('login.agreeContent'),
-				confirmText: t('common.ok'),
-				cancelText: t('common.cancel'),
-				success: (res) => {
-					if (res.confirm) {
-						wechatAgree.value = true
-						handleWechatLogin()
-					}
-				}
-			})
+			confirmAgreement(t('login.agreeContent'), wechatAgree, handleWechatLogin)
 			return
 		}
 		submitting.value = true
@@ -361,10 +335,7 @@
 					if (d != null) {
 						userStore.setUser(d)
 					}
-					uni.showToast({ title: t('login.success'), icon: 'success' })
-					setTimeout(() => {
-						uni.redirectTo({ url: '/pages/user/settings' })
-					}, 1500)
+					toastGo(t('login.success'), '/pages/user/settings')
 				}).catch((e) => {
 					clearTimeout(timeoutId)
 					uni.hideLoading()

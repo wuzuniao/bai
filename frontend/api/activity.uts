@@ -6,42 +6,29 @@
  *   hasAccessToken 源头跳过请求，未登录走本地默认展示）
  * - 返回 ApiResponse（code=0 成功，data 为内层业务数据）
  */
-import { request, ApiResponse, RequestOptions } from '@/utils/request.uts'
-import { API_BASE_URL } from '@/utils/config.uts'
+import { request, ApiResponse, apiOpts } from '@/utils/request.uts'
 
-/** 构造请求选项（固定业务后端地址、带认证头、10s 超时、401 静默） */
-function opts(url: string, method: RequestMethod, data: UTSJSONObject | null) : RequestOptions {
-	return {
-		url: url,
-		method: method,
-		data: data,
-		auth: true,
-		timeout: 10000,
-		baseUrl: API_BASE_URL,
-		silent: true
-	} as RequestOptions
-}
 
 /** 活动页聚合数据（余额 / 今日已获 / 阅读统计 / 本周签到 / 今日档位状态） */
 export function fetchActivitySummary() : Promise<ApiResponse> {
-	return request(opts('/api/v1/activity/summary', 'GET', null))
+	return request(apiOpts('/api/v1/activity/summary', 'GET', null))
 }
 
 /** 今日签到（按星期定档发放铜币；重复签到后端 400） */
 export function postCheckin() : Promise<ApiResponse> {
-	return request(opts('/api/v1/activity/checkin', 'POST', {} as UTSJSONObject))
+	return request(apiOpts('/api/v1/activity/checkin', 'POST', {} as UTSJSONObject))
 }
 
 /** 会员补签（date=被补日期 YYYY-MM-DD；黑铁及以上每月 3 次，后端实时复核会员与限额） */
 export function postCheckinMakeup(date: string) : Promise<ApiResponse> {
 	const data = {} as UTSJSONObject
 	data['date'] = date
-	return request(opts('/api/v1/activity/makeup', 'POST', data))
+	return request(apiOpts('/api/v1/activity/makeup', 'POST', data))
 }
 
 /** 领取阅读档位奖励（tierMinutes=档位阈值分钟数；未达标/已领取后端 400） */
 export function claimReadingReward(tierMinutes: number) : Promise<ApiResponse> {
 	const data = {} as UTSJSONObject
 	data['tier_minutes'] = tierMinutes
-	return request(opts('/api/v1/activity/reading-claim', 'POST', data))
+	return request(apiOpts('/api/v1/activity/reading-claim', 'POST', data))
 }

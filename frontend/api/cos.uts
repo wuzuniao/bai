@@ -5,27 +5,14 @@
  * - 预签名 URL 由后端经 STS 临时密钥签发，密钥与临时凭证均不出后端，
  *   前端仅持 URL 直传/直取 COS（上传后需调完成登记维护云端清单）
  */
-import { request, ApiResponse, RequestOptions } from '@/utils/request.uts'
-import { API_BASE_URL } from '@/utils/config.uts'
+import { request, ApiResponse, apiOpts } from '@/utils/request.uts'
 // 词典注册（复用请求层文案段）
 import '@/utils/locales/request.uts'
 
-/** 构造请求选项（固定业务后端地址、带认证头、15s 超时、401 静默） */
-function opts(url: string, method: RequestMethod, data: UTSJSONObject | null) : RequestOptions {
-	return {
-		url: url,
-		method: method,
-		data: data,
-		auth: true,
-		timeout: 15000,
-		baseUrl: API_BASE_URL,
-		silent: true
-	} as RequestOptions
-}
 
 /** 云端书籍清单（data: {prefix, items: [{key, title, format, size, uploaded_at}]}） */
 export function fetchCloudObjects() : Promise<ApiResponse> {
-	return request(opts('/api/v1/cos/objects', 'GET', null))
+	return request(apiOpts('/api/v1/cos/objects', 'GET', null, 15000))
 }
 
 /** 上传预签名 URL（data: {key, url, expires_in}；书名/格式服务端白名单校验） */
@@ -33,7 +20,7 @@ export function fetchUploadUrl(title: string, format: string) : Promise<ApiRespo
 	const data = {} as UTSJSONObject
 	data['title'] = title
 	data['format'] = format
-	return request(opts('/api/v1/cos/upload-url', 'POST', data))
+	return request(apiOpts('/api/v1/cos/upload-url', 'POST', data, 15000))
 }
 
 /** 下载预签名 URL（data: {key, url, expires_in}） */
@@ -41,7 +28,7 @@ export function fetchDownloadUrl(title: string, format: string) : Promise<ApiRes
 	const data = {} as UTSJSONObject
 	data['title'] = title
 	data['format'] = format
-	return request(opts('/api/v1/cos/download-url', 'GET', data))
+	return request(apiOpts('/api/v1/cos/download-url', 'GET', data, 15000))
 }
 
 /** 删除云端书籍对象（幂等；书架删除勾选「同时删除云端数据」时随业务库删除触发） */
@@ -49,5 +36,5 @@ export function deleteCloudObject(title: string, format: string) : Promise<ApiRe
 	const data = {} as UTSJSONObject
 	data['title'] = title
 	data['format'] = format
-	return request(opts('/api/v1/cos/delete', 'POST', data))
+	return request(apiOpts('/api/v1/cos/delete', 'POST', data, 15000))
 }

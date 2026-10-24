@@ -7,24 +7,11 @@
  *   页面走本地缓存与默认样式；调用点经 hasAccessToken 源头跳过请求）
  * - 返回 ApiResponse（code=0 成功，data 为内层业务数据）
  */
-import { request, ApiResponse, RequestOptions } from '@/utils/request.uts'
-import { API_BASE_URL } from '@/utils/config.uts'
+import { request, ApiResponse, apiOpts } from '@/utils/request.uts'
 import { t } from '@/utils/i18n.uts'
 // 词典注册（复用请求层文案段）
 import '@/utils/locales/request.uts'
 
-/** 构造请求选项（固定业务后端地址、带认证头、10s 超时、401 静默） */
-function opts(url: string, method: RequestMethod, data: UTSJSONObject | null) : RequestOptions {
-	return {
-		url: url,
-		method: method,
-		data: data,
-		auth: true,
-		timeout: 10000,
-		baseUrl: API_BASE_URL,
-		silent: true
-	} as RequestOptions
-}
 
 /** 空请求体（DELETE 等无体请求） */
 function emptyBody() : UTSJSONObject {
@@ -35,7 +22,7 @@ function emptyBody() : UTSJSONObject {
 
 /** 书架列表（云端为准；返回 data.list 为书籍对象数组） */
 export function fetchBooks() : Promise<ApiResponse> {
-	return request(opts('/api/v1/books', 'GET', null))
+	return request(apiOpts('/api/v1/books', 'GET', null))
 }
 
 /** 导入登记（同用户同名书后端复用同一行并回填元数据；返回 data 含 id 与 created） */
@@ -46,31 +33,31 @@ export function registerBook(title: string, format: string, size: number, chapte
 	data['size'] = size
 	data['chapter_count'] = chapterCount
 	data['has_preface'] = hasPreface
-	return request(opts('/api/v1/books', 'POST', data))
+	return request(apiOpts('/api/v1/books', 'POST', data))
 }
 
 /** 阅读进度回写（fields 仅放本次要更新的进度键，如 last_chapter/last_page_index/last_scroll_top/last_percent/pdf_ratio；后端按「有进度字段」判定刷新最近阅读时刻） */
 export function updateBookProgress(bookId: number, fields: UTSJSONObject) : Promise<ApiResponse> {
-	return request(opts('/api/v1/books/' + bookId, 'PUT', fields))
+	return request(apiOpts('/api/v1/books/' + bookId, 'PUT', fields))
 }
 
 /** 书架手动排序批量更新（items: [{id, sort_order}]） */
 export function updateBookOrder(items: UTSJSONObject[]) : Promise<ApiResponse> {
 	const data = {} as UTSJSONObject
 	data['items'] = items
-	return request(opts('/api/v1/books/order', 'PUT', data))
+	return request(apiOpts('/api/v1/books/order', 'PUT', data))
 }
 
 /** 删除书籍（后端级联清理划线/想法/书签） */
 export function deleteBook(bookId: number) : Promise<ApiResponse> {
-	return request(opts('/api/v1/books/' + bookId, 'DELETE', emptyBody()))
+	return request(apiOpts('/api/v1/books/' + bookId, 'DELETE', emptyBody()))
 }
 
 // ==================== 划线与想法 ====================
 
 /** 书籍的划线与想法列表（data: {underlines, thoughts}） */
 export function fetchBookNotes(bookId: number) : Promise<ApiResponse> {
-	return request(opts('/api/v1/books/' + bookId + '/notes', 'GET', null))
+	return request(apiOpts('/api/v1/books/' + bookId + '/notes', 'GET', null))
 }
 
 /** 划线按「章+段」upsert（ranges 扁平数组 [s1,e1,s2,e2,...]，空数组=整段取消） */
@@ -79,7 +66,7 @@ export function upsertUnderline(bookId: number, cid: number, origin: number, ran
 	data['cid'] = cid
 	data['origin'] = origin
 	data['ranges'] = ranges
-	return request(opts('/api/v1/books/' + bookId + '/notes/underline', 'PUT', data))
+	return request(apiOpts('/api/v1/books/' + bookId + '/notes/underline', 'PUT', data))
 }
 
 /** 写想法（跨章选区定位 + 划线文本快照 + 正文；返回 data.id） */
@@ -93,21 +80,21 @@ export function createThought(bookId: number, fromCid: number, fromOrigin: numbe
 	data['to_end'] = toEnd
 	data['quote'] = quote
 	data['content'] = content
-	return request(opts('/api/v1/books/' + bookId + '/notes/thought', 'POST', data))
+	return request(apiOpts('/api/v1/books/' + bookId + '/notes/thought', 'POST', data))
 }
 
 // ==================== 书签 ====================
 
 /** 书签列表（data.list: [{chapter_id, page_index}]） */
 export function fetchBookBookmarks(bookId: number) : Promise<ApiResponse> {
-	return request(opts('/api/v1/books/' + bookId + '/bookmarks', 'GET', null))
+	return request(apiOpts('/api/v1/books/' + bookId + '/bookmarks', 'GET', null))
 }
 
 /** 书签整表替换（前端本地列表即真源快照） */
 export function replaceBookmarks(bookId: number, items: UTSJSONObject[]) : Promise<ApiResponse> {
 	const data = {} as UTSJSONObject
 	data['items'] = items
-	return request(opts('/api/v1/books/' + bookId + '/bookmarks', 'PUT', data))
+	return request(apiOpts('/api/v1/books/' + bookId + '/bookmarks', 'PUT', data))
 }
 
 // ==================== 阅读时长 ====================
@@ -116,12 +103,12 @@ export function replaceBookmarks(bookId: number, items: UTSJSONObject[]) : Promi
 export function reportMinutes(mins: number) : Promise<ApiResponse> {
 	const data = {} as UTSJSONObject
 	data['minutes'] = mins
-	return request(opts('/api/v1/reading/minutes', 'POST', data))
+	return request(apiOpts('/api/v1/reading/minutes', 'POST', data))
 }
 
 /** 今日与累计阅读分钟数（data: {today_minutes, total_minutes}） */
 export function fetchReadingStats() : Promise<ApiResponse> {
-	return request(opts('/api/v1/reading/stats', 'GET', null))
+	return request(apiOpts('/api/v1/reading/stats', 'GET', null))
 }
 
 /** 阅读统计报告（data: 周期指标/trend 趋势/peak 最久点位/books 书籍榜/hours 时段分布/peak_tag 偏好标签；anchor 为周期内锚点日期 YYYY-MM-DD，total 传空串） */
@@ -130,7 +117,7 @@ export function fetchReadingReport(period: string, anchor: string) : Promise<Api
 	if (anchor.length > 0) {
 		url += '&anchor=' + anchor
 	}
-	return request(opts(url, 'GET', null))
+	return request(apiOpts(url, 'GET', null))
 }
 
 /**
@@ -141,21 +128,21 @@ export function fetchReadingReport(period: string, anchor: string) : Promise<Api
 export function reportReadingSessions(items: UTSJSONObject[]) : Promise<ApiResponse> {
 	const data = {} as UTSJSONObject
 	data['sessions'] = items
-	return request(opts('/api/v1/reading/sessions', 'POST', data))
+	return request(apiOpts('/api/v1/reading/sessions', 'POST', data))
 }
 
 // ==================== 偏好 ====================
 
 /** 读取偏好配置（data.prefs 未保存过为 null） */
 export function fetchPreferences() : Promise<ApiResponse> {
-	return request(opts('/api/v1/preferences', 'GET', null))
+	return request(apiOpts('/api/v1/preferences', 'GET', null))
 }
 
 /** 偏好整包写入（阅读设置 + 书架样式） */
 export function savePreferences(prefs: UTSJSONObject) : Promise<ApiResponse> {
 	const data = {} as UTSJSONObject
 	data['prefs'] = prefs
-	return request(opts('/api/v1/preferences', 'PUT', data))
+	return request(apiOpts('/api/v1/preferences', 'PUT', data))
 }
 
 /**

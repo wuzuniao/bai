@@ -2,8 +2,6 @@
 export type BottomNavItem = {
 	/** 激活项标识（home / bookshelf / mine），与页面传入的 active 比对 */
 	key: string
-	/** 图标旁文字 */
-	text: string
 	/** 未激活图标路径 */
 	icon: string
 	/** 激活图标路径 */

@@ -17,11 +17,11 @@
 				direction="vertical"
 				:show-scrollbar="false"
 				:scroll-top="scrollModeTop"
-					:scroll-into-view="scrollIntoView"
-					@scroll="onScrollModeScroll"
-					@scrolltolower="onScrollToLower"
-					@scrolltoupper="onScrollToUpper"
-				>
+				:scroll-into-view="scrollIntoView"
+				@scroll="onScrollModeScroll"
+				@scrolltolower="onScrollToLower"
+				@scrolltoupper="onScrollToUpper"
+			>
 					<view class="scroll-mode-inner" :style="'padding-top:' + contentTopPx + 'px;padding-bottom:' + contentBottomPx + 'px'">
 						<!-- 章前间距锚点：前插上一章后 scroll-into-view 锚定此锚点，视口完整呈现「上一章尾部 → 间距 → 标题」 -->
 						<view
@@ -237,17 +237,17 @@
 			@toast="onControlToast"
 		/>
 		<!-- 书签下拉/移除遮罩（顶部半透明提示条：高度即内容位移量，填补内容下移留出的空白；书签图标在遮罩内右上角随动作变化） -->
-			<view
-				v-if="pullState != 'none' || pullSettling"
-				class="bookmark-mask"
-				:class="pullSettling ? 'bookmark-mask-settle' : ''"
-				:style="'height:' + maskHeight + 'px;background-color:' + maskBg"
-			>
-				<image class="bookmark-mask-icon" :src="maskIconSrc" />
-				<view class="bookmark-mask-row">
-					<text class="bookmark-mask-text" :style="'color:' + maskTextColor">{{ maskText }}</text>
-				</view>
+		<view
+			v-if="pullState != 'none' || pullSettling"
+			class="bookmark-mask"
+			:class="pullSettling ? 'bookmark-mask-settle' : ''"
+			:style="'height:' + maskHeight + 'px;background-color:' + maskBg"
+		>
+			<image class="bookmark-mask-icon" :src="maskIconSrc" />
+			<view class="bookmark-mask-row">
+				<text class="bookmark-mask-text" :style="'color:' + maskTextColor">{{ maskText }}</text>
 			</view>
+		</view>
 
 		<!-- 全局信息提示（组件化：文案/显隐/自动消失计时内聚 ReaderToast） -->
 		<ReaderToast ref="toastRef" :night="nightMode" />
@@ -295,11 +295,11 @@
 </template>
 
 <script setup lang="uts">
-	import { READER_THEME_LIGHT, READER_THEME_NIGHT, READER_THEME_PAPER } from '@/utils/theme.uts'
+	import { READER_THEME_LIGHT, readerThemeOf, readerThemeIcon } from '@/utils/theme.uts'
 	import { useUserStore, avatarSrcOf } from '@/stores/user.uts'
-	import { LocalBook, BookProgress, findBook, isBookDirty, loadBookProgress, saveBookProgress, updateBookReading, addReadingSession } from '@/utils/books.uts'
+	import { LocalBook, BookProgress, findBook, isBookDirty, loadBookProgress, saveBookProgress, updateBookReading, createReadingClock } from '@/utils/books.uts'
 	import { parseChapters, readTextFile, ParsedChapter } from '@/utils/bookparse.uts'
-	import { Chapter, Paragraph, Bookmark, Thought, UnderlineEntry, NoteRecord, ShareQuoteCtx, SelSpan, SpanSeg, TextMetrics, ParaRect, ReaderSettings, FONT_OPTIONS, fontOptionOf, setActiveBookId, loadUnderlines, loadThoughts, findUnderlineEntry, loadBookmarks, loadSettings, buildNoteRecords, buildShareQuoteCtx, fetchNotesToCache, fetchBookmarksToCache, VIRTUAL_BOOK_ID, SENTENCE_END_CHARS, thoughtAt, spanOfThought, buildSpanSegs } from '@/utils/readerTypes.uts'
+	import { Chapter, Paragraph, Bookmark, Thought, UnderlineEntry, NoteRecord, ShareQuoteCtx, SelSpan, SpanSeg, TextMetrics, ParaRect, ReaderSettings, fontOptionOf, loadStoredFontKey, setActiveBookId, loadUnderlines, loadThoughts, findUnderlineEntry, loadBookmarks, loadSettings, buildNoteRecords, buildShareQuoteCtx, fetchNotesToCache, fetchBookmarksToCache, VIRTUAL_BOOK_ID, SENTENCE_END_CHARS, thoughtAt, spanOfThought, buildSpanSegs } from '@/utils/readerTypes.uts'
 	import { PageSlice, computePageBreaks, computePageBreaksMeasured, computePageBreaksExact, ParaLineLayout } from '@/utils/pagination.uts'
 	// #ifdef APP-ANDROID
 	import { buildParaLayout } from '@/utils/textlayout.uts'
@@ -780,9 +780,9 @@
 				// 卸载整章节点，转入末行探测（探测节点更轻量）
 				measureParas.value = [] as number[]
 				probeTailChars(cid, epoch, new Map<number, TailSearch>(), new Map<number, number>(), 0, resolve)
-				}).exec()
-				}, 40)
-				}
+			}).exec()
+		}, 40)
+	}
 
 	/** 末行字符探测驱动：按当前数据打包，收集被切断且末行未知的段落；无则完成，否则生成前缀探针进入本轮实测 */
 	function probeTailChars(cid : number, epoch : number, search : Map<number, TailSearch>, found : Map<number, number>, round : number, resolve : () => void) : void {
@@ -1116,41 +1116,24 @@
 		scheduleAnchorCalc()
 	}
 
-	/** ===== 阅读时长结算（onShow 起算，onHide/onUnload 落库；书架统计卡展示） ===== */
-	let enterAt = 0
-	/** 最近操作时间（根节点 touchstart 跟踪；连续 10 分钟无操作视为本次阅读时间结束） */
-	let lastActiveAt = 0
-	/** 无操作超时阈值（超过则时长截断，下次操作重新起算） */
-	const IDLE_TIMEOUT_MS = 10 * 60 * 1000
+	/** ===== 阅读时长结算（onShow 起算，onHide/onUnload 落库；书架统计卡展示；时钟收口 utils/books.uts） ===== */
+	const readingClock = createReadingClock('txt')
 
 	onShow(() => {
-		enterAt = Date.now()
-		lastActiveAt = enterAt
+		readingClock.onShown()
 	})
 
 	/** 根节点触摸：记录操作时间；距上次操作超 10 分钟则上一会话以「最后操作+10min」入账并重新起算 */
 	function onPageTouchStart() : void {
-		const now = Date.now()
-		if (enterAt > 0 && lastActiveAt > 0 && now - lastActiveAt > IDLE_TIMEOUT_MS && bookId.value != VIRTUAL_BOOK_ID) {
-			addReadingSession(bookId.value, 'txt', enterAt, lastActiveAt + IDLE_TIMEOUT_MS)
-			enterAt = now
-		}
-		lastActiveAt = now
+		readingClock.onActive(bookId.value)
 	}
 
-	/** 结算本次阅读：累计今日分钟数 + 回写书架最近阅读状态（onHide 先于 onUnload 触发，enterAt 置零防双计） */
+	/** 结算本次阅读：累计今日分钟数 + 回写书架最近阅读状态（onHide 先于 onUnload 触发，时钟结算防双计） */
 	function recordReadingSession() : void {
 		if (bookId.value == VIRTUAL_BOOK_ID) {
 			return
 		}
-		if (enterAt > 0) {
-			// 会话入账统一入口：时长统计（本地镜像+云端回正）与按书/时段流水一并处理（<1 分钟内部丢弃）；
-			// 结束点截断至「最后操作+10min」（页面后台停留期间不计时长）
-			const endAt = lastActiveAt > 0 ? Math.min(Date.now(), lastActiveAt + IDLE_TIMEOUT_MS) : Date.now()
-			addReadingSession(bookId.value, 'txt', enterAt, endAt)
-		}
-		enterAt = 0
-		lastActiveAt = 0
+		readingClock.settle(bookId.value)
 		// 滚动模式按锚点章回写（currentChapterId 是滚动加载推进的「到达章」，非视口顶所在章）
 		updateBookReading(bookId.value, scrollMode.value ? anchorCid : currentChapterId.value)
 	}
@@ -1380,10 +1363,8 @@
 	/** 覆盖模式遮罩透明度（当前页上，仅回翻）：被上一页取代越多越深 */
 	const coverCurrentMaskOpacity = computed(() : number => flipCoverCurrentOpacity(pageW.value, flipOffset.value))
 
-	/** 覆盖遮罩面色（主题适配）：浅色纸面用墨色加深，暗色纸面用浅白提亮（与书签遮罩/浮层的暗底区分惯例一致） */
-	const coverMaskBg = computed(() : string => {
-		return nightMode.value ? 'rgba(255, 255, 255, 0.24)' : 'rgba(0, 0, 0, 0.45)'
-	})
+	/** 覆盖遮罩面色（主题适配，随 applyReaderTheme 成组切换） */
+	const coverMaskBg = ref(READER_THEME_LIGHT.coverMaskBg)
 
 	/** 主题状态（色值唯一定义于 utils/theme.uts：日间=画布令牌，夜间/纸张为阅读专用主题；控制框组件经 themeKey 自行解析） */
 	const nightMode = ref(false)
@@ -1515,12 +1496,7 @@
 	/** ===== 书签（真源在 ReaderControl 组件：增删/持久化内聚；页面维护内存镜像供当前页旗帜渲染） ===== */
 	const bookmarks = ref<Bookmark[]>([])
 
-	/** 读取书签镜像（打开书籍云端落缓存后经 reloadNotesMirror 刷新） */
-	function reloadBookmarkMirror() : void {
-		bookmarks.value = loadBookmarks()
-	}
-
-	/** 控制框组件书签变更通知：重读本地存储刷新当前页书签旗帜 */
+	/** 控制框组件书签变更通知（打开书籍云端落缓存后经 reloadNotesMirror 复用）：重读本地存储刷新当前页书签旗帜 */
 	function onBookmarksChanged() : void {
 		bookmarks.value = loadBookmarks()
 	}
@@ -1584,7 +1560,7 @@
 	/** 云端笔记落缓存后的统一镜像刷新（划线/想法/书签；书签面板经 bookId prop 变化自行重载） */
 	function reloadNotesMirror() : void {
 		reloadUnderlineThoughtMirror()
-		reloadBookmarkMirror()
+		onBookmarksChanged()
 	}
 
 	/** 气泡组件划线/想法写入通知：重读本地存储刷新正文划线渲染与目录抽屉卡片 */
@@ -1637,22 +1613,7 @@
 	})
 
 	/** ===== 正文字体（默认思源黑体，未安装时经回退链落到系统黑体；选择后本地持久化） ===== */
-	const STORAGE_FONT = 'reader_font'
-
-	const fontKey = ref('sourcehan')
-
-	{
-		const stored : any = uni.getStorageSync(STORAGE_FONT)
-		if (typeof stored == 'string') {
-			const key = stored as string
-			for (let i = 0; i < FONT_OPTIONS.length; i++) {
-				if (FONT_OPTIONS[i].key == key) {
-					fontKey.value = key
-					break
-				}
-			}
-		}
-	}
+	const fontKey = ref(loadStoredFontKey())
 
 	/** 当前生效字体栈（应用至正文；字体真源在 ReaderControl 组件，change 事件同步镜像） */
 	const fontFamily = computed(() : string => {
@@ -1746,7 +1707,6 @@
 	/** 划词高亮镜像（选区真源在气泡组件：spanChanged 事件同步，驱动正文高亮渲染与派生上下文） */
 	const selSpan = ref<SelSpan | null>(null)
 
-	/** 选区变化镜像（气泡组件 spanChanged 事件） */
 	/** 选区代次（锚点 id 组成部分）：选区每次变化递增 */
 	const selEpoch = ref(0)
 	/** 选区两端锚点节点 id（携带代次）：渲染未落地时按新 id 查询落空触发重试，旧代次节点不会被误读为当前锚点 */
@@ -1933,8 +1893,8 @@
 	/** 划线段点击协调标志：段落 click 先于父级 content click（微信端无有效 stopPropagation，用标志让父级跳过本次） */
 	let paragraphTapHandled = false
 
-	/** 想法查看面板底色：夜晚用深色浮层，白天用纯白与页面背景区分（下行气泡组件） */
-	const thoughtCardPanelBg = computed(() : string => nightMode.value ? menuBottomBg.value : '#ffffff')
+	/** 想法查看面板底色：夜晚用深色浮层，白天用纯白与页面背景区分（下行气泡组件，随 applyReaderTheme 成组切换） */
+	const thoughtCardPanelBg = ref(READER_THEME_LIGHT.thoughtPanelBg)
 
 	/** ===== 用户信息（分享卡片头像下行气泡组件） ===== */
 	const userStore = useUserStore()
@@ -2125,7 +2085,7 @@
 
 	/** 主题图标路径：夜间使用 -light 白色变体 */
 	function themeIcon(name: string) : string {
-		return '/static/icons/' + name + (nightMode.value ? '-light' : '') + '.svg'
+		return readerThemeIcon(name, nightMode.value)
 	}
 
 	/** 左右滑动翻页手势（Stitch 设置面板"翻页"模式：左滑下一章、右滑上一章，水平位移阈值避免与纵向滚动冲突） */
@@ -2813,12 +2773,7 @@
 
 	/** 应用阅读主题（整组成组切换：正文/浮层/遮罩/控件色） */
 	function applyReaderTheme(key : string) : void {
-		let theme = READER_THEME_LIGHT
-		if (key == 'night') {
-			theme = READER_THEME_NIGHT
-		} else if (key == 'paper') {
-			theme = READER_THEME_PAPER
-		}
+		const theme = readerThemeOf(key)
 		themeKey.value = key
 		nightMode.value = key == 'night'
 		readerBg.value = theme.readerBg
@@ -2832,6 +2787,8 @@
 		maskTextColor.value = theme.maskTextColor
 		popoverBg.value = theme.popoverBg
 		panelShadow.value = theme.panelShadow
+		coverMaskBg.value = theme.coverMaskBg
+		thoughtCardPanelBg.value = theme.thoughtPanelBg
 	}
 
 	/** 控制框设置变更应用（设置真源在组件：调节/持久化/提示内聚；页面同步镜像并应用渲染） */

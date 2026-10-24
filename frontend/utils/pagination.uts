@@ -142,7 +142,7 @@ export function computePageBreaksMeasured(paraTexts : string[], paraLines : numb
 			}
 			if (remainLines <= rows) {
 				// 剩余整段装得下：切片直达段尾（实测行数与真实渲染零漂移）
-				current.push({ origin: i, from: from, to: len - 1 } as PageSlice[])
+				current.push({ origin: i, from: from, to: len - 1 } as PageSlice)
 				usedH += gap + remainLines * lineH
 				from = len
 			} else {
@@ -154,7 +154,7 @@ export function computePageBreaksMeasured(paraTexts : string[], paraLines : numb
 				if (to < from) {
 					to = from
 				}
-				current.push({ origin: i, from: from, to: to } as PageSlice[])
+				current.push({ origin: i, from: from, to: to } as PageSlice)
 				usedH += gap + rows * lineH
 				from = to + 1
 				remainLines -= rows
@@ -230,12 +230,12 @@ export function computePageBreaksExact(paraTexts : string[], layout : ParaLineLa
 			const from = k == 0 ? 0 : ends[k - 1] + 1
 			if (k + rows >= totalLines) {
 				// 剩余整段装得下：切片直达段尾（行边界即真实渲染边界）
-				current.push({ origin: i, from: from, to: len - 1 } as PageSlice[])
+				current.push({ origin: i, from: from, to: len - 1 } as PageSlice)
 				usedH += gap + (totalLines - k) * lineH
 				k = totalLines
 			} else {
 				// 装不下：按真实行边界切 rows 行，续文留待下页
-				current.push({ origin: i, from: from, to: ends[k + rows - 1] } as PageSlice[])
+				current.push({ origin: i, from: from, to: ends[k + rows - 1] } as PageSlice)
 				usedH += gap + rows * lineH
 				k += rows
 			}

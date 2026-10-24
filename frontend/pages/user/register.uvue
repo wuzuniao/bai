@@ -63,6 +63,7 @@
 	import AgreementCheckbox from '@/components/form/AgreementCheckbox.uvue'
 	import { sendRegisterCode, registerUser } from './api/user.uts'
 	import { validateUsername, validatePassword, validateConfirmPassword, validateEmail } from './utils/validators.uts'
+	import { confirmAgreement, toastGo } from './utils/flow.uts'
 	import { t } from '@/utils/i18n.uts'
 	// 词典注册（register 页文案 + 公共段）
 	import '@/pages/user/locales/register.uts'
@@ -163,18 +164,7 @@
 			return
 		}
 		if (!agreed.value) {
-			uni.showModal({
-				title: t('common.tip'),
-				content: t('register.agreeContent'),
-				confirmText: t('common.ok'),
-				cancelText: t('common.cancel'),
-				success: (res) => {
-					if (res.confirm) {
-						agreed.value = true
-						submitForm()
-					}
-				}
-			})
+			confirmAgreement(t('register.agreeContent'), agreed, submitForm)
 			return
 		}
 		submitForm()
@@ -183,11 +173,8 @@
 	function submitForm() : void {
 		submitting.value = true
 		registerUser(usernameValue.value, passwordValue.value, emailValue.value, codeValue.value).then((_res) => {
-			uni.showToast({ title: t('register.success'), icon: 'success' })
 			// 注册成功后跳转登录页（带 mode=normal 直接展示账号密码登录卡片）
-			setTimeout(() => {
-				uni.redirectTo({ url: '/pages/user/login?mode=normal' })
-			}, 1500)
+			toastGo(t('register.success'), '/pages/user/login?mode=normal')
 		}).catch((e) => {
 			const err = e as Error
 			// auth 服务无业务错误码，按错误文案含「验证码」识别验证码类错误并映射本地化文案

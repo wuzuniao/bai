@@ -25,15 +25,19 @@ export function sanitizeTitle(value : string) : string {
 	return cleaned.trim()
 }
 
-/** 书籍正文本地路径（与导入管线同名约定，下载落盘 / 上传读源共用） */
-export function bookFilePath(bookId : number, format : string) : string {
-	const ext = format.toLowerCase()
+/** 书籍正文沙盒目录（与导入管线同名约定；Web 端无沙盒文件系统，为 IndexedDB 键命名空间，末段文件名语义与沙盒一致） */
+export function booksDir() : string {
 	// #ifdef WEB
-	return 'webbooks/' + bookId.toString() + '.' + ext
+	return 'webbooks'
 	// #endif
 	// #ifndef WEB
-	return uni.env.USER_DATA_PATH + '/books/' + bookId.toString() + '.' + ext
+	return uni.env.USER_DATA_PATH + '/books'
 	// #endif
+}
+
+/** 书籍正文本地路径（与导入管线同名约定，下载落盘 / 上传读源共用） */
+export function bookFilePath(bookId : number, format : string) : string {
+	return booksDir() + '/' + bookId.toString() + '.' + format.toLowerCase()
 }
 
 /** 读取本地正文文件字节（上传源；Web 端为 IndexedDB 键，文件缺失 reject） */
@@ -159,8 +163,8 @@ export function cosGetBytesOrNull(url : string) : Promise<ArrayBuffer | null> {
 
 // ==================== 打开书籍前的本机正文保障 ====================
 
-/** 单本下载（取预签名 → 直取字节 → 落盘 → 本机正文回写；失败抛错，云端对象不存在抛缺失哨兵） */
-async function downloadBook(book : LocalBook) : Promise<void> {
+/** 单本下载（取预签名 → 直取字节 → 落盘 → 本机正文回写；失败抛错，云端对象不存在抛缺失哨兵）——同步与恢复建档共用 */
+export async function downloadBook(book : LocalBook) : Promise<void> {
 	const urlRes = await fetchDownloadUrl(sanitizeTitle(book.title), book.format.toLowerCase())
 	if (urlRes.code != 0 || urlRes.data == null) {
 		throw new Error(urlRes.msg)

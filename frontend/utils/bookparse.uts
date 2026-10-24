@@ -1,10 +1,10 @@
 // 书籍导入管线：文件编码识别 → 章节解析 → 沙盒落盘入库
 // 端差异收口：文件选择由调用方（书架页）按端条件编译完成，本文件只处理已选中的本地文件
 
-import { applyRegisteredBook, nextPendingBookId, applyPendingImport, loadBooks, setBookFileLocal, LocalBook } from './books'
+import { applyRegisteredBook, nextPendingBookId, applyPendingImport, loadBooks, setBookFileLocal, discardSandboxFile, discardCrossFormatFile, LocalBook } from './books'
 import { registerBook } from '../api/reading.uts'
 import { fetchDownloadUrl, fetchUploadUrl, fetchCloudObjects } from '../api/cos.uts'
-import { sanitizeTitle, readBookBytes, writeBookBytes, cosPut, cosGetBytesOrNull, isCloudMissingError, CLOUD_MISSING_ERR } from './cloudsync.uts'
+import { sanitizeTitle, readBookBytes, writeBookBytes, cosPut, cosGetBytesOrNull, isCloudMissingError, CLOUD_MISSING_ERR, downloadBook, booksDir } from './cloudsync.uts'
 import { hasAccessToken } from './request.uts'
 import { t } from './i18n'
 // 词典注册（导入管线文案）
@@ -19,10 +19,9 @@ import { openPdfSession } from './pdfrender'
 import Charset from 'java.nio.charset.Charset'
 // #endif
 // #ifdef WEB
-import { webFsCopy, webFsDelete, webReadTextFile } from './webfs'
+import { webFsCopy, webReadTextFile } from './webfs'
 // #endif
 
-/** 解析后的章（目录标题 + 正文页眉/大标题拆分 + 该章段落） */
 /** 序章标签（展示值：解析时按当前语言取词） */
 function prefaceLabel() : string {
 	return t('bookparse.preface')
@@ -284,7 +283,7 @@ function readChunkedApp(path : string, charsetName : string) : Promise<string> {
 }
 // #endif
 
-/** 读取文本文件并自动识别编码（utf-8 优先，含替换符时按 GBK 重读；微信/Android 分块读规避大文件整读内存峰值） */
+/** 读取文本文件并自动识别编码（utf-8 优先，含替换符时按 GBK 重读；微信/Android 分块读规避大文件整读内存峰值，iOS 端整读无分块） */
 export function readTextFile(path : string) : Promise<string> {
 	// #ifdef MP-WEIXIN
 	return new Promise<string>((resolve, reject) => {
@@ -510,21 +509,6 @@ function titleFromFileName(fileName : string) : string {
 	return title.length > 0 ? title : t('bookparse.untitled')
 }
 
-/** 清理导入中途落盘的文件（失败路径回收；Web 端为 IndexedDB 键删除，容错忽略） */
-function discardFile(path : string) : void {
-	// #ifdef WEB
-	webFsDelete(path)
-	return
-	// #endif
-	// #ifndef WEB
-	try {
-		uni.getFileSystemManager().unlinkSync(path)
-	} catch (e) {
-		// 忽略
-	}
-	// #endif
-}
-
 /** 导入一本书：复制落盘解析 → 登录态云端登记（后端分配 id，同名书复用）/ 未登录本地负数 id 落地（登录后同步云端）→ 以 id 命名入库 */
 export async function importBook(fileName : string, tempPath : string, size : number) : Promise<void> {
 	const dot = fileName.lastIndexOf('.')
@@ -537,13 +521,7 @@ export async function importBook(fileName : string, tempPath : string, size : nu
 		// 与后端登记校验对齐：离线导入无服务端校验，超限会导致登录后同步永久失败
 		throw new Error(t('bookparse.titleTooLong'))
 	}
-	// #ifdef WEB
-	// Web 端无文件系统沙盒：dir 为 IndexedDB 键命名空间（虚拟路径，末段文件名语义与沙盒一致）
-	const dir = 'webbooks'
-	// #endif
-	// #ifndef WEB
-	const dir = uni.env.USER_DATA_PATH + '/books'
-	// #endif
+	const dir = booksDir()
 	await ensureBooksDir(dir)
 	// 先以临时名落盘（正文解析需真实文件），id 分配后再改名；随机后缀防批量导入同毫秒自撞
 	const workPath = dir + '/_import_' + Date.now().toString() + '_' + Math.floor(Math.random() * 100000).toString() + '.' + ext
@@ -556,7 +534,7 @@ export async function importBook(fileName : string, tempPath : string, size : nu
 		try {
 			text = await readTextFile(workPath)
 		} catch (e) {
-			discardFile(workPath)
+			discardSandboxFile(workPath)
 			throw e
 		}
 		const parsed = parseChapters(text, titleFromFileName(fileName))
@@ -571,19 +549,19 @@ export async function importBook(fileName : string, tempPath : string, size : nu
 			chapterCount = session.pageCount
 			session.close()
 		} catch (e) {
-			discardFile(workPath)
+			discardSandboxFile(workPath)
 			// 透传渲染器文案（损坏 / 端不支持）
 			throw e
 		}
 		// #endif
 		// #ifndef APP
-		discardFile(workPath)
+		discardSandboxFile(workPath)
 		throw new Error(t('bookparse.pdfUnsupported'))
 		// #endif
 	}
 	// 章节数与后端登记校验对齐：离线导入无服务端校验，超限会导致登录后同步永久失败
 	if (chapterCount > 100000) {
-		discardFile(workPath)
+		discardSandboxFile(workPath)
 		throw new Error(t('bookparse.tooManyChapters'))
 	}
 	if (hasAccessToken()) {
@@ -602,19 +580,19 @@ export async function importBook(fileName : string, tempPath : string, size : nu
 			bookId = registered!.getNumber('id') ?? 0
 		}
 		if (bookId <= 0) {
-			discardFile(workPath)
+			discardSandboxFile(workPath)
 			throw new Error(t('bookparse.registerFail'))
 		}
 		// 以云端 id 命名正文文件；重导入换格式时清理旧格式残留
 		const bodyPath = dir + '/' + bookId + '.' + ext
 		if (bodyPath != workPath) {
 			await copyToSandbox(workPath, bodyPath)
-			discardFile(workPath)
+			discardSandboxFile(workPath)
 		}
 		if (ext == 'txt') {
-			discardFile(dir + '/' + bookId + '.pdf')
+			discardCrossFormatFile(bodyPath, ext)
 		} else {
-			discardFile(dir + '/' + bookId + '.txt')
+			discardCrossFormatFile(bodyPath, ext)
 		}
 		applyRegisteredBook(registered!, bodyPath)
 	} else {
@@ -622,11 +600,11 @@ export async function importBook(fileName : string, tempPath : string, size : nu
 		const pendingId = nextPendingBookId(bookTitle)
 		const bodyPath = dir + '/' + pendingId + '.' + ext
 		await copyToSandbox(workPath, bodyPath)
-		discardFile(workPath)
+		discardSandboxFile(workPath)
 		if (ext == 'txt') {
-			discardFile(dir + '/' + pendingId + '.pdf')
+			discardCrossFormatFile(bodyPath, ext)
 		} else {
-			discardFile(dir + '/' + pendingId + '.txt')
+			discardCrossFormatFile(bodyPath, ext)
 		}
 		applyPendingImport(bookTitle, ext.toUpperCase(), size, chapterCount, hasPreface, bodyPath)
 	}
@@ -670,33 +648,6 @@ async function uploadBook(book : LocalBook) : Promise<void> {
 	await cosPut(url, buf)
 }
 
-/** 单本下载到已有书行（取预签名 → 直取字节 → 落盘 → 本机正文回写；失败/云端缺失抛错，缺失抛哨兵） */
-async function downloadBook(book : LocalBook) : Promise<void> {
-	const urlRes = await fetchDownloadUrl(sanitizeTitle(book.title), book.format.toLowerCase())
-	if (urlRes.code != 0 || urlRes.data == null) {
-		throw new Error(urlRes.msg)
-	}
-	const url = urlRes.data!.getString('url') ?? ''
-	if (url.length == 0) {
-		throw new Error('empty download url')
-	}
-	const buf = await cosGetBytesOrNull(url)
-	if (buf == null) {
-		throw new Error(CLOUD_MISSING_ERR)
-	}
-	// 与导入管线同构的沙盒目录（Web 端为 IndexedDB 键命名空间）
-	let dir = ''
-	// #ifdef WEB
-	dir = 'webbooks'
-	// #endif
-	// #ifndef WEB
-	dir = uni.env.USER_DATA_PATH + '/books'
-	// #endif
-	const path = dir + '/' + book.id.toString() + '.' + book.format.toLowerCase()
-	await writeBookBytes(path, buf)
-	setBookFileLocal(book.id, path, buf.byteLength)
-}
-
 /** 单本下载落盘（不登记；restoreBookFromCloud 内部用） */
 async function downloadBytesToWork(title : string, format : string) : Promise<string | null> {
 	const ext = format.toLowerCase()
@@ -712,13 +663,7 @@ async function downloadBytesToWork(title : string, format : string) : Promise<st
 	if (buf == null) {
 		throw new Error(CLOUD_MISSING_ERR)
 	}
-	let dir = ''
-	// #ifdef WEB
-	dir = 'webbooks'
-	// #endif
-	// #ifndef WEB
-	dir = uni.env.USER_DATA_PATH + '/books'
-	// #endif
+	const dir = booksDir()
 	await ensureBooksDir(dir)
 	// 随机后缀防批量恢复同毫秒自撞（与导入管线临时名同策略）
 	const workPath = dir + '/_restore_' + Date.now().toString() + '_' + Math.floor(Math.random() * 100000).toString() + '.' + ext
@@ -758,7 +703,7 @@ async function restoreBookFromCloudInner(title : string, format : string, size :
 		try {
 			text = await readTextFile(workPath)
 		} catch (e) {
-			discardFile(workPath)
+			discardSandboxFile(workPath)
 			return false
 		}
 		const parsed = parseChapters(text, title)
@@ -771,12 +716,12 @@ async function restoreBookFromCloudInner(title : string, format : string, size :
 			const session = await openPdfSession(workPath)
 			chapterCount = session.pageCount
 		} catch (e) {
-			discardFile(workPath)
+			discardSandboxFile(workPath)
 			return false
 		}
 		// #endif
 		// #ifndef APP
-		discardFile(workPath)
+		discardSandboxFile(workPath)
 		return false
 		// #endif
 	}
@@ -791,31 +736,25 @@ async function restoreBookFromCloudInner(title : string, format : string, size :
 		registered = null
 	}
 	if (registered == null) {
-		discardFile(workPath)
+		discardSandboxFile(workPath)
 		return false
 	}
 	const bookId = registered!.getNumber('id') ?? 0
 	if (bookId <= 0) {
-		discardFile(workPath)
+		discardSandboxFile(workPath)
 		return false
 	}
 	// 以云端 id 命名入库（换格式残留清理与导入管线同口径）
-	let dir = ''
-	// #ifdef WEB
-	dir = 'webbooks'
-	// #endif
-	// #ifndef WEB
-	dir = uni.env.USER_DATA_PATH + '/books'
-	// #endif
+	const dir = booksDir()
 	const bodyPath = dir + '/' + bookId.toString() + '.' + ext
 	if (bodyPath != workPath) {
 		await copyToSandbox(workPath, bodyPath)
-		discardFile(workPath)
+		discardSandboxFile(workPath)
 	}
 	if (ext == 'txt') {
-		discardFile(dir + '/' + bookId.toString() + '.pdf')
+		discardCrossFormatFile(bodyPath, ext)
 	} else {
-		discardFile(dir + '/' + bookId.toString() + '.txt')
+		discardCrossFormatFile(bodyPath, ext)
 	}
 	applyRegisteredBook(registered!, bodyPath)
 	return true

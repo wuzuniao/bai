@@ -10,7 +10,7 @@
 	 * PageHeader —— 页面标题区复用组件
 	 * 标题 + 副标题/描述，个人中心子页面（帮助中心/联系我们/站内信等）共用。
 	 */
-	const props = defineProps<{
+	defineProps<{
 		/** 页面主标题 */
 		title: string
 		/** 页面副标题/描述（可空） */

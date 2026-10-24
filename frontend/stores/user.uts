@@ -55,19 +55,8 @@ export const useUserStore = defineStore('user', () => {
 	const loadUserFromStorage = () : void => {
 		try {
 			// WEB 端：本地已有项目令牌则维持（N34 本地有效不交换）；本地无令牌时经父域
-			// SSO Cookie 的平台令牌异步交换恢复，完成后经回调写入 store 响应式状态
-			restoreAuthFromCookie((restored: RestoredAuthState) => {
-				if (restored.userInfoJson.length > 0) {
-					const parsed = JSON.parse<UserInfo>(restored.userInfoJson)
-					if (parsed != null && parsed.id > 0) {
-						userInfo.value = parsed
-					}
-				}
-				accessToken.value = restored.access_token
-				if (restored.refresh_token.length > 0) {
-					refreshToken.value = restored.refresh_token
-				}
-			})
+			// SSO Cookie 的平台令牌异步交换恢复，完成后经 onAuthRestored 监听写入响应式状态
+			restoreAuthFromCookie()
 			const stored = uni.getStorageSync('userInfo')
 			if (stored != null && stored != '') {
 				const parsed = JSON.parse<UserInfo>(stored as string)
@@ -215,4 +204,31 @@ export function avatarPathOf(key: string) : string {
 		return '/static/touxiang/lan.png'
 	}
 	return '/static/touxiang/hong.png'
+}
+
+/** 可选头像 key 表（资料页选择网格的展示顺序） */
+export const AVATAR_OPTION_KEYS : string[] = ['hei', 'hong', 'huang', 'lan']
+
+/** 数据库存值反查头像 key（含子串容错，默认 hong）——资料页选中态回显用 */
+export function avatarKeyOf(url : string) : string {
+	if (url.includes('hei')) {
+		return 'hei'
+	}
+	if (url.includes('huang')) {
+		return 'huang'
+	}
+	if (url.includes('lan')) {
+		return 'lan'
+	}
+	return 'hong'
+}
+
+/** 是否持有会员权益角色（黑铁及以上档位或管理员；与后端会员/云同步口径一致，后端动作时实时复核）——reward/bookshelf 共用 */
+export function hasMembershipRole(info : UserInfo | null) : boolean {
+	if (info == null) {
+		return false
+	}
+	const roles = info.roles
+	return roles.includes('admin') || roles.includes('iron') || roles.includes('bronze')
+		|| roles.includes('silver') || roles.includes('gold')
 }

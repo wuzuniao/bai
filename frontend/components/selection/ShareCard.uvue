@@ -196,8 +196,16 @@
 	const SHARE_RING_R = 23.0
 	const SHARE_LOGO_R = 20.0
 	const SHARE_INK = '#0e0f0c'
+	/** 画布用墨色透明梯度与底色（与 SCSS 侧 rgba($bai-ink, x)/令牌同值：远端引文/近端引文/引号/元信息/卡片白底） */
+	const SHARE_FAR = 'rgba($bai-ink, 0.18)'
+	const SHARE_NEAR = 'rgba($bai-ink, 0.4)'
+	const SHARE_QUOTE = 'rgba($bai-ink, 0.25)'
+	const SHARE_META = 'rgba($bai-ink, 0.45)'
+	const SHARE_CANVAS_BG = '#ffffff'
 	/** 段落间距（px，正文段间距 40rpx 换算） */
 	const SHARE_PARA_GAP = 20.0
+	/** 小间距（px，23rpx 间距换算，390 基准 ÷2）：引文块/想法块/出处行之间距 */
+	const SHARE_GAP_SM = 11.5
 
 	/** 分享卡片绘制辅助：文本按宽度折行（\n 强制换行保留段落结构；返回行数组，供画布高度预算与逐行绘制） */
 	function wrapCanvasLines(ctx : CanvasRenderingContext2D, text : string, maxW : number, font : string) : string[] {
@@ -352,22 +360,22 @@
 		const runs : ShareRun[] = [] as ShareRun[]
 		const d = shareData.value
 		if (d.farBefore.length > 0) {
-			runs.push({ text: d.farBefore, fs: 12.5, bold: false, color: 'rgba(14, 15, 12, 0.18)' } as ShareRun)
+			runs.push({ text: d.farBefore, fs: 12.5, bold: false, color: SHARE_FAR } as ShareRun)
 		}
 		if (d.nearBefore.length > 0) {
-			runs.push({ text: d.nearBefore, fs: 12.5, bold: false, color: 'rgba(14, 15, 12, 0.4)' } as ShareRun)
+			runs.push({ text: d.nearBefore, fs: 12.5, bold: false, color: SHARE_NEAR } as ShareRun)
 		}
 		// 开引号仅在上/下文渐出场景渲染（与预览 shareParas 同规则：段首场景不渲染保证左缘对齐）
 		if (!quoteStartsAtParaStart()) {
-			runs.push({ text: '“', fs: 20, bold: true, color: 'rgba(14, 15, 12, 0.25)' } as ShareRun)
+			runs.push({ text: '“', fs: 20, bold: true, color: SHARE_QUOTE } as ShareRun)
 		}
 		runs.push({ text: d.quote, fs: 13.5, bold: true, color: SHARE_INK } as ShareRun)
-		runs.push({ text: '”', fs: 20, bold: true, color: 'rgba(14, 15, 12, 0.25)' } as ShareRun)
+		runs.push({ text: '”', fs: 20, bold: true, color: SHARE_QUOTE } as ShareRun)
 		if (d.nearAfter.length > 0) {
-			runs.push({ text: d.nearAfter, fs: 12.5, bold: false, color: 'rgba(14, 15, 12, 0.4)' } as ShareRun)
+			runs.push({ text: d.nearAfter, fs: 12.5, bold: false, color: SHARE_NEAR } as ShareRun)
 		}
 		if (d.farAfter.length > 0) {
-			runs.push({ text: d.farAfter, fs: 12.5, bold: false, color: 'rgba(14, 15, 12, 0.18)' } as ShareRun)
+			runs.push({ text: d.farAfter, fs: 12.5, bold: false, color: SHARE_FAR } as ShareRun)
 		}
 		return runs
 	}
@@ -388,12 +396,13 @@
 			}
 			quoteBlockH += quoteParas[i].lines.length * SHARE_LINE_H
 		}
-		const quoteTop = SHARE_CARD_TOP + SHARE_HEADER_H + SHARE_LINE_H + 11.5
-		let thoughtTop = quoteTop + quoteBlockH + 11.5
+		const quoteTop = SHARE_CARD_TOP + SHARE_HEADER_H + SHARE_LINE_H + SHARE_GAP_SM
+		let thoughtTop = quoteTop + quoteBlockH + SHARE_GAP_SM
 		if (thL.length > 0) {
+			// 存在想法时的 +10.5 为实测对齐校准值（与预览 CSS 间距无直接对应），调整需导出长图核对
 			thoughtTop += 1 + 9.5
 		}
-		const sourceTop = thoughtTop + (thL.length > 0 ? thL.length * SHARE_LINE_H : 0) + 11.5
+		const sourceTop = thoughtTop + (thL.length > 0 ? thL.length * SHARE_LINE_H : 0) + SHARE_GAP_SM
 		const cardH = sourceTop + 15.0 - SHARE_CARD_TOP
 		return { thoughtTop: thoughtTop, sourceTop: sourceTop, cardH: cardH, H: SHARE_CARD_TOP + cardH } as ShareCardLayout
 	}
@@ -402,9 +411,9 @@
 	function drawShareCardBase(ctx : CanvasRenderingContext2D, cardH : number) : void {
 		ctx.fillStyle = '#efefec'
 		ctx.fillRect(0, 0, SHARE_CARD_W, SHARE_CARD_TOP)
-		ctx.fillStyle = '#ffffff'
+		ctx.fillStyle = SHARE_CANVAS_BG
 		ctx.fillRect(0, SHARE_CARD_TOP, SHARE_CARD_W, cardH)
-		ctx.fillStyle = 'rgba(14, 15, 12, 0.45)'
+		ctx.fillStyle = SHARE_META
 		ctx.font = '12.5px sans-serif'
 		ctx.textAlign = 'center'
 		ctx.fillText(t('sel.appName'), SHARE_CARD_W / 2, SHARE_CARD_TOP + SHARE_HEADER_H + SHARE_BASE12)
@@ -421,7 +430,7 @@
 				top += SHARE_PARA_GAP
 			}
 			if (i == 0 && hungMark) {
-				ctx.fillStyle = 'rgba(14, 15, 12, 0.25)'
+				ctx.fillStyle = SHARE_QUOTE
 				ctx.font = 'bold 20px sans-serif'
 				ctx.fillText('“', SHARE_TEXT_X, top + 13.5 * 0.8)
 			}
@@ -436,28 +445,28 @@
 
 	/** 绘制出处（左对齐，与预览一致） */
 	function drawShareSource(ctx : CanvasRenderingContext2D, top : number) : void {
-		ctx.fillStyle = 'rgba(14, 15, 12, 0.4)'
+		ctx.fillStyle = SHARE_NEAR
 		ctx.font = '10.5px sans-serif'
 		ctx.fillText('《' + shareData.value.bookTitle + '》 · ' + shareData.value.source, SHARE_TEXT_X, top + SHARE_BASE10)
 	}
 
-	/** 绘制头像（白环包裹跨卡片顶边；withLogo=false 时以浅色圆替代） */
-	function drawShareLogo(ctx : CanvasRenderingContext2D, logo : CanvasImage, withLogo : boolean) : void {
-		ctx.fillStyle = '#ffffff'
+	/** 绘制头像（白环包裹，圆心/半径由调用方传入；withLogo=false 时以浅色圆替代）——分享卡与转发封面共用 */
+	function drawAvatar(ctx : CanvasRenderingContext2D, cx : number, cy : number, ringR : number, logoR : number, logo : CanvasImage, withLogo : boolean) : void {
+		ctx.fillStyle = SHARE_CANVAS_BG
 		ctx.beginPath()
-		ctx.arc(SHARE_CARD_W / 2, SHARE_CARD_TOP, SHARE_RING_R, 0, Math.PI * 2)
+		ctx.arc(cx, cy, ringR, 0, Math.PI * 2)
 		ctx.fill()
 		if (withLogo) {
 			ctx.save()
 			ctx.beginPath()
-			ctx.arc(SHARE_CARD_W / 2, SHARE_CARD_TOP, SHARE_LOGO_R, 0, Math.PI * 2)
+			ctx.arc(cx, cy, logoR, 0, Math.PI * 2)
 			ctx.clip()
-			ctx.drawImage(logo, SHARE_CARD_W / 2 - SHARE_LOGO_R, SHARE_CARD_TOP - SHARE_LOGO_R, SHARE_LOGO_R * 2, SHARE_LOGO_R * 2)
+			ctx.drawImage(logo, cx - logoR, cy - logoR, logoR * 2, logoR * 2)
 			ctx.restore()
 		} else {
 			ctx.fillStyle = '#d9d9d5'
 			ctx.beginPath()
-			ctx.arc(SHARE_CARD_W / 2, SHARE_CARD_TOP, SHARE_LOGO_R, 0, Math.PI * 2)
+			ctx.arc(cx, cy, logoR, 0, Math.PI * 2)
 			ctx.fill()
 		}
 	}
@@ -578,11 +587,11 @@
 
 	/** 绘制转发封面主体（背景/顶带/产品名/引文主体折行截断/出处；头像由 drawCoverLogo 补画） */
 	function drawCoverComposition(ctx : CanvasRenderingContext2D) : void {
-		ctx.fillStyle = '#ffffff'
+		ctx.fillStyle = SHARE_CANVAS_BG
 		ctx.fillRect(0, 0, COVER_W, COVER_H)
 		ctx.fillStyle = '#efefec'
 		ctx.fillRect(0, 0, COVER_W, COVER_BAND_H)
-		ctx.fillStyle = 'rgba(14, 15, 12, 0.45)'
+		ctx.fillStyle = SHARE_META
 		ctx.font = '11px sans-serif'
 		ctx.textAlign = 'center'
 		ctx.fillText(t('sel.appName'), COVER_W / 2, COVER_NAME_Y)
@@ -592,37 +601,21 @@
 		const maxLines = Math.floor((COVER_QUOTE_MAX_BOTTOM - COVER_QUOTE_TOP) / COVER_LINE_H)
 		const truncated = lines.length > maxLines
 		const shown = truncated ? lines.slice(0, maxLines) : lines
-		ctx.fillStyle = '#0e0f0c'
+		ctx.fillStyle = SHARE_INK
 		ctx.font = 'bold 16px sans-serif'
 		let top = COVER_QUOTE_TOP
 		for (let i = 0; i < shown.length; i++) {
 			ctx.fillText(shown[i] + (truncated && i == shown.length - 1 ? '…' : ''), COVER_PAD, top)
 			top += COVER_LINE_H
 		}
-		ctx.fillStyle = 'rgba(14, 15, 12, 0.4)'
+		ctx.fillStyle = SHARE_NEAR
 		ctx.font = '11px sans-serif'
 		ctx.fillText('《' + shareData.value.bookTitle + '》 · ' + shareData.value.source, COVER_PAD, COVER_H - 24.0)
 	}
 
 	/** 绘制转发封面头像（白环包裹跨顶带底边；withLogo=false 时以浅色圆替代） */
-	function drawCoverLogo(ctx : CanvasRenderingContext2D, logo : any, withLogo : boolean) : void {
-		ctx.fillStyle = '#ffffff'
-		ctx.beginPath()
-		ctx.arc(COVER_W / 2, COVER_BAND_H, COVER_RING_R, 0, Math.PI * 2)
-		ctx.fill()
-		if (withLogo) {
-			ctx.save()
-			ctx.beginPath()
-			ctx.arc(COVER_W / 2, COVER_BAND_H, COVER_LOGO_R, 0, Math.PI * 2)
-			ctx.clip()
-			ctx.drawImage(logo, COVER_W / 2 - COVER_LOGO_R, COVER_BAND_H - COVER_LOGO_R, COVER_LOGO_R * 2, COVER_LOGO_R * 2)
-			ctx.restore()
-		} else {
-			ctx.fillStyle = '#d9d9d5'
-			ctx.beginPath()
-			ctx.arc(COVER_W / 2, COVER_BAND_H, COVER_LOGO_R, 0, Math.PI * 2)
-			ctx.fill()
-		}
+	function drawCoverLogo(ctx : CanvasRenderingContext2D, logo : CanvasImage, withLogo : boolean) : void {
+		drawAvatar(ctx, COVER_W / 2, COVER_BAND_H, COVER_RING_R, COVER_LOGO_R, logo, withLogo)
 	}
 
 	/** 绘制并导出（canvas 为画布节点：小程序/App 为 node 模式画布，Web 为原生 HTMLCanvasElement） */
@@ -693,7 +686,7 @@
 				return
 			}
 			headerDrawn = true
-			drawShareLogo(ctx, logo, withLogo)
+			drawAvatar(ctx, SHARE_CARD_W / 2, SHARE_CARD_TOP, SHARE_RING_R, SHARE_LOGO_R, logo, withLogo)
 		}
 		const exportCanvas = () : void => {
 			if (exported) {
@@ -762,7 +755,7 @@
 
 	.share-card {
 		width: 590rpx;
-		background-color: #ffffff;
+		background-color: $bai-canvas;
 		border-radius: $bai-rounded-lg;
 		padding: 62rpx 31rpx 31rpx 31rpx;
 	}
@@ -776,7 +769,7 @@
 		width: 92rpx;
 		height: 92rpx;
 		border-radius: $bai-rounded-pill;
-		background-color: #ffffff;
+		background-color: $bai-canvas;
 		padding: 6rpx;
 		z-index: 2;
 	}
@@ -789,7 +782,7 @@
 
 	.share-card-app {
 		font-size: 25rpx;
-		color: rgba(14, 15, 12, 0.45);
+		color: rgba($bai-ink, 0.45);
 		text-align: center;
 		margin-bottom: 23rpx;
 	}
@@ -822,23 +815,23 @@
 	}
 
 	.share-ctx-far {
-		color: rgba(14, 15, 12, 0.18);
+		color: rgba($bai-ink, 0.18);
 	}
 
 	.share-ctx-near {
-		color: rgba(14, 15, 12, 0.4);
+		color: rgba($bai-ink, 0.4);
 	}
 
 	.share-quote-mark {
 		font-size: 40rpx;
 		font-weight: 800;
-		color: rgba(14, 15, 12, 0.25);
+		color: rgba($bai-ink, 0.25);
 	}
 
 	.share-quote-main {
 		font-size: 27rpx;
 		font-weight: 700;
-		color: #0e0f0c;
+		color: $bai-ink;
 	}
 
 	.share-card-thought {
@@ -853,7 +846,7 @@
 
 	.share-card-source {
 		font-size: 21rpx;
-		color: rgba(14, 15, 12, 0.4);
+		color: rgba($bai-ink, 0.4);
 		margin-top: 23rpx;
 	}
 
@@ -868,24 +861,24 @@
 		flex: 1;
 		height: 80rpx;
 		border-radius: $bai-rounded-pill;
-		background-color: #ffffff;
-		border: 1px solid rgba(14, 15, 12, 0.15);
+		background-color: $bai-canvas;
+		border: 1px solid rgba($bai-ink, 0.15);
 		align-items: center;
 		justify-content: center;
 	}
 
 	.share-action-text {
 		font-size: 27rpx;
-		color: #0e0f0c;
+		color: $bai-ink;
 	}
 
 	.share-action-share {
-		background-color: #0e0f0c;
-		border-color: #0e0f0c;
+		background-color: $bai-ink;
+		border-color: $bai-ink;
 	}
 
 	.share-action-text-primary {
-		color: #ffffff;
+		color: $bai-on-primary;
 	}
 
 	/* 分享卡片绘制画布（移出屏幕外，仅用于导出图片） */

@@ -19,7 +19,7 @@ import {
 } from '../api/reading.uts'
 import { deleteCloudObject } from '../api/cos.uts'
 import { hasAccessToken } from './request.uts'
-import { relocateBookNotes, repushBookNotes, thoughtFromCloud, Thought } from './readerTypes.uts'
+import { relocateBookNotes, repushBookNotes, thoughtFromCloud, Thought, loadSettings } from './readerTypes.uts'
 import { t, tf } from './i18n'
 // 词典注册（书籍数据层文案）
 import './locales/books.uts'
@@ -440,11 +440,7 @@ export function removeBookData(book : LocalBook, deleteCloud : boolean) : void {
 	// #endif
 	// #ifndef WEB
 	if (book.path.length > 0) {
-		try {
-			uni.getFileSystemManager().unlinkSync(book.path)
-		} catch (e) {
-			// 文件可能已被系统清理，忽略
-		}
+		discardSandboxFile(book.path)
 	}
 	try {
 		uni.getFileSystemManager().rmdirSync(uni.env.USER_DATA_PATH + '/pdf_cache/' + book.id, true)
@@ -559,8 +555,8 @@ export function applyPendingImport(title : string, format : string, size : numbe
 	saveBooks(list)
 }
 
-/** 沙盒文件删除（容错忽略；Web 端为 IndexedDB 键删除） */
-function discardSandboxFile(path : string) : void {
+/** 沙盒文件删除（容错忽略；Web 端为 IndexedDB 键删除）——导入管线经 bookparse 共用 */
+export function discardSandboxFile(path : string) : void {
 	// #ifdef WEB
 	webFsDelete(path)
 	return
@@ -572,6 +568,13 @@ function discardSandboxFile(path : string) : void {
 		// 忽略
 	}
 	// #endif
+}
+
+/** 删除换格式残留的正文文件（txt↔pdf 互斥清理）：传入当前格式正文完整路径，删除对侧扩展名同名文件 */
+export function discardCrossFormatFile(bodyPath : string, ext : string) : void {
+	const dot = bodyPath.lastIndexOf('.')
+	const base = dot >= 0 ? bodyPath.substring(0, dot) : bodyPath
+	discardSandboxFile(base + '.' + (ext == 'txt' ? 'pdf' : 'txt'))
 }
 
 /**
@@ -655,7 +658,7 @@ async function migratePendingBook(book : LocalBook, data : UTSJSONObject) : Prom
 		const ext = dot > slash ? book.path.substring(dot + 1) : 'txt'
 		newPath = dirPrefix + newId + '.' + ext
 		await renameSandboxFile(book.path, newPath)
-		discardSandboxFile(dirPrefix + newId + '.' + (ext == 'txt' ? 'pdf' : 'txt'))
+		discardCrossFormatFile(newPath, ext)
 		// #ifndef WEB
 		try {
 			uni.getFileSystemManager().rmdirSync(uni.env.USER_DATA_PATH + '/pdf_cache/' + book.id, true)
@@ -719,7 +722,7 @@ async function syncPendingBooks() : Promise<void> {
 
 // ==================== 阅读时长（按日云端统计 + 本地缓存镜像） ====================
 
-/** 阅读时长统计缓存（today/total 分钟数；date 为今日值归属日期，跨天 today 归零） */
+/** 阅读时长统计缓存（today/total 分钟数；storage JSON 另含 date 归属日期用于跨天归零，见 saveStats/loadStats） */
 type ReadingStatsCache = {
 	today: number
 	total: number
@@ -901,6 +904,48 @@ function savePendingSessions(list : PendingSession[]) : void {
 	uni.setStorageSync(STORAGE_SESSIONS, JSON.stringify(wrap))
 }
 
+/** 阅读会话时钟（onShow 起算、根节点 touchstart 续期、onHide/onUnload 结算；reader 与 pdfreader 共用同一结算口径） */
+export type ReadingClock = {
+	/** 页面显示：起算本次阅读 */
+	onShown : () => void
+	/** 根节点触摸：记录操作时间；距上次操作超时则上一会话以「最后操作+10min」入账并重新起算（虚拟书 0 不计时） */
+	onActive : (bookId : number) => void
+	/** 结算本次阅读：会话入账（<1 分钟内部丢弃），结束点截断至「最后操作+10min」（页面后台停留期间不计时长）；
+	 *  调用方自行守卫虚拟书 0 与进度回写 */
+	settle : (bookId : number) => void
+}
+
+/** 无操作超时阈值（超过则时长截断，下次操作重新起算） */
+const READING_IDLE_TIMEOUT_MS = 10 * 60 * 1000
+
+/** 创建阅读会话时钟（source 为流水来源标识：'txt'/'pdf'） */
+export function createReadingClock(source : string) : ReadingClock {
+	let enterAt = 0
+	let lastActiveAt = 0
+	return {
+		onShown: () => {
+			enterAt = Date.now()
+			lastActiveAt = enterAt
+		},
+		onActive: (bookId : number) => {
+			const now = Date.now()
+			if (enterAt > 0 && lastActiveAt > 0 && now - lastActiveAt > READING_IDLE_TIMEOUT_MS && bookId != 0) {
+				addReadingSession(bookId, source, enterAt, lastActiveAt + READING_IDLE_TIMEOUT_MS)
+				enterAt = now
+			}
+			lastActiveAt = now
+		},
+		settle: (bookId : number) => {
+			if (enterAt > 0) {
+				const endAt = lastActiveAt > 0 ? Math.min(Date.now(), lastActiveAt + READING_IDLE_TIMEOUT_MS) : Date.now()
+				addReadingSession(bookId, source, enterAt, endAt)
+			}
+			enterAt = 0
+			lastActiveAt = 0
+		}
+	} as ReadingClock
+}
+
 /** 阅读会话入账（reader/pdfreader 结算统一入口）：时长统计走既有 addTodayMinutes；流水本地暂存 + 在线即传（失败保留待补传） */
 export function addReadingSession(bookId : number, source : string, startedMs : number, endedMs : number) : void {
 	const mins = Math.floor((endedMs - startedMs) / 60000)
@@ -1034,20 +1079,14 @@ export function applyCloudPreferences(prefs : UTSJSONObject | null) : void {
 	}
 }
 
-/** 读取本地 reader_settings 缓存（缺项容错，供合并云端偏好用） */
+/** 读取本地 reader_settings 缓存（缺项容错，供合并云端偏好用；默认值与 readerTypes.loadSettings 同源） */
 function loadCachedReaderSettings() : UTSJSONObject {
-	const stored : any = uni.getStorageSync('reader_settings')
-	if (typeof stored == 'string' && (stored as string).length > 0) {
-		const obj = JSON.parse<UTSJSONObject>(stored as string)
-		if (obj != null) {
-			return obj
-		}
-	}
+	const s = loadSettings()
 	const def = {} as UTSJSONObject
-	def['fontSize'] = 18
-	def['pageTurn'] = '滚动'
-	def['theme'] = 'light'
-	def['fontKey'] = 'sourcehan'
+	def['fontSize'] = s.fontSize
+	def['pageTurn'] = s.pageTurn
+	def['theme'] = s.theme
+	def['fontKey'] = s.fontKey
 	return def
 }
 

@@ -134,6 +134,7 @@
 	import { fetchReadingReport } from '@/api/reading.uts'
 	import { hasAccessToken } from '@/utils/request.uts'
 	import { loadBooks, exportPendingSessionRows } from '@/utils/books.uts'
+	import { countCachedNotes } from '@/utils/readerTypes.uts'
 	// i18n：本页 v-for 变量名 t 与取词函数冲突，取词函数别名 tr
 	import { t as tr, tf } from '@/utils/i18n.uts'
 	// 词典注册（stats 页文案 + 公共段）
@@ -365,16 +366,7 @@
 			ids.push(books[i].id)
 		}
 		for (let i = 0; i < ids.length; i++) {
-			const keys: string[] = ['reader_underlines' + ids[i], 'reader_thoughts' + ids[i]]
-			for (let k = 0; k < keys.length; k++) {
-				const stored : any = uni.getStorageSync(keys[k])
-				if (typeof stored == 'string' && (stored as string).length > 0) {
-					const arr = JSON.parse<UTSJSONObject[]>(stored as string)
-					if (arr != null) {
-						n += arr.length
-					}
-				}
-			}
+			n += countCachedNotes(ids[i])
 		}
 		return n
 	}
@@ -601,12 +593,20 @@
 		return res
 	}
 
-	/** 12 小时封顶灰度色块：画布灰(#f4f4f2)→墨黑(#0e0f0c) 线性插值（时长照实统计，仅颜色封顶） */
+	/** 月历色块端色（裸 RGB 与 $bai-canvas-soft(#f4f4f2)/$bai-ink(#0e0f0c) 令牌同值，令牌改动须同步） */
+	const CAL_GRAY_FROM = [244, 244, 242]
+	const CAL_GRAY_TO = [14, 15, 12]
+	/** 月历色块封顶分钟数（12h 最高档，与 reward 页 FULL_DAY_MINUTES/活动档位表 720 同源） */
+	const CAL_CAP_MINUTES = 720
+	/** 月历数字反白阈值（当日 ≥6 小时） */
+	const CAL_DARK_MINUTES = 360
+
+	/** 12 小时封顶灰度色块：画布灰→墨黑线性插值（时长照实统计，仅颜色封顶） */
 	function shadeStyle(minutes : number) : string {
-		const t = Math.min(minutes / 720, 1)
-		const r = Math.round(244 + (14 - 244) * t)
-		const g = Math.round(244 + (15 - 244) * t)
-		const b = Math.round(242 + (12 - 242) * t)
+		const t = Math.min(minutes / CAL_CAP_MINUTES, 1)
+		const r = Math.round(CAL_GRAY_FROM[0] + (CAL_GRAY_TO[0] - CAL_GRAY_FROM[0]) * t)
+		const g = Math.round(CAL_GRAY_FROM[1] + (CAL_GRAY_TO[1] - CAL_GRAY_FROM[1]) * t)
+		const b = Math.round(CAL_GRAY_FROM[2] + (CAL_GRAY_TO[2] - CAL_GRAY_FROM[2]) * t)
 		return 'background-color: rgb(' + r + ',' + g + ',' + b + ');'
 	}
 
@@ -628,7 +628,7 @@
 			cells.push({
 				day: day,
 				bg: mins > 0 ? shadeStyle(mins) : '',
-				dark: mins >= 360
+				dark: mins >= CAL_DARK_MINUTES
 			} as CalCell)
 		}
 		calendarCells.value = cells

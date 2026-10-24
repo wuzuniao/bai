@@ -1,0 +1,31 @@
+/**
+ * 用户子包页面流程小助手（login/register/forgot-password 共用的交互胶水）
+ * 仅被 pages/user 分包引用，置于分包目录避免编译进主包
+ */
+
+import { Ref } from 'vue'
+import { t } from '@/utils/i18n.uts'
+
+/** 协议确认弹窗：未勾选时弹出，确认后置位并重入提交动作（login 三处与 register 共用同一骨架） */
+export function confirmAgreement(content : string, agreeRef : Ref<boolean>, onConfirmed : () => void) : void {
+	uni.showModal({
+		title: t('common.tip'),
+		content: content,
+		confirmText: t('common.ok'),
+		cancelText: t('common.cancel'),
+		success: (res) => {
+			if (res.confirm) {
+				agreeRef.value = true
+				onConfirmed()
+			}
+		}
+	})
+}
+
+/** 成功提示 + 1.5s 后 redirectTo（登录/注册/找回密码成功后的跳转收口） */
+export function toastGo(title : string, url : string) : void {
+	uni.showToast({ title: title, icon: 'success' })
+	setTimeout(() => {
+		uni.redirectTo({ url: url })
+	}, 1500)
+}

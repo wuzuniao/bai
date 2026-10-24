@@ -93,7 +93,6 @@
 	// 通知按钮组件引用：页面显示时刷新未读状态（响应站内信页标记已读后的返回）
 	const noticeRef = ref<NoticeButton | null>(null)
 
-	/** 顶部留白：内容区避让状态栏（小程序端胶囊在右侧，不冲突） */
 	// 微信小程序分享：转发好友与朋友圈（封面统一 /static/share-cover.png，复制自 yao 项目）
 	// #ifdef MP-WEIXIN
 	onShareAppMessage(() => {
@@ -262,7 +261,7 @@
 	}
 
 	/* ===== 站内信入口 ===== */
-	/* 通知按钮已组件化（components/NoticeButton/NoticeButton.uvue），样式随组件；
+	/* 通知按钮已组件化（components/common/NoticeButton.uvue），样式随组件；
 	 * 零高定位层：限宽与主内容同口径（Web 480 / 其余 750），铃铛 absolute 锚定本层 */
 	.settings-page__notice-cap {
 		width: 100%;
@@ -435,7 +434,7 @@
 	}
 
 	.settings-page__kinetic-slogan {
-		color: rgba(255, 255, 255, 0.75);
+		color: rgba($bai-on-primary, 0.75);
 		font-size: 32rpx;
 		line-height: 52rpx;
 		font-weight: 400;

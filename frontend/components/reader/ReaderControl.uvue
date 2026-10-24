@@ -79,7 +79,7 @@
 </template>
 
 <script setup lang="uts">
-	import { READER_THEME_LIGHT, READER_THEME_NIGHT, READER_THEME_PAPER, ReaderTheme } from '@/utils/theme.uts'
+	import { readerThemeOf, readerThemeIcon, ReaderTheme } from '@/utils/theme.uts'
 	import { Chapter, NoteRecord, Bookmark, ReaderSettings, loadSettings, spacedChapterTitle } from '@/utils/readerTypes.uts'
 	import { t } from '@/utils/i18n.uts'
 	// 词典注册（阅读器组件文案）
@@ -142,13 +142,7 @@
 
 	/** 主题（成组解析自 utils/theme.uts：正文/浮层/遮罩/控件色） */
 	const theme = computed<ReaderTheme>(() : ReaderTheme => {
-		if (settingsMirror.value.theme == 'night') {
-			return READER_THEME_NIGHT
-		}
-		if (settingsMirror.value.theme == 'paper') {
-			return READER_THEME_PAPER
-		}
-		return READER_THEME_LIGHT
+		return readerThemeOf(settingsMirror.value.theme)
 	})
 	const nightMode = computed(() : boolean => {
 		return settingsMirror.value.theme == 'night'
@@ -156,7 +150,7 @@
 
 	/** 主题图标路径：夜间使用 -light 白色变体 */
 	function themeIcon(name : string) : string {
-		return '/static/icons/' + name + (nightMode.value ? '-light' : '') + '.svg'
+		return readerThemeIcon(name, nightMode.value)
 	}
 
 	/** 顶部导航内容行（px）：与小程序胶囊同行对齐（状态栏高度起、行高 40px） */
@@ -259,12 +253,6 @@
 		border-bottom-left-radius: $bai-rounded-lg;
 		border-bottom-right-radius: $bai-rounded-lg;
 		z-index: 40;
-		transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.28s cubic-bezier(0.16, 1, 0.3, 1);
-	}
-
-	.menu-top-hidden {
-		transform: translateY(-110%);
-		opacity: 0;
 	}
 
 	.menu-top-inner {
@@ -322,13 +310,7 @@
 		border-top-left-radius: $bai-rounded-xl;
 		border-top-right-radius: $bai-rounded-xl;
 		z-index: 30;
-		/* 投影内联绑定（夜间切换白色微光） */
-		transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.28s cubic-bezier(0.16, 1, 0.3, 1);
-	}
-
-	.menu-bottom-hidden {
-		transform: translateY(110%);
-		opacity: 0;
+		/* 投影内联绑定（夜间切换白色微光）；显隐用 v-show 硬切（:class 过渡在微信端实测不生效，故无动画样式） */
 	}
 
 	/* 听书悬浮球（Stitch: 64px 黑底圆，悬浮于底栏上方 96px，右 20px） */

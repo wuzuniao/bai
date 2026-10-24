@@ -121,8 +121,8 @@
 	import { getTodayMinutes, getTotalMinutes } from '@/utils/books.uts'
 	import { hasAccessToken, ApiResponse } from '@/utils/request.uts'
 	import { fetchActivitySummary, postCheckin, postCheckinMakeup, claimReadingReward } from '@/api/activity.uts'
-	import { REWARD_TIERS, fmtRemainMinutes } from '@/utils/rewards.uts'
-	import { useUserStore } from '@/stores/user.uts'
+	import { REWARD_TIERS, fmtRemainMinutes, tierTotalReward } from '@/utils/rewards.uts'
+	import { useUserStore, hasMembershipRole } from '@/stores/user.uts'
 	// i18n：本页 v-for 变量名 t 与取词函数冲突，取词函数别名 tr
 	import { t as tr, tf } from '@/utils/i18n.uts'
 	// 词典注册（reward 页文案 + 公共段 + 奖励共享段）
@@ -148,27 +148,10 @@
 		state: string
 	}
 
-	/** 星期标签（周一~周日，自然周口径，index 0=周一；渲染期经 weekLabel 取词随语言切换刷新） */
+	/** 星期标签（周一~周日，自然周口径，index 0=周一；渲染期取词随语言切换刷新，词条 reward.week1~7，越界回落周日） */
 	function weekLabel(weekday: number) : string {
-		if (weekday == 1) {
-			return tr('reward.week1')
-		}
-		if (weekday == 2) {
-			return tr('reward.week2')
-		}
-		if (weekday == 3) {
-			return tr('reward.week3')
-		}
-		if (weekday == 4) {
-			return tr('reward.week4')
-		}
-		if (weekday == 5) {
-			return tr('reward.week5')
-		}
-		if (weekday == 6) {
-			return tr('reward.week6')
-		}
-		return tr('reward.week7')
+		const idx = weekday >= 1 && weekday <= 7 ? weekday : 7
+		return tr('reward.week' + idx.toString())
 	}
 	/** 每日签到奖励档（周一~周五 +5、周六 +10、周日大礼 +20；与后端 CHECKIN_REWARDS 同步维护，未登录兜底展示用） */
 	const DEFAULT_WEEK_REWARDS: number[] = [5, 5, 5, 5, 5, 10, 20]
@@ -199,13 +182,7 @@
 
 	/** 是否持有会员权益角色（黑铁及以上档位或管理员；本地即时判定做交互引导，后端补签时实时复核） */
 	const isMember = computed((): boolean => {
-		const info = userStore.userInfo
-		if (info == null) {
-			return false
-		}
-		return info.roles.includes('admin') || info.roles.includes('iron')
-			|| info.roles.includes('bronze') || info.roles.includes('silver')
-			|| info.roles.includes('gold')
+		return hasMembershipRole(userStore.userInfo)
 	})
 
 	/** 本月剩余补签次数（会员每月 3 次，与后端 MAKEUP_QUOTA_PER_MONTH 同步维护） */
@@ -504,7 +481,7 @@
 				claimBusy.value = false
 				if (res.code == 0 && res.data != null) {
 					const data = res.data!
-					const reward = data.getNumber('reward') ?? (t.base + t.bonus)
+					const reward = data.getNumber('reward') ?? tierTotalReward(t)
 					applyBalanceFromData(data)
 					setTierState(t.minutes, 'claimed')
 					showToast(tf('toast.claimOkN', [reward.toString()]))
@@ -744,7 +721,7 @@
 	}
 
 	function tierDesc(t: TierView) : string {
-		const total = t.base + t.bonus
+		const total = tierTotalReward(t)
 		if (t.state == 'claimed') {
 			return tf('reward.tierClaimedN', [total.toString()])
 		}
@@ -801,10 +778,10 @@
 		}, 1500)
 	}
 
-	/** "去阅读"：进入阅读正文页继续累计时长 */
+	/** "去阅读"：跳书架选书（阅读器需指定书籍打开，无上下文不直达正文页） */
 	function goReading() : void {
 		uni.navigateTo({
-			url: '/pages/reading/reader'
+			url: '/pages/reading/bookshelf'
 		})
 	}
 

@@ -9,7 +9,7 @@
 	 * ListGroup —— 设置列表分组容器（白底大圆角卡片，条目间由 ListCell 分隔线区分）
 	 * disabled=true 时整体置灰（账号待删除状态的资料分组）。
 	 */
-	const props = defineProps<{
+	defineProps<{
 		/** 是否置灰禁用态 */
 		disabled: boolean
 	}>()

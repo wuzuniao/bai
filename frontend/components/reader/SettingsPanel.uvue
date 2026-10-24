@@ -79,8 +79,8 @@
 </template>
 
 <script setup lang="uts">
-	import { READER_THEME_LIGHT, READER_THEME_NIGHT, READER_THEME_PAPER, ReaderTheme } from '@/utils/theme.uts'
-	import { ReaderSettings, FONT_OPTIONS, fontOptionOf, loadSettings, saveSettings } from '@/utils/readerTypes.uts'
+	import { READER_THEME_LIGHT, READER_THEME_PAPER, readerThemeOf, ReaderTheme } from '@/utils/theme.uts'
+	import { ReaderSettings, FONT_OPTIONS, fontOptionOf, loadSettings, saveSettings, loadStoredFontKey } from '@/utils/readerTypes.uts'
 	import { t } from '@/utils/i18n.uts'
 	// 词典注册（阅读器组件文案 + 公共段）
 	import '@/utils/locales/readercomp.uts'
@@ -141,18 +141,9 @@
 		fontSize.value = s.fontSize
 		pageTurn.value = pageTurnModes.indexOf(s.pageTurn) >= 0 ? s.pageTurn : pageTurnModes[0]
 		themeKey.value = s.theme
-		selectedBg.value = s.theme == 'paper' ? READER_THEME_PAPER.readerBg : (s.theme == 'night' ? READER_THEME_NIGHT.readerBg : READER_THEME_LIGHT.readerBg)
+		selectedBg.value = readerThemeOf(s.theme).readerBg
 		// 字体沿用独立 key（历史版本存储结构不变）
-		const storedFont : any = uni.getStorageSync('reader_font')
-		if (typeof storedFont == 'string') {
-			const key = storedFont as string
-			for (let i = 0; i < FONT_OPTIONS.length; i++) {
-				if (FONT_OPTIONS[i].key == key) {
-					fontKey.value = key
-					break
-				}
-			}
-		}
+		fontKey.value = loadStoredFontKey()
 	}
 
 	/** 字体选项与当前生效字体名（按钮展示） */
@@ -163,13 +154,7 @@
 
 	/** 主题（成组解析自 utils/theme.uts：正文/浮层/遮罩/控件色） */
 	const theme = computed<ReaderTheme>(() : ReaderTheme => {
-		if (themeKey.value == 'night') {
-			return READER_THEME_NIGHT
-		}
-		if (themeKey.value == 'paper') {
-			return READER_THEME_PAPER
-		}
-		return READER_THEME_LIGHT
+		return readerThemeOf(themeKey.value)
 	})
 	const nightMode = computed(() : boolean => {
 		return themeKey.value == 'night'
@@ -224,7 +209,7 @@
 	/** 日/夜切换（宿主三项导航经 ref 调用：真源唯一写入口，保证持久化与上行一致） */
 	function setTheme(key : string) : void {
 		themeKey.value = key
-		selectedBg.value = key == 'paper' ? READER_THEME_PAPER.readerBg : (key == 'night' ? READER_THEME_NIGHT.readerBg : READER_THEME_LIGHT.readerBg)
+		selectedBg.value = readerThemeOf(key).readerBg
 		saveSettings({ fontSize: fontSize.value, pageTurn: pageTurn.value, theme: themeKey.value, fontKey: fontKey.value } as ReaderSettings)
 		emitChange()
 		emit('toast', key == 'night' ? t('readercomp.nightOn') : t('readercomp.nightOff'))

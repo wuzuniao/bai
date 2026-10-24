@@ -1,7 +1,7 @@
 <template>
 	<!-- 全局提示（页面正中卡片弹窗，1.5s 自动消失；夜间提亮卡片底色） -->
 	<view v-if="visible" class="reader-toast">
-		<text class="reader-toast-text" :style="night ? 'background-color:rgba(44, 44, 44, 0.98)' : ''">{{ msg }}</text>
+		<text class="reader-toast-text" :style="night ? 'background-color:' + READER_THEME_NIGHT.menuBottomBg : ''">{{ msg }}</text>
 	</view>
 </template>
 
@@ -13,6 +13,8 @@
 	 * 宿主经 ref 调 show(msg) 弹出（重复调用重置 1.5s 计时）；
 	 * night 下行控制夜间提亮卡片底色。
 	 */
+	import { READER_THEME_NIGHT } from '@/utils/theme.uts'
+
 	const props = defineProps<{
 		/** 夜间模式（提亮卡片底色与暗底区分） */
 		night: boolean

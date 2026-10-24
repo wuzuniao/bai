@@ -155,7 +155,8 @@
 	import CodeInput from '@/components/form/CodeInput.uvue'
 	import ListGroup from '@/components/list/ListGroup.uvue'
 	import ListCell from '@/components/list/ListCell.uvue'
-	import { useUserStore } from '@/stores/user.uts'
+	import { useUserStore, avatarPathOf, avatarKeyOf, AVATAR_OPTION_KEYS } from '@/stores/user.uts'
+	import { validateConfirmPassword } from './utils/validators.uts'
 	import { ApiResponse } from '@/utils/request.uts'
 	import { t, currentLocale, setLocale } from '@/utils/i18n.uts'
 	// 词典注册（profile 页文案 + 公共段）
@@ -307,12 +308,10 @@
 		src: string
 	}
 
-	const avatarOptions = ref<AvatarOption[]>([
-		{ key: 'hei', src: '/static/touxiang/hei.png' } as AvatarOption,
-		{ key: 'hong', src: '/static/touxiang/hong.png' } as AvatarOption,
-		{ key: 'huang', src: '/static/touxiang/huang.png' } as AvatarOption,
-		{ key: 'lan', src: '/static/touxiang/lan.png' } as AvatarOption
-	])
+	/** 可选头像网格（key 顺序与路径映射真源在 stores/user.uts） */
+	const avatarOptions = ref<AvatarOption[]>(AVATAR_OPTION_KEYS.map((k : string) : AvatarOption => {
+		return { key: k, src: avatarPathOf(k) } as AvatarOption
+	}))
 
 	const selectedAvatar = ref('hong')
 
@@ -322,17 +321,7 @@
 		if (info == null) {
 			return 'hong'
 		}
-		const url = info.avatar_url
-		if (url == 'hei' || url.includes('hei')) {
-			return 'hei'
-		}
-		if (url == 'huang' || url.includes('huang')) {
-			return 'huang'
-		}
-		if (url == 'lan' || url.includes('lan')) {
-			return 'lan'
-		}
-		return 'hong'
+		return avatarKeyOf(info.avatar_url)
 	}
 
 	function onSelectAvatar(key: string) : void {
@@ -363,10 +352,6 @@
 		const v = signatureValue.value.trim()
 		if (v.length == 0) {
 			signatureError.value = t('profile.signatureEmpty')
-			return
-		}
-		if (v.length > 70) {
-			signatureError.value = t('profile.signatureTooLong')
 			return
 		}
 		updateSignature(v).then((_res: ApiResponse) => {
@@ -411,13 +396,13 @@
 			confirmPasswordError.value = ''
 			return
 		}
-		confirmPasswordError.value = confirmPasswordValue.value !== newPasswordValue.value ? t('profile.pwdMismatch') : ''
+		confirmPasswordError.value = validateConfirmPassword(confirmPasswordValue.value, newPasswordValue.value)
 	}
 
 	function handleChangePassword() : void {
 		newPasswordError.value = validatePassword(newPasswordValue.value)
-		if (newPasswordValue.value.length > 0 && confirmPasswordValue.value !== newPasswordValue.value) {
-			confirmPasswordError.value = t('profile.pwdMismatch')
+		if (newPasswordValue.value.length > 0 && confirmPasswordValue.value.length > 0) {
+			confirmPasswordError.value = validateConfirmPassword(confirmPasswordValue.value, newPasswordValue.value)
 		} else if (confirmPasswordValue.value.length == 0) {
 			confirmPasswordError.value = t('profile.confirmPasswordPh')
 		} else {
@@ -530,7 +515,7 @@
 			newEmailError.value = ''
 			newCodeError.value = ''
 			newCodeRef.value?.reset()
-			} else {
+		} else {
 			collapseAll()
 		}
 	}
@@ -811,11 +796,6 @@
 		background-color: $bai-ink;
 		flex-shrink: 0;
 		overflow: hidden;
-	}
-
-	/* 英文态：旋钮滑至右端 */
-	.profile-page__lang-switch--en {
-		background-color: $bai-ink;
 	}
 
 	.profile-page__lang-knob {

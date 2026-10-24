@@ -38,7 +38,7 @@
 
 <script setup lang="uts">
 	import { mpCapsuleRect, CONTENT_CAP_PX, scheduleResizeReload } from '@/utils/layout.uts'
-	import { findBook, loadPdfProgress, savePdfProgress, updateBookReading, addReadingSession } from '@/utils/books.uts'
+	import { findBook, loadPdfProgress, savePdfProgress, updateBookReading, createReadingClock } from '@/utils/books.uts'
 	import { openPdfSession } from '@/utils/pdfrender.uts'
 	import { t, tf } from '@/utils/i18n.uts'
 	// 词典注册（reader/pdfreader 页文案）
@@ -78,12 +78,8 @@
 	let winH = 0
 	/** 页面已卸载（渲染调度中断标志） */
 	let disposed = false
-	/** 阅读时长起算（onShow 起算，onHide/onUnload 结算，与 reader 一致） */
-	let enterAt = 0
-	/** 最近操作时间（根节点 touchstart 跟踪；连续 10 分钟无操作视为本次阅读时间结束） */
-	let lastActiveAt = 0
-	/** 无操作超时阈值（超过则时长截断，下次操作重新起算） */
-	const IDLE_TIMEOUT_MS = 10 * 60 * 1000
+	/** 阅读时长起算（onShow 起算，onHide/onUnload 结算，与 reader 共用同一时钟收口 utils/books.uts） */
+	const readingClock = createReadingClock('pdf')
 
 	/** 页 wrapper 高（px）：屏宽 × 页比例，等比缩放的布局基准（固定高保证 scroll-into-view 定位与页码推算准确） */
 	const pageWrapperH = computed(() : number => {
@@ -138,8 +134,7 @@
 	})
 
 	onShow(() => {
-		enterAt = Date.now()
-		lastActiveAt = enterAt
+		readingClock.onShown()
 	})
 
 	/** 折叠屏展开/折叠、旋转、桌面拖宽：更新正文区实宽，页 wrapper 高随动重算。
@@ -160,12 +155,7 @@
 
 	/** 根节点触摸：记录操作时间；距上次操作超 10 分钟则上一会话以「最后操作+10min」入账并重新起算 */
 	function onPageTouchStart() : void {
-		const now = Date.now()
-		if (enterAt > 0 && lastActiveAt > 0 && now - lastActiveAt > IDLE_TIMEOUT_MS && bookId.value != 0) {
-			addReadingSession(bookId.value, 'pdf', enterAt, lastActiveAt + IDLE_TIMEOUT_MS)
-			enterAt = now
-		}
-		lastActiveAt = now
+		readingClock.onActive(bookId.value)
 	}
 
 	onHide(() => {
@@ -326,21 +316,14 @@
 		menuVisible.value = !menuVisible.value
 	}
 
-	/** 结算阅读：进度百分比落库（书籍记录云端跟随） + 回写最近阅读状态 + 累计今日时长（onHide 先于 onUnload，enterAt 置零防双计） */
+	/** 结算阅读：进度百分比落库（书籍记录云端跟随） + 回写最近阅读状态 + 累计今日时长（onHide 先于 onUnload，时钟结算防双计） */
 	function persistReading() : void {
 		if (bookId.value == 0) {
 			return
 		}
 		savePdfProgress(bookId.value, { percent: curPercent.value, ratio: pageRatio.value } as PdfProgress)
 		updateBookReading(bookId.value, -1, Math.round(curPercent.value))
-		if (enterAt > 0) {
-			// 会话入账统一入口：时长统计（本地镜像+云端回正）与按书/时段流水一并处理（<1 分钟内部丢弃）；
-			// 结束点截断至「最后操作+10min」（页面后台停留期间不计时长）
-			const endAt = lastActiveAt > 0 ? Math.min(Date.now(), lastActiveAt + IDLE_TIMEOUT_MS) : Date.now()
-			addReadingSession(bookId.value, 'pdf', enterAt, endAt)
-		}
-		enterAt = 0
-		lastActiveAt = 0
+		readingClock.settle(bookId.value)
 	}
 
 	/** 返回书架 */

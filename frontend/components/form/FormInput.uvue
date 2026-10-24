@@ -23,7 +23,7 @@
 	 */
 	import { PLACEHOLDER_STYLE } from '@/utils/theme.uts'
 
-	const props = defineProps<{
+	defineProps<{
 		/** 输入值（v-model） */
 		modelValue: string
 		/** 字段标签（空串不渲染） */

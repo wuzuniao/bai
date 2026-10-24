@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 跨子域 SSO Cookie 工具（WEB 端专用，其余端 no-op；账号别名与合并改造：Cookie 固定持有平台令牌）
  * --------------------------------------------------------------------------
  * 同一浏览器内「一处登录，处处通行」——bai/jin/yao/auth 各子域的 localStorage
@@ -417,20 +417,18 @@ export async function recoverAuthFromCookie(): Promise<RestoredAuthState | null>
 }
 
 /**
- * 启动时从父域 Cookie 恢复登录态（N34/P39 恢复语义）
+ * 启动时从父域 Cookie 恢复登录态（N34/P39 恢复语义，异步执行、结果经 onAuthRestored 监听通知）
  * 1. 本地已有项目 access_token：本地有效不交换（N34，各项目本地身份独立维持），直接返回
  *    （本地令牌失效场景由请求 401 链经 recoverAuthFromCookie 兜底恢复）
  * 2. 本地无令牌 + Cookie 有平台令牌：经共享恢复链交换 → 项目令牌 + 资料写本地，
- *    成功后经 onRestored 回调与 onAuthRestored 监听通知 store 写响应式状态
+ *    成功后经 onAuthRestored 监听通知 store 写响应式状态
  * 3. 平台 access 失效：用 Cookie 内平台 refresh_token 刷新后重试交换（P39）；
  *    服务端明确拒绝平台登录态 → 清 Cookie 保持跨站一致（网络不可达时保留）
  * 4. Cookie 缺失：无事可做（本地身份独立维持；登出经 auth 全端撤销后由 401 链收敛）
- * @param onRestored 恢复成功回调（可空）
- * @returns 是否立即判断为无需恢复（异步恢复不改变返回值语义）
  */
-export function restoreAuthFromCookie(onRestored: ((res: RestoredAuthState) => void) | null = null): boolean {
+export function restoreAuthFromCookie(): void {
 	// #ifndef WEB
-	return false
+	return
 	// #endif
 	// #ifdef WEB
 	try {
@@ -438,20 +436,15 @@ export function restoreAuthFromCookie(onRestored: ((res: RestoredAuthState) => v
 		const localToken = localTokenRaw == null ? '' : localTokenRaw as string
 		// N34：本地已有项目令牌（无论与 Cookie 是否一致），本地身份独立维持不交换
 		if (localToken.length > 0) {
-			return false
+			return
 		}
 		const saved = readAuthCookie()
 		if (saved == null || saved.access_token.length == 0) {
-			return false
+			return
 		}
-		startRestoreChain().then((restored: RestoredAuthState | null) => {
-			if (restored != null && onRestored != null) {
-				onRestored(restored)
-			}
-		})
-		return false
+		startRestoreChain()
 	} catch (e) {
-		return false
+		// Cookie 读取异常：放弃本次恢复
 	}
 	// #endif
 }

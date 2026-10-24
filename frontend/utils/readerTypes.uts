@@ -82,7 +82,21 @@ export function fontOptionOf(key : string) : FontOption {
 	return FONT_OPTIONS[0]
 }
 
-/** ===== 划线与想法（本地存储真源：SelectionPopover 组件写入，阅读页/目录抽屉读取） ===== */
+/** 恢复本地存储的字体 key（未存/校验失败回落默认；reader 页与设置面板共用同一恢复口径） */
+export function loadStoredFontKey() : string {
+	const stored : any = uni.getStorageSync('reader_font')
+	if (typeof stored == 'string') {
+		const key = stored as string
+		for (let i = 0; i < FONT_OPTIONS.length; i++) {
+			if (FONT_OPTIONS[i].key == key) {
+				return key
+			}
+		}
+	}
+	return FONT_OPTIONS[0].key
+}
+
+/** ===== 划线与想法（本地缓存读写：SelectionPopover 组件写入，阅读页/目录抽屉读取；云端真源、写入即静默跟随） ===== */
 
 /** 划线记录：按「章+段落」记录（跨章划线的段索引属于各自章） */
 export type UnderlineEntry = {
@@ -576,7 +590,7 @@ export function loadUnderlines() : UnderlineEntry[] {
 export function loadThoughts() : Thought[] {
 	const key = bookScopedKey(THOUGHT_STORAGE_KEY)
 	if (key == null) {
-		return [] as Thought[]
+		return []
 	}
 	const stored : any = uni.getStorageSync(key)
 	if (typeof stored == 'string' && (stored as string).length > 0) {
@@ -585,7 +599,23 @@ export function loadThoughts() : Thought[] {
 			return list
 		}
 	}
-	return [] as Thought[]
+	return []
+}
+
+/** 统计指定书籍的本地缓存划线+想法条数（书架/统计页汇总用；key 与容错口径与本文件读写单点一致） */
+export function countCachedNotes(bookId : number) : number {
+	let n = 0
+	const keys : string[] = [UNDERLINE_STORAGE_KEY + bookId, THOUGHT_STORAGE_KEY + bookId]
+	for (let i = 0; i < keys.length; i++) {
+		const stored : any = uni.getStorageSync(keys[i])
+		if (typeof stored == 'string' && (stored as string).length > 0) {
+			const arr = JSON.parse<UTSJSONObject[]>(stored as string)
+			if (arr != null) {
+				n += arr.length
+			}
+		}
+	}
+	return n
 }
 
 /** 查找章+段落的划线记录 */

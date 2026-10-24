@@ -42,6 +42,10 @@ export type ReaderTheme = {
 	controlBorder: string
 	/** 设置面板控件文字色（夜间白字突出） */
 	controlText: string
+	/** 翻页覆盖模式遮罩面色（浅色纸面用墨色加深，暗色纸面用浅白提亮） */
+	coverMaskBg: string
+	/** 想法查看面板底色（日间纯白与页面背景区分，夜间随浮层底色） */
+	thoughtPanelBg: string
 }
 
 /** 日间主题（画布 canvas-soft + 墨色文字，取自 DESIGN_bai.md） */
@@ -66,7 +70,10 @@ export const READER_THEME_LIGHT: ReaderTheme = {
 	/** 日间控件：白底墨字 */
 	controlBg: '#ffffff',
 	controlBorder: '#e9e9e6',
-	controlText: '#0e0f0c'
+	controlText: '#0e0f0c',
+	/** 浅色纸面用墨色半透明加深（与书签遮罩的暗底惯例一致） */
+	coverMaskBg: 'rgba(0, 0, 0, 0.45)',
+	thoughtPanelBg: '#ffffff'
 } as ReaderTheme
 
 /** 夜间主题（深色纸面） */
@@ -92,7 +99,11 @@ export const READER_THEME_NIGHT: ReaderTheme = {
 	/** 夜间控件：灰底白字，与暗面板区分且文字突出 */
 	controlBg: '#3a3a3a',
 	controlBorder: 'rgba(255, 255, 255, 0.12)',
-	controlText: '#f3f4f6'
+	controlText: '#f3f4f6',
+	/** 暗色纸面用浅白半透明提亮（与浮层的暗底区分惯例一致） */
+	coverMaskBg: 'rgba(255, 255, 255, 0.24)',
+	/** 夜间随浮层底色提亮 */
+	thoughtPanelBg: 'rgba(44, 44, 44, 0.98)'
 } as ReaderTheme
 
 /** 暖米黄纸张主题（阅读背景色板第二选项，浮层与弱化色同日间） */
@@ -114,8 +125,26 @@ export const READER_THEME_PAPER: ReaderTheme = {
 	/** 纸张主题浮层与弱化色同日间，控件同为白底墨字 */
 	controlBg: '#ffffff',
 	controlBorder: '#e9e9e6',
-	controlText: '#0e0f0c'
+	controlText: '#0e0f0c',
+	coverMaskBg: 'rgba(0, 0, 0, 0.45)',
+	thoughtPanelBg: '#ffffff'
 } as ReaderTheme
 
 /** 输入框占位内联样式（placeholder-style 仅接受字符串，无法引用 SCSS 变量） */
 export const PLACEHOLDER_STYLE: string = 'color: #868685'
+
+/** 主题 key → ReaderTheme 解析（未知 key 回落日间）：阅读页与控制框/设置组件共用同一解析，新增主题只改此处 */
+export function readerThemeOf(key : string) : ReaderTheme {
+	if (key == 'night') {
+		return READER_THEME_NIGHT
+	}
+	if (key == 'paper') {
+		return READER_THEME_PAPER
+	}
+	return READER_THEME_LIGHT
+}
+
+/** 主题图标路径：夜间使用 -light 白色变体（阅读页控制框与书签面板共用） */
+export function readerThemeIcon(name : string, night : boolean) : string {
+	return '/static/icons/' + name + (night ? '-light' : '') + '.svg'
+}

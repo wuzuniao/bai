@@ -160,8 +160,8 @@
 	 *       setAnchors/setDragRects 回传组件差分定位）；选区变化
 	 *       emit('spanChanged') 供宿主渲染高亮镜像。
 	 * 复制：写入剪贴板（微信端系统提示，其他端页面内提示）。
-	 * 划线：本地存储区间运算（切换式：完全覆盖取消、否则并入），存储 key
-	 *       reader_underlines 为真源。
+	 * 划线：本地缓存区间运算（切换式：完全覆盖取消、否则并入），存储 key
+	 *       reader_underlines（云端真源的本地镜像，写入后云端静默跟随）。
 	 * 查询：占位提示。
 	 * 写想法/查看卡片/分享：经 thoughtPanelRef/shareCardRef 调子组件
 	 *       （openEditor/open/showThoughtView/hideThoughtView）。
@@ -674,8 +674,8 @@
 		const w = popoverW > 0 ? popoverW : (twoLine.value ? uni.upx2px(290) : POPOVER_EST_W)
 		const h = popoverH > 0 ? popoverH : (twoLine.value ? 100 : POPOVER_EST_H)
 		// 上下间距避开手柄视觉体：起点柄悬于行顶上方、终点柄圆头垂于行底下方，另留 16rpx 呼吸空隙
-		const hotH = uni.upx2px(76)
-		const visH = uni.upx2px(50)
+		const hotH = uni.upx2px(HANDLE_HOT_RPX)
+		const visH = uni.upx2px(HANDLE_VISUAL_RPX)
 		const gapUp = visH + uni.upx2px(16)
 		const gapDown = hotH - visH + uni.upx2px(16)
 		const arrowH = uni.upx2px(13)

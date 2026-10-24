@@ -23,17 +23,18 @@
 
 	const noticeTop = ref('45px')
 
-	// 图标两态切换（显示尺寸 46rpx，与 jin 同规格）
+	// 图标两态切换（显示尺寸 46rpx）
 	const iconSrc = computed((): string => {
 		return hasUnread.value ? '/static/icons/notice-unread.svg' : '/static/icons/notice.svg'
 	})
 
-	/** 顶部留白：statusBarHeight - 5px 基础偏移 + 约 0.6vh 相对增量，各机型视觉比例一致（与 yao 同款算法） */
+	/** 顶部留白：statusBarHeight - 5px 基础偏移 + 约 0.6vh 相对增量，各机型视觉比例一致
+	 * （与 member-pay 页返回键顶部定位同款算法，改动需两处同步核对真机） */
 	function computeTop(): void {
 		try {
-			const sysInfo = uni.getSystemInfoSync()
-			const statusBarHeight = sysInfo.statusBarHeight != null ? sysInfo.statusBarHeight : 44
-			const extra = sysInfo.windowHeight * 0.006
+			const win = uni.getWindowInfo()
+			const statusBarHeight = win.statusBarHeight != null ? win.statusBarHeight : 44
+			const extra = win.windowHeight * 0.006
 			noticeTop.value = (statusBarHeight - 5 + extra).toString() + 'px'
 		} catch (e) {
 			noticeTop.value = '45px'

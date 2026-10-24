@@ -26,11 +26,10 @@
 	import '@/utils/locales/common.uts'
 
 	/** 导航项定义（含目标路径）：导航数据与页面跳转均由本组件统一管理，页面仅需传入 active；
-	 *  text 不再预置（文案随语言切换），经 navText 动态取词 */
+	 *  文案经 navText 动态取词（随语言切换） */
 	const items : BottomNavItem[] = [
 		{
 			key: 'home',
-			text: '',
 			icon: '/static/icons/home.svg',
 			iconActive: '/static/icons/home-active.svg',
 			iconWidth: 31,
@@ -39,7 +38,6 @@
 		} as BottomNavItem,
 		{
 			key: 'bookshelf',
-			text: '',
 			icon: '/static/icons/bookshelf.svg',
 			iconActive: '/static/icons/bookshelf-active.svg',
 			iconWidth: 38,
@@ -48,7 +46,6 @@
 		} as BottomNavItem,
 		{
 			key: 'mine',
-			text: '',
 			icon: '/static/icons/mine.svg',
 			iconActive: '/static/icons/mine-active.svg',
 			iconWidth: 31,
