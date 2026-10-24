@@ -535,7 +535,7 @@
 			}
 		}
 
-		// 指标：总时长/阅读天数/日均（周期自然天数）
+		// 指标：总时长/阅读天数/日均（分母与云端同口径：未结束周期按截至今日计，未来日不稀释日均）
 		let totalMins = 0
 		let activeDays = 0
 		for (let i = 0; i < dayBuckets.length; i++) {
@@ -545,8 +545,9 @@
 			}
 		}
 		const sp = startKey.split('-')
-		const ep = endKey.split('-')
 		const sDate = new Date(parseInt(sp[0]), parseInt(sp[1]) - 1, parseInt(sp[2]))
+		const effEnd = endKey < todayKey ? endKey : todayKey
+		const ep = effEnd.split('-')
 		const eDate = new Date(parseInt(ep[0]), parseInt(ep[1]) - 1, parseInt(ep[2]))
 		const dayCount = Math.max(Math.round((eDate.getTime() - sDate.getTime()) / 86400000) + 1, 1)
 		// 书籍榜 top3

@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import date, datetime, time as dtime, timedelta
 from typing import Any
 
-from sqlalchemy import delete, desc, func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -476,7 +476,8 @@ class ReadingService:
     async def get_report(self, db: AsyncSession, user_id: int, period: str, anchor: date) -> dict[str, Any]:
         """
         阅读统计报告（周期 = week 本周 / month 本月 / year 本年 / total 全部，anchor 为周期内锚点日期）
-        - 趋势与时长来自 reading_daily_stats（聚合真源）；书籍榜与时段分布来自 reading_sessions（明细账，两账不保证一致）
+        - 趋势与时长来自 reading_daily_stats（聚合真源）；书籍榜与时段分布来自 reading_sessions
+          明细账，按「日」等比校准到真源后聚合（两账可能漂移，详见下方书籍榜注释），保证与总时长互洽
         - 在读/完本为 user_books 累计状态（项目无按周期快照数据）；笔记数按 created_at 落区间统计
         """
         if period not in self.REPORT_PERIODS:
@@ -554,31 +555,59 @@ class ReadingService:
             )
         )
 
-        # 书籍榜：周期内按书聚合时长 top3（book_title 快照支撑删书后展示）
+        # 书籍榜与时段分布：会话明细先按「日」校准再聚合。明细账（reading_sessions）与聚合真源
+        # （reading_daily_stats）可能互相漂移（离线补传重复、分钟上报失败丢失、客户端时钟偏差
+        # 产生真源外日期的流水），直接聚合会出现书籍时长超过周期总时长、四个周期 Tab 数字互斥。
+        # 校准规则：每日明细分钟和按该日真源分钟等比缩放（f = 真源/明细），真源不覆盖的日期剔除，
+        # 向下取整保证分布之和恒不超过周期总时长（book_title 快照支撑删书后展示）
         sess_where = (
             ReadingSession.user_id == user_id,
             ReadingSession.started_at >= day_start,
             ReadingSession.started_at < day_end,
         )
-        total_rows = await db.execute(
-            select(ReadingSession.book_title, func.sum(ReadingSession.minutes))
+        day_rows = await db.execute(
+            select(func.date(ReadingSession.started_at), func.sum(ReadingSession.minutes))
             .where(*sess_where)
-            .group_by(ReadingSession.book_title)
-            .order_by(desc(func.sum(ReadingSession.minutes)))
-            .limit(3)
+            .group_by(func.date(ReadingSession.started_at))
         )
+        day_factors: dict[date, float] = {}
+        for d, mins in day_rows.fetchall():
+            m = int(mins)
+            day_factors[d] = day_map[d] / m if day_map.get(d, 0) > 0 and m > 0 else 0.0
+        book_rows = await db.execute(
+            select(
+                func.date(ReadingSession.started_at),
+                ReadingSession.book_title,
+                func.sum(ReadingSession.minutes),
+            )
+            .where(*sess_where)
+            .group_by(func.date(ReadingSession.started_at), ReadingSession.book_title)
+        )
+        book_map: dict[str, int] = {}
+        for d, title, mins in book_rows.fetchall():
+            f = day_factors.get(d, 0.0)
+            if f > 0:
+                book_map[title] = book_map.get(title, 0) + int(int(mins) * f)
         books = [
-            {"book_title": t, "total_minutes": int(m)}
-            for t, m in total_rows.fetchall()
+            {"book_title": t, "total_minutes": m}
+            for t, m in sorted(book_map.items(), key=lambda kv: kv[1], reverse=True)[:3]
         ]
 
-        # 时段分布：0-23 点逐时聚合会话分钟数 + 偏好分段标签
+        # 时段分布：0-23 点逐时聚合（同样经每日校准）+ 偏好分段标签
         hour_rows = await db.execute(
-            select(func.hour(ReadingSession.started_at), func.sum(ReadingSession.minutes))
+            select(
+                func.date(ReadingSession.started_at),
+                func.hour(ReadingSession.started_at),
+                func.sum(ReadingSession.minutes),
+            )
             .where(*sess_where)
-            .group_by(func.hour(ReadingSession.started_at))
+            .group_by(func.date(ReadingSession.started_at), func.hour(ReadingSession.started_at))
         )
-        hour_map = {int(h): int(m) for h, m in hour_rows.fetchall()}
+        hour_map: dict[int, int] = {}
+        for d, h, mins in hour_rows.fetchall():
+            f = day_factors.get(d, 0.0)
+            if f > 0:
+                hour_map[int(h)] = hour_map.get(int(h), 0) + int(int(mins) * f)
         hours = [{"minutes": hour_map.get(h, 0)} for h in range(24)]
         peak_tag = ""
         best = 0
