@@ -15,11 +15,12 @@
     "@dcloudio/uni-app-plus": "3.0.0-alpha-5010420260626001",
     "@dcloudio/uni-h5": "3.0.0-alpha-5010420260626001",
     "pinia": "^2.3.1",
-    "vue": "^3.4.0"
+    "vue": "3.4.21"
   },
   "devDependencies": {
     "@dcloudio/types": "^3.4.8",
     "@dcloudio/uni-cli-shared": "3.0.0-alpha-5010420260626001",
+    "@dcloudio/uni-mp-weixin": "^3.0.0-alpha-5010420260626001",
     "@dcloudio/uni-uts-v1": "3.0.0-alpha-5010420260626001",
     "@dcloudio/uts-linux-x64-gnu": "3.0.0-alpha-5010420260626001",
     "@dcloudio/vite-plugin-uni": "3.0.0-alpha-5010420260626001",

@@ -2633,7 +2633,9 @@
 							top: rects[idx].top,
 							bottom: rects[idx].bottom,
 							len: paras[o].text.length,
-							from: 0
+							from: 0,
+							firstLen: -1,
+							secondOrigin: -1
 						} as ParaRect)
 					}
 				}
@@ -2656,7 +2658,9 @@
 						top: rects[i].top,
 						bottom: rects[i].bottom,
 						len: it.to - it.from + 1,
-						from: it.from
+						from: it.from,
+						firstLen: -1,
+						secondOrigin: -1
 					} as ParaRect)
 				}
 				popoverRef.value?.setDragRects(dragParaRects)

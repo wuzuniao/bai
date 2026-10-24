@@ -6,6 +6,14 @@
 						<text class="help-page__card-title">{{ t('help.faqProfileTitle') }}</text>
 						<text class="help-page__card-text">{{ t('help.faqProfileText') }}</text>
 					</view>
+					<view class="help-page__card">
+						<text class="help-page__card-title">{{ t('help.faqFormatTitle') }}</text>
+						<text class="help-page__card-text">{{ t('help.faqFormatText') }}</text>
+					</view>
+					<view class="help-page__card">
+						<text class="help-page__card-title">{{ t('help.faqSyncTitle') }}</text>
+						<text class="help-page__card-text">{{ t('help.faqSyncText') }}</text>
+					</view>
 				</view>
 	</PageShell>
 </template>

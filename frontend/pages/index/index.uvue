@@ -546,7 +546,7 @@
 
 	/** 行矩形 → 拖动映射缓存项（行间 margin 空隙以上一行下界补齐消除死区）。
 	 *  宽屏合并行：一个渲染行并置两个笔记段——len=16、firstLen=8、secondOrigin=后段行号，
-	 *  气泡组件触点字符索引超前段长度时切分到后段（无合并时字段缺省行为不变） */
+	 *  气泡组件触点字符索引超前段长度时切分到后段（无合并时两字段为 -1，行为不变） */
 	function buildDragRects(rects : NodeInfo[]) : ParaRect[] {
 		const dragRects : ParaRect[] = []
 		const lines = renderLines.value
@@ -572,7 +572,9 @@
 					top: rects[ri].top,
 					bottom: rects[ri].bottom,
 					len: LINE_CHAR_COUNT,
-					from: 0
+					from: 0,
+					firstLen: -1,
+					secondOrigin: -1
 				} as ParaRect)
 			}
 		}
