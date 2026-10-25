@@ -28,8 +28,8 @@
 				</view>
 			</view>
 
-			<!-- 统计视图：总览卡 + 分布卡 + 书籍榜 + 时段卡 -->
-			<view v-if="viewMode == 'stats'">
+			<!-- 统计视图：总览卡 + 分布卡 + 书籍榜 + 时段卡（周期内无阅读时长时改显空态提示） -->
+			<view v-if="viewMode == 'stats' && !statsEmpty">
 			<!-- 总览卡：周期总时长 + 日均 + 四项指标 -->
 			<view class="card">
 				<text class="total-text">{{ totalText }}</text>
@@ -126,6 +126,11 @@
 			</view>
 			</view>
 
+			<!-- 统计视图空数据：不渲染空卡片，仅提示文本 -->
+			<view v-if="viewMode == 'stats' && statsEmpty" class="stats-empty">
+				<text class="empty-text">{{ tr('stats.empty') }}</text>
+			</view>
+
 			<!-- 阅读时长排行（全体用户按当前所选周期总时长降序；触底懒加载至全部显示完） -->
 			<view v-if="viewMode == 'rank'" class="card">
 				<text class="card-title">{{ tr('stats.rankTitle') }}</text>
@@ -136,6 +141,9 @@
 					<text class="empty-text">{{ rankLoadingMore ? tr('stats.loadingMore') : tr('stats.empty') }}</text>
 				</view>
 				<view v-for="(r, i) in rankList" :key="r.userId" :class="i > 0 ? 'rank-item rank-item-gap' : 'rank-item'">
+					<view :class="rankNoClass(i)">
+						<text :class="rankNoTextClass(i)">{{ i + 1 }}</text>
+					</view>
 					<text class="rank-name">{{ r.username.length > 0 ? r.username : tf('stats.rankAnon', [r.userId.toString()]) }}</text>
 					<text class="rank-mins">{{ r.totalText }}</text>
 				</view>
@@ -243,6 +251,8 @@
 	const hourBars = ref<BarCell[]>([])
 	const hourTicks = ref<string[]>(['', '', '', '', ''])
 	const hoursTitle = ref(tr('stats.hoursTitle'))
+	/** 报表已渲染标记（区分「未加载」与「确认空数据」，避免载入完成前闪现空态提示） */
+	const reportReady = ref(false)
 
 	// ── 排行视图 ──
 	const viewMode = ref('stats')
@@ -321,6 +331,34 @@
 
 	/** 周期总时长文案 */
 	const totalText = computed((): string => fmtMinutes(totalMinutes.value))
+
+	/** 统计视图空数据：报表已加载且周期内无阅读时长 */
+	const statsEmpty = computed((): boolean => reportReady.value && totalMinutes.value == 0)
+
+	/** 名次徽章底色类：前三名金/银/铜圆徽，其余中性软灰 */
+	function rankNoClass(i : number) : string {
+		if (i == 0) {
+			return 'rank-no rank-no-gold'
+		}
+		if (i == 1) {
+			return 'rank-no rank-no-silver'
+		}
+		if (i == 2) {
+			return 'rank-no rank-no-bronze'
+		}
+		return 'rank-no'
+	}
+
+	/** 名次徽章文字类：金/银浅底墨字、铜深底反白、其余弱文本 */
+	function rankNoTextClass(i : number) : string {
+		if (i == 2) {
+			return 'rank-no-num rank-no-num-light'
+		}
+		if (i < 3) {
+			return 'rank-no-num'
+		}
+		return 'rank-no-num rank-no-num-dim'
+	}
 
 	// ── 交互 ──
 
@@ -873,6 +911,7 @@
 		// 时段偏好标题（按实际高峰分段生成：凌晨/上午/下午/夜间）
 		const tag = d.getString('peak_tag') ?? ''
 		hoursTitle.value = tag.length > 0 ? tf('stats.hoursPref', [segTagLabel(tag)]) : tr('stats.hoursTitle')
+		reportReady.value = true
 	}
 
 	/** 时段偏好标签 → 文案（后端/本地报表 peak_tag 为中文枚举，按值映射 i18n 词条） */
@@ -1233,6 +1272,14 @@
 		font-size: 26rpx;
 	}
 
+	/* 统计视图空数据提示（替代整组卡片，画布上居中） */
+	.stats-empty {
+		flex-direction: row;
+		justify-content: center;
+		padding-top: 80rpx;
+		padding-bottom: 80rpx;
+	}
+
 	.book-item {
 		flex-direction: row;
 		align-items: center;
@@ -1284,6 +1331,43 @@
 
 	.rank-item-gap {
 		margin-top: 24rpx;
+	}
+
+	/* 名次徽章：金=$bai-warning 银=$bai-pale（card-feature-silver 同源）铜=$bai-warning-deep（铜币文字同源），均取 DESIGN_bai.md 令牌 */
+	.rank-no {
+		width: 48rpx;
+		height: 48rpx;
+		justify-content: center;
+		align-items: center;
+		background-color: $bai-canvas-soft;
+		border-radius: $bai-rounded-pill;
+		margin-right: 16rpx;
+	}
+
+	.rank-no-gold {
+		background-color: $bai-warning;
+	}
+
+	.rank-no-silver {
+		background-color: $bai-pale;
+	}
+
+	.rank-no-bronze {
+		background-color: $bai-warning-deep;
+	}
+
+	.rank-no-num {
+		color: $bai-ink;
+		font-size: 24rpx;
+		font-weight: 600;
+	}
+
+	.rank-no-num-light {
+		color: $bai-on-primary;
+	}
+
+	.rank-no-num-dim {
+		color: $bai-mute;
 	}
 
 	.rank-name {
