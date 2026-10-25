@@ -573,8 +573,8 @@ class RewardService:
         发生自动发放时顺带自动签到（当日已签到则静默跳过）
         - today_minutes：调用方（/reading/minutes）刚更新过当日统计行时传入以免重查，未传时自查；
           低于最低档直接返回，不再查领取记录
-        - 只对可领档位逐个发放（复用 claim_reading_reward，各自提交事务；并发重复领取由
-          唯一约束兜底，业务异常静默跳过待下次发放）
+        - 可领档位批量发放（领取记录 + 铜币流水一次提交，见 _issue_reading_rewards）；
+          自动签到仍独立提交（已签到抛业务异常静默跳过，不影响已发放的档位）
         - 返回 {"claimed": 本次实际发放清单, "checkin": 本次自动签到结果}，供前端提示到账；
           checkin 为 None 表示未发生发放或当日已签到
         """
@@ -594,15 +594,16 @@ class RewardService:
             )
         )
         claimed_minutes = set(claimed_rows.scalars().all())
-        issued: list[dict[str, int]] = []
-        for tier_minutes, _base, _bonus in self.READING_TIERS:
-            if today_minutes < tier_minutes or tier_minutes in claimed_minutes:
-                continue
-            try:
-                result = await self.claim_reading_reward(db, user_id, tier_minutes, today_minutes)
-            except BusinessError:
-                continue  # 已领取（并发）/未达标（统计滞后）等业务异常，跳过待下次
-            issued.append({"tier_minutes": tier_minutes, "reward": int(result["reward"])})
+        claimable = [
+            (tier_minutes, base, bonus)
+            for tier_minutes, base, bonus in self.READING_TIERS
+            if today_minutes >= tier_minutes and tier_minutes not in claimed_minutes
+        ]
+        issued = (
+            await self._issue_reading_rewards(db, user_id, claimable, today, today_minutes)
+            if claimable
+            else []
+        )
         # 发生自动发放时顺带自动签到（每日首次即 5 分钟档达成）；已签到抛业务异常静默跳过
         checkin_result: dict[str, Any] | None = None
         if issued:
@@ -611,6 +612,56 @@ class RewardService:
             except BusinessError:
                 pass
         return {"claimed": issued, "checkin": checkin_result}
+
+    async def _issue_reading_rewards(
+        self,
+        db: AsyncSession,
+        user_id: int,
+        claimable: list[tuple[int, int, int]],
+        today: date,
+        today_minutes: int,
+    ) -> list[dict[str, int]]:
+        """
+        批量发放阅读档位奖励：全部领取记录 + 铜币入账单事务一次提交（免逐档提交与逐档锁账户）
+        - 每档独立铜币流水（source_id 关联各自领取记录），账户行同事务内复用同一把锁
+        - 并发重复领取由唯一约束兜底：整批回滚后降级逐档发放（复用 claim_reading_reward，
+          单档冲突不拖累其余档位）
+        """
+        records = [
+            ReadingRewardClaim(
+                user_id=user_id, claim_date=today, tier_minutes=tier_minutes, reward=base + bonus
+            )
+            for tier_minutes, base, bonus in claimable
+        ]
+        for record in records:
+            db.add(record)
+        try:
+            await db.flush()  # 取记录 id 供流水关联；唯一约束兜底并发重复领取
+        except IntegrityError:
+            await db.rollback()
+            issued: list[dict[str, int]] = []
+            for tier_minutes, _base, _bonus in claimable:
+                try:
+                    result = await self.claim_reading_reward(
+                        db, user_id, tier_minutes, today_minutes
+                    )
+                except BusinessError:
+                    continue  # 已领取（并发）/未达标（统计滞后）等业务异常，跳过待下次
+                issued.append({"tier_minutes": tier_minutes, "reward": int(result["reward"])})
+            return issued
+        issued = []
+        for record, (tier_minutes, _base, _bonus) in zip(records, claimable):
+            await self._credit(
+                db,
+                user_id,
+                record.reward,
+                self.SOURCE_READING,
+                str(record.id),
+                f"阅读 {tier_minutes} 分钟奖励",
+            )
+            issued.append({"tier_minutes": tier_minutes, "reward": record.reward})
+        await db.commit()
+        return issued
 
 
 # 模块级单例

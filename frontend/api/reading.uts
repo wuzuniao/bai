@@ -106,11 +106,6 @@ export function reportMinutes(mins: number) : Promise<ApiResponse> {
 	return request(apiOpts('/api/v1/reading/minutes', 'POST', data))
 }
 
-/** 今日与累计阅读分钟数（data: {today_minutes, total_minutes}） */
-export function fetchReadingStats() : Promise<ApiResponse> {
-	return request(apiOpts('/api/v1/reading/stats', 'GET', null))
-}
-
 /** 阅读统计报告（data: 周期指标/trend 趋势/peak 最久点位/books 书籍榜/hours 时段分布/peak_tag 偏好标签；anchor 为周期内锚点日期 YYYY-MM-DD） */
 export function fetchReadingReport(period: string, anchor: string) : Promise<ApiResponse> {
 	let url = '/api/v1/reading/report?period=' + period

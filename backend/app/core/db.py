@@ -33,13 +33,17 @@ class Base(DeclarativeBase):
 class Database:
     """数据库引擎与会话工厂封装（请求级会话随请求结束关闭）"""
 
+    # 连接池规模：常驻 10 + 超售 20（单进程 uvicorn 规模；MariaDB 默认 max_connections 足够）
+    POOL_SIZE = 10
+    MAX_OVERFLOW = 20
+
     def __init__(self, url: str) -> None:
         self.engine = create_async_engine(
             url,
             pool_pre_ping=True,
             pool_recycle=3600,
-            pool_size=settings.DB_POOL_SIZE,
-            max_overflow=settings.DB_MAX_OVERFLOW,
+            pool_size=self.POOL_SIZE,
+            max_overflow=self.MAX_OVERFLOW,
             isolation_level="READ COMMITTED",
             connect_args={"init_command": "SET time_zone='+08:00'"},
         )

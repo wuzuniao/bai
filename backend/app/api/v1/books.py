@@ -36,9 +36,10 @@ async def list_books(
     user_id: int = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """书架列表（按手动排序返回；今日/累计时长经 /reading/stats 查询）"""
+    """书架列表（按手动排序返回；顺带返回今日/累计阅读分钟数，书架页一次拉全免二次请求）"""
     books = await svc.list_books(db, user_id)
-    return response_service.ok({"list": [svc.book_to_dict(b) for b in books]})
+    stats = await svc.get_stats(db, user_id)
+    return response_service.ok({"list": [svc.book_to_dict(b) for b in books], "reading": stats})
 
 
 @router.post("")

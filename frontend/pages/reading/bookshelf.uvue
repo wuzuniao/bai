@@ -214,7 +214,7 @@
 <script setup lang="uts">
 	import BottomNavBar from '@/components/common/BottomNavBar.uvue'
 	import { PLACEHOLDER_STYLE } from '@/utils/theme.uts'
-	import { LocalBook, loadBooks, saveBooks, syncBookOrder, removeBookData, getTodayMinutes, fetchBooksFromCloud, fetchReadingStatsFromCloud, cleanupLegacyBooks } from '@/utils/books.uts'
+	import { LocalBook, loadBooks, saveBooks, syncBookOrder, removeBookData, getTodayMinutes, fetchBooksFromCloud, cleanupLegacyBooks } from '@/utils/books.uts'
 	import { saveBookshelfStyle, loadBookshelfStyle } from '@/utils/readerTypes.uts'
 	import { importBook, runBookSync, restoreEmptyShelfFromCloud } from '@/utils/bookparse.uts'
 	import { ensureBookLocal } from '@/utils/cloudsync.uts'
@@ -398,7 +398,6 @@
 		cleanupLegacyBooks()
 		loadShelf()
 		books.value = await fetchBooksFromCloud()
-		await fetchReadingStatsFromCloud()
 		todayMinutes.value = getTodayMinutes()
 		readStyleFromCache()
 		await refreshTierStates()

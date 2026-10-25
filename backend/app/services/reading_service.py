@@ -546,11 +546,13 @@ class ReadingService:
             accepted += 1
         if accepted > 0:
             now = TimezoneUtil.now()
-            for day, mins in day_minutes.items():
+            # 逐日锁行取最新值再写（防与 /minutes 等链路并发丢更新）；按日期排序加锁，
+            # 避免两批补传的日序不同交叉加锁互相等待
+            for day, mins in sorted(day_minutes.items()):
                 result = await db.execute(
-                    select(ReadingDailyStat).where(
-                        ReadingDailyStat.user_id == user_id, ReadingDailyStat.stat_date == day
-                    )
+                    select(ReadingDailyStat)
+                    .where(ReadingDailyStat.user_id == user_id, ReadingDailyStat.stat_date == day)
+                    .with_for_update()
                 )
                 row = result.scalar_one_or_none()
                 current = row.minutes if row is not None else 0

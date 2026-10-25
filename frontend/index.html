@@ -9,7 +9,14 @@
 				'<meta name="viewport" content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0' +
 				(coverSupport ? ', viewport-fit=cover' : '') + '" />')
 		</script>
-		<link rel="icon" href="/static/favicon.ico" />
+		<!-- favicon 存 static/web（H5 专有目录）：uni-app x 构建按平台裁剪 static，
+		     避免小程序/App 主包携带纯 H5 资源；nginx 以根路径 /static/ 兜底服务本目录 -->
+		<link rel="icon" href="/static/web/favicon.ico" />
+		<!-- 启动链路预热：Web 端 SSO 恢复（本地无令牌时向 auth 交换项目令牌）是首条跨域请求，
+		     预建连接省一次 DNS+TCP+TLS 往返；业务 API（bai.wuzuniao.com）与页面同源，
+		     文档加载即已建连，无需预热 -->
+		<link rel="preconnect" href="https://auth.wuzuniao.com" crossorigin />
+		<link rel="dns-prefetch" href="https://auth.wuzuniao.com" />
 		<style>
 			/* H5 端页面背景色（与 uni.scss 的 $bai-canvas-soft 保持一致），防止加载白闪。
 			 * 页面不再做 body 整体限宽（2026-10-22 起）：宽屏背景铺满全屏，

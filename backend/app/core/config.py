@@ -10,12 +10,6 @@ _BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 class Settings(BaseSettings):
     DATABASE_URL: str
-
-    # ==================== 数据库连接池（SQLAlchemy 异步引擎） ====================
-    # 池内常驻连接数与超售上限（单进程 uvicorn 规模下的默认值，生产可经 .env 调整）
-    DB_POOL_SIZE: int = 10
-    DB_MAX_OVERFLOW: int = 20
-
     PROJECT_NAME: str = "无足鸟古诗词学习助手"
     API_V1_STR: str = "/api/v1"
 
@@ -40,13 +34,15 @@ class Settings(BaseSettings):
     CORS_ALLOW_ORIGINS: str = "https://bai.wuzuniao.com"
 
     # 是否放行本地开发源（任意 localhost/127.0.0.1 端口）：H5 开发服务器端口不固定
-    # （HBuilderX 默认 8080、Vite 5173 等），逐一登记易漏故用正则统一放行；
-    # 生产部署脚本生成的 .env 置 false（本地源放行仅开发联调需要，生产不应保留）
-    CORS_ALLOW_LOCALHOST: bool = True
+    # （HBuilderX 默认 8080、Vite 5173 等），逐一登记易漏故用正则统一放行。
+    # 默认 false（fail-closed）：生产漏配置时宁缺勿滥，不静默放行本地源；
+    # 开发机在 backend/.env 显式置 true（见 .env.example），生产部署脚本生成的 .env 显式置 false
+    CORS_ALLOW_LOCALHOST: bool = False
 
-    # 接口文档开关（/docs /redoc /openapi.json）：开发默认开启；生产部署脚本生成的
-    # .env 置 false（公网不暴露接口清单；nginx 层亦只反代 /api/ 与 /health，双保险）
-    DOCS_ENABLED: bool = True
+    # 接口文档开关（/docs /redoc /openapi.json）。默认 false（fail-closed）：公网环境
+    # 漏配置时不暴露接口清单；开发机在 backend/.env 显式置 true（见 .env.example），
+    # 生产部署脚本生成的 .env 亦显式置 false（nginx 层只反代 /api/ 与 /health，双保险）
+    DOCS_ENABLED: bool = False
 
     # 微信小程序配置（预留：业务功能使用微信能力时启用）
     WX_APPID: str = ""

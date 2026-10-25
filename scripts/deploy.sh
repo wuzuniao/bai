@@ -490,6 +490,15 @@ server {
     ssl_session_cache   shared:SSL:10m;
     ssl_session_timeout 10m;
 
+    # 安全响应头（always 让 4xx/5xx 也携带）。HSTS 不带 includeSubDomains：本配置
+    # 只辖 bai 子域，不为同域其他子域项目单方面做全局决策。注意 nginx add_header
+    # 继承规则：location 内出现任一 add_header 即不再继承 server 级，故下方自带
+    # Cache-Control 的 location 已重复本组头，新增此类 location 时须同步补齐
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
     client_max_body_size 20m;
 
     # gzip 压缩：HTML 由 gzip 模块默认压缩；此处补充 js/css/json/svg 等文本类型，
@@ -540,6 +549,10 @@ server {
     location ^~ /h5/assets/ {
         alias /var/www/bai/assets/;
         add_header Cache-Control "public, max-age=31536000, immutable" always;
+        add_header Strict-Transport-Security "max-age=31536000" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Frame-Options "DENY" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
         # 单连接限速：防爬虫（bingbot 等）并发抓取挤占带宽与 nginx worker，拖慢真实用户请求
         limit_rate 512k;
         try_files $uri =404;
@@ -550,6 +563,10 @@ server {
     location = /h5/index.html {
         alias /var/www/bai/index.html;
         add_header Cache-Control "no-cache" always;
+        add_header Strict-Transport-Security "max-age=31536000" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Frame-Options "DENY" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
     }
 
     # 其余 /h5/ 路径（含 history 路由 /h5/pages/...）：静态命中，未命中回退入口页
@@ -568,6 +585,10 @@ server {
     # 协商返回 304
     location ^~ /static/ {
         add_header Cache-Control "public, max-age=604800" always;
+        add_header Strict-Transport-Security "max-age=31536000" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Frame-Options "DENY" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
         # 单连接限速：降低爬虫与恶意流量对出口带宽的挤占
         limit_rate 256k;
         try_files $uri =404;
@@ -578,6 +599,10 @@ server {
     # 浏览器等会按启发式策略强缓存入口页，导致继续引用已被清空的旧 bundle（白屏/旧代码）
     location = /index.html {
         add_header Cache-Control "no-cache" always;
+        add_header Strict-Transport-Security "max-age=31536000" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Frame-Options "DENY" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
     }
 
     # robots.txt（SEO）：内联返回，无需静态文件；禁止爬虫抓取后端 API 与健康检查，
@@ -592,6 +617,10 @@ server {
     location = /sitemap.xml {
         alias /var/www/bai/static/sitemap.xml;
         add_header Cache-Control "public, max-age=86400" always;
+        add_header Strict-Transport-Security "max-age=31536000" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Frame-Options "DENY" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
     }
 
     # 过渡期：域名根路径 302 至 /h5/（Web 端上线后以 Web 端站点配置替换本块）

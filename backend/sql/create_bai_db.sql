@@ -84,7 +84,8 @@ CREATE TABLE IF NOT EXISTS `reading_daily_stats` (
   `last_report_at` DATETIME NULL COMMENT '节奏校验锚点：最近一次受理时长上报的服务器时刻（NULL=尚无上报）',
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  UNIQUE KEY `uk_rds_user_date` (`user_id`, `stat_date`)
+  UNIQUE KEY `uk_rds_user_date` (`user_id`, `stat_date`),
+  KEY `idx_rds_date_user` (`stat_date`, `user_id`, `minutes`)
 ) COMMENT='每日阅读时长统计';
 
 -- 5. 用户阅读偏好（单行 JSON：阅读设置 字号/翻页/主题/字体 + 书架卡片样式）

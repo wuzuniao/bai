@@ -13,7 +13,6 @@ import {
 	updateBookOrder,
 	deleteBook,
 	reportMinutes,
-	fetchReadingStats,
 	reportReadingSessions,
 	syncQuiet
 } from '../api/reading.uts'
@@ -233,6 +232,7 @@ function bookFromCloud(obj : UTSJSONObject) : LocalBook | null {
 
 /**
  * 云端书架拉取并覆盖缓存（页面进入时调用；云端为准，本机仅回填 path）。
+ * 响应顺带返回阅读时长统计（后端一次拉全），命中时覆盖本地统计缓存。
  * 云端失败时静默保留缓存（离线容错），返回当前可用列表
  */
 export async function fetchBooksFromCloud() : Promise<LocalBook[]> {
@@ -247,6 +247,12 @@ export async function fetchBooksFromCloud() : Promise<LocalBook[]> {
 	try {
 		const res = await fetchBooks()
 		if (res.code == 0 && res.data != null) {
+			// 嵌套对象取值用索引访问（uts2js 的 UTSJSONObject 无 getJSONObject 方法，见 request.uts）
+			const readingRaw = res.data!['reading']
+			const reading = readingRaw == null ? null : readingRaw as UTSJSONObject
+			if (reading != null) {
+				saveStats(reading.getNumber('today_minutes') ?? 0, reading.getNumber('total_minutes') ?? 0)
+			}
 			const arr = res.data!.getArray('list')
 			const cloud : LocalBook[] = []
 			if (arr != null) {
@@ -760,7 +766,7 @@ function saveStats(today : number, total : number) : void {
 	uni.setStorageSync(STORAGE_STATS, JSON.stringify(obj))
 }
 
-/** 今日已读分钟数（书架统计卡展示；缓存镜像，云端为准由 fetchReadingStatsFromCloud 覆盖） */
+/** 今日已读分钟数（书架统计卡展示；缓存镜像，云端为准由 fetchBooksFromCloud 顺带覆盖） */
 export function getTodayMinutes() : number {
 	return loadStats().today
 }
@@ -768,21 +774,6 @@ export function getTodayMinutes() : number {
 /** 累计阅读分钟数（福利页展示） */
 export function getTotalMinutes() : number {
 	return loadStats().total
-}
-
-/** 云端阅读统计拉取并覆盖缓存（页面进入时调用；未登录走本地缓存） */
-export async function fetchReadingStatsFromCloud() : Promise<void> {
-	if (!hasAccessToken()) {
-		return
-	}
-	try {
-		const res = await fetchReadingStats()
-		if (res.code == 0 && res.data != null) {
-			saveStats(res.data!.getNumber('today_minutes') ?? 0, res.data!.getNumber('total_minutes') ?? 0)
-		}
-	} catch (e) {
-		console.warn('云端阅读统计拉取失败', e)
-	}
 }
 
 /** 累计今日阅读分钟数（由 addReadingSession 统一入口调用）：本地镜像即写 + 云端上报按响应回正（未登录仅记本地） */
