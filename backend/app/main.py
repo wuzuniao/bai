@@ -82,6 +82,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             await t
         except asyncio.CancelledError:
             pass
+    await auth_client.aclose()
 
 
 # 接口文档开关：开发默认开启；生产由部署脚本生成的 .env 置 DOCS_ENABLED=false，

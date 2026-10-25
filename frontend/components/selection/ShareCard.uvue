@@ -26,14 +26,6 @@
 				<view class="share-card-logo-ring">
 					<image class="share-card-logo" :src="logoSrc" />
 				</view>
-				<!-- #ifdef MP-WEIXIN -->
-				<!-- 转发封面状态行：缩略图即预生成的临时文件本身（真机可渲染=文件有效），
-				     失败时状态文案携带平台 errMsg（真机预览无 console，诊断信息须上屏） -->
-				<view class="share-cover-row">
-					<image v-if="coverPath.length > 0" class="share-cover-thumb" :src="coverPath" mode="aspectFill" />
-					<text class="share-cover-status" :class="coverStatus == 'fail' ? 'share-cover-status-fail' : ''">{{ coverStatusText() }}</text>
-				</view>
-				<!-- #endif -->
 				<view class="share-actions">
 					<view class="share-action" @click="saveShareImage">
 						<text class="share-action-text">{{ t('sel.saveImage') }}</text>
@@ -92,63 +84,8 @@
 	const shareOpen = ref(false)
 	/** 转发封面导出已重试标志（真机 canvasToTempFilePath 偶发失败时整链重试一次；每次打开预览复位） */
 	let coverExportRetried = false
-	/** ===== 转发封面生成状态（仅微信端；真机预览无 console，状态与失败原因直接上屏供诊断） ===== */
-	/** 生成状态：making 生成中 / ready 就绪 / fail 失败 */
-	const coverStatus = ref('making')
-	/** 失败原因（平台 errMsg 摘要或超时标记） */
-	const coverErrText = ref('')
-	/** 已生成的封面临时文件路径（缩略图直读该文件，真机可渲染=文件有效） */
-	const coverPath = ref('')
 	/** 最终分享用封面路径（服务端 URL 优先，上传失败回落本地临时路径；''=未定） */
 	const coverUrl = ref('')
-	/** 看门狗定时器句柄（预生成回调在真机可能整个丢失：1.7s 无结果重跑一次，再 1.7s 仍无结果标超时失败） */
-	let coverWatchdog = 0
-	/** 看门狗已重跑预生成标志（每次打开预览复位） */
-	let coverRegenDone = false
-
-	/** 封面状态行文案（失败时拼接真实原因） */
-	function coverStatusText() : string {
-		if (coverStatus.value == 'ready') {
-			return t('sel.coverReady')
-		}
-		if (coverStatus.value == 'fail') {
-			return t('sel.coverFailPrefix') + coverErrText.value
-		}
-		return t('sel.coverMaking')
-	}
-
-	/** 重置并启动封面看门狗（打开预览时调用；关闭预览时经 stopCoverWatchdog 清理） */
-	function startCoverWatchdog() : void {
-		stopCoverWatchdog()
-		coverWatchdog = setTimeout(() : void => {
-			// 导出已有结果（本地路径就绪或已失败）即止——后续上传由其自身超时收口
-			if (coverStatus.value != 'making' || coverPath.value.length > 0) {
-				return
-			}
-			if (!coverRegenDone) {
-				coverRegenDone = true
-				console.warn('转发封面预生成无结果，看门狗重跑')
-				preGenerateShareImage()
-				coverWatchdog = setTimeout(() : void => {
-					if (coverStatus.value == 'making' && coverPath.value.length == 0) {
-						coverStatus.value = 'fail'
-						coverErrText.value = t('sel.coverTimeout')
-					}
-				}, 1700)
-				return
-			}
-			coverStatus.value = 'fail'
-			coverErrText.value = t('sel.coverTimeout')
-		}, 1700)
-	}
-
-	/** 停止封面看门狗 */
-	function stopCoverWatchdog() : void {
-		if (coverWatchdog > 0) {
-			clearTimeout(coverWatchdog)
-			coverWatchdog = 0
-		}
-	}
 	/** 打开分享时的内容快照（渲染与绘制共用非空数据） */
 	const shareData = ref<ShareQuoteCtx>({
 		farBefore: '',
@@ -247,21 +184,14 @@
 		// 打开预览即后台预生成分享封面图（用户点击分享按钮时已就绪；先生清空旧图防上一次选区残留）
 		emit('shareImage', '')
 		coverExportRetried = false
-		coverRegenDone = false
-		coverStatus.value = 'making'
-		coverErrText.value = ''
-		coverPath.value = ''
 		coverUrl.value = ''
 		preGenerateShareImage()
-		startCoverWatchdog()
 		// #endif
 	}
 
 	function closeShare() : void {
 		shareOpen.value = false
 		// #ifdef MP-WEIXIN
-		stopCoverWatchdog()
-		coverPath.value = ''
 		coverUrl.value = ''
 		// #endif
 		// 关闭预览即清除待用封面（避免后续右上角菜单转发误用本次引文图）
@@ -591,7 +521,6 @@
 			success: (res2) => {
 				if (forShare) {
 					console.log('转发封面已生成', res2.tempFilePath)
-					coverPath.value = res2.tempFilePath
 					uploadCover(res2.tempFilePath)
 					return
 				}
@@ -618,8 +547,6 @@
 						return
 					}
 					console.warn('转发封面导出重试仍失败', err != null ? err.errMsg : '')
-					coverStatus.value = 'fail'
-					coverErrText.value = err != null && err.errMsg != null ? ('' + err.errMsg) : ''
 					emit('toast', t('sel.coverFailExport'))
 					emit('shareImage', '')
 					return
@@ -661,13 +588,9 @@
 		// #endif
 	}
 
-	/** 预生成分享封面图（仅微信端，打开预览时调用）：画布绘制后导出临时图经
-	 *  emit('shareImage') 上行，供宿主页面 onShareAppMessage 作为转发封面；
-	 *  失败时上行空串，宿主回落默认封面 */
-	/** 封面最终路径定格（服务端 URL 优先，上传失败回落本地）：就绪上行 + 状态更新 */
+	/** 封面最终路径定格（服务端 URL 优先，上传失败回落本地）：就绪上行事件供宿主消费 */
 	function settleCover(p : string) : void {
 		coverUrl.value = p
-		coverStatus.value = 'ready'
 		emit('shareImage', p)
 	}
 
@@ -724,16 +647,12 @@
 		const proxy = self == null ? null : self.proxy
 		if (proxy == null) {
 			console.warn('转发封面预生成失败：组件实例不可用')
-			coverStatus.value = 'fail'
-			coverErrText.value = t('sel.coverNoCanvas')
 			emit('toast', t('sel.coverFailCanvas'))
 			return
 		}
 		uni.createSelectorQuery().in(proxy).select('#share-canvas').fields({ node: true, size: true }, (res : any) : void => {
 			if (res == null || res.node == null) {
 				console.warn('转发封面预生成失败：画布节点查询为空', JSON.stringify(res))
-				coverStatus.value = 'fail'
-				coverErrText.value = t('sel.coverNoCanvas')
 				emit('toast', t('sel.coverFailCanvas'))
 				return
 			}
@@ -949,33 +868,6 @@
 		width: 80rpx;
 		height: 80rpx;
 		border-radius: $bai-rounded-pill;
-	}
-
-	/* 转发封面状态行（仅微信端）：缩略图 5:4 直读预生成临时文件 */
-	.share-cover-row {
-		flex-direction: row;
-		align-items: center;
-		justify-content: center;
-		gap: 15rpx;
-		margin-top: 23rpx;
-		width: 590rpx;
-	}
-
-	.share-cover-thumb {
-		width: 100rpx;
-		height: 80rpx;
-		border-radius: $bai-rounded-sm;
-		border: 1px solid rgba($bai-ink, 0.15);
-	}
-
-	.share-cover-status {
-		font-size: 21rpx;
-		color: rgba($bai-ink, 0.4);
-		flex: 1;
-	}
-
-	.share-cover-status-fail {
-		color: rgba($bai-ink, 0.6);
 	}
 
 	.share-card-app {

@@ -21,11 +21,6 @@ const zh: Dict = new Map<string, string>([
 	['sel.saveFailPerm', '保存失败，请检查相册权限'],
 	['sel.coverFailCanvas', '转发封面生成失败：画布不可用'],
 	['sel.coverFailExport', '转发封面生成失败：导出失败'],
-	['sel.coverMaking', '转发封面生成中…'],
-	['sel.coverReady', '转发封面就绪'],
-	['sel.coverFailPrefix', '转发封面失败：'],
-	['sel.coverTimeout', '生成超时'],
-	['sel.coverNoCanvas', '画布不可用'],
 	['sel.queryTodo', '查询功能即将上线'],
 	['sel.copyFail', '复制失败，请重试'],
 	['sel.copied', '已复制到剪贴板']
@@ -48,11 +43,6 @@ const en: Dict = new Map<string, string>([
 	['sel.saveFailPerm', 'Save failed, check album permission'],
 	['sel.coverFailCanvas', 'Share cover failed: canvas unavailable'],
 	['sel.coverFailExport', 'Share cover failed: export error'],
-	['sel.coverMaking', 'Generating share cover...'],
-	['sel.coverReady', 'Share cover ready'],
-	['sel.coverFailPrefix', 'Share cover failed: '],
-	['sel.coverTimeout', 'timeout'],
-	['sel.coverNoCanvas', 'canvas unavailable'],
 	['sel.queryTodo', 'Lookup coming soon'],
 	['sel.copyFail', 'Copy failed, try again'],
 	['sel.copied', 'Copied to clipboard']

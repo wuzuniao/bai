@@ -79,6 +79,7 @@
 			@span-changed="onSpanChanged"
 			@drag-started="onDragStarted"
 			@query-anchors="measureAnchors"
+			@share-image="onCardShareImage"
 		/>
 		<!-- 全局信息提示（复制/查询等动作反馈，固定日间样式） -->
 		<ReaderToast ref="toastRef" :night="false" />
@@ -95,6 +96,9 @@
 	import { POEM_LINES, PoemLine } from '@/utils/poem.uts'
 	import { scheduleResizeReload } from '@/utils/layout.uts'
 	import { t } from '@/utils/i18n.uts'
+	// #ifdef MP-WEIXIN
+	import { buildShareAppContent } from '@/utils/shareCover.uts'
+	// #endif
 	// 词典注册（首页文案；诗词内容不翻译）
 	import '@/utils/locales/index.uts'
 	import '@/utils/locales/common.uts'
@@ -147,10 +151,26 @@
 	})
 	// #endif
 
-	// 微信小程序分享：转发好友与朋友圈（封面统一 /static/share-cover.png，复制自 yao 项目）
+	// 微信小程序分享：转发好友与朋友圈（朋友圈封面统一 /static/share-cover.png，复制自 yao 项目）
 	// #ifdef MP-WEIXIN
-	onShareAppMessage(() => {
-		return { title: t('index.shareTitle'), imageUrl: '/static/share-cover.png' }
+	/** 气泡分享卡片预生成的封面路径（服务端 URL 优先；''=未就绪） */
+	const cardShareImage = ref('')
+	function onCardShareImage(path : string) : void {
+		cardShareImage.value = path
+	}
+
+	/** 当前转发封面路径（''=未就绪）：事件通道优先，ref 直读兜底（emit 事件链真机不可靠，
+	 *  ref 链与 beginSelection 同机制、真机已验证；与 reader.uvue shareCoverPath 同构，同步义务） */
+	function shareCoverPath() : string {
+		if (cardShareImage.value.length > 0) {
+			return cardShareImage.value
+		}
+		return popoverRef.value?.coverImagePath() ?? ''
+	}
+
+	onShareAppMessage(() : CustomShareContent => {
+		// 诗词卡片预生成的 5:4 封面优先作为封面（组装逻辑收口 utils/shareCover.uts）
+		return buildShareAppContent(t('index.shareTitle'), '/pages/index/index', () : string => shareCoverPath())
 	})
 	onShareTimeline(() => {
 		return { title: t('index.shareTitle'), imageUrl: '/static/share-cover.png' }

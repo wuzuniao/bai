@@ -58,6 +58,13 @@ class AuthClient:
         # - _revocation_watermark：增量拉取水位（auth 返回的服务器当前时间 ISO 字符串）
         self._revocations: dict[int, float] = {}
         self._revocation_watermark: str | None = None
+        # 复用长连接 HTTP 客户端（连接池化：撤销同步/用户名解析/会员授权共享
+        # TCP+TLS 会话，免每次调用重建连接）；应用关闭时经 aclose 释放
+        self._http = httpx.AsyncClient(timeout=self.HTTP_TIMEOUT)
+
+    async def aclose(self) -> None:
+        """释放 HTTP 连接池（应用关闭时由 lifespan 调用）"""
+        await self._http.aclose()
 
     # ==================== HTTP 基础 ====================
 
@@ -73,27 +80,23 @@ class AuthClient:
 
     async def _get_json(self, path: str, params: dict | None = None) -> dict:
         """调用 auth 服务 GET 接口并返回 JSON（非 2xx 抛异常由调用方降级处理）"""
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(
-                self._auth_url(path),
-                params=params,
-                headers=self._service_headers(),
-                timeout=self.HTTP_TIMEOUT,
-            )
-            resp.raise_for_status()
-            return resp.json()
+        resp = await self._http.get(
+            self._auth_url(path),
+            params=params,
+            headers=self._service_headers(),
+        )
+        resp.raise_for_status()
+        return resp.json()
 
     async def _post_json(self, path: str, json_body: dict | None = None) -> dict:
         """调用 auth 服务 POST 接口并返回 JSON（非 2xx 抛异常由调用方处理）"""
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                self._auth_url(path),
-                json=json_body or {},
-                headers=self._service_headers(),
-                timeout=self.HTTP_TIMEOUT,
-            )
-            resp.raise_for_status()
-            return resp.json()
+        resp = await self._http.post(
+            self._auth_url(path),
+            json=json_body or {},
+            headers=self._service_headers(),
+        )
+        resp.raise_for_status()
+        return resp.json()
 
     # ==================== JWKS 公钥管理 ====================
 

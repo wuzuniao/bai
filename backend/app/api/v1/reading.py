@@ -32,7 +32,7 @@ async def report_minutes(
 ) -> dict:
     """单次阅读结算上报（分钟数累加至今日，按日封顶 1440 并经节奏校验）；随后自动发放已达成的阅读档位奖励，发放时顺带自动签到"""
     stats = await svc.add_minutes(db, user_id, data.minutes)
-    auto = await reward_svc.auto_claim_reached(db, user_id)
+    auto = await reward_svc.auto_claim_reached(db, user_id, stats["today_minutes"])
     return response_service.ok({**stats, **auto})
 
 

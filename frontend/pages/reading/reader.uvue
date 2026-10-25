@@ -306,6 +306,9 @@
 	// #endif
 	import { flipCurrentLayerStyle, flipPrevLayerStyle, flipNextLayerStyle, flipCoverNextOpacity, flipCoverCurrentOpacity } from '@/utils/flipstyle.uts'
 	import { mpCapsuleRect, scheduleResizeReload } from '@/utils/layout.uts'
+	// #ifdef MP-WEIXIN
+	import { buildShareAppContent } from '@/utils/shareCover.uts'
+	// #endif
 	import SelectionPopover from '@/components/selection/SelectionPopover.uvue'
 	import ReaderControl from '@/components/reader/ReaderControl.uvue'
 	import ReaderFooterBar from '@/components/reader/ReaderFooterBar.uvue'
@@ -1900,13 +1903,6 @@
 	const userStore = useUserStore()
 
 	// #ifdef MP-WEIXIN
-	/** onShareAppMessage promise 字段的 resolve 载荷（与 CustomShareContent.promise 泛型参数同构） */
-	type SharePromiseContent = {
-		title?: string
-		path?: string
-		imageUrl?: string
-	}
-
 	/** 当前转发封面路径（''=未就绪）：事件通道优先，ref 直读兜底（emit 事件链真机不可靠，
 	 *  ref 链与 beginSelection 同机制、真机已验证） */
 	function shareCoverPath() : string {
@@ -1917,30 +1913,8 @@
 	}
 
 	onShareAppMessage(() : CustomShareContent => {
-		// 气泡分享卡片预生成的 5:4 引文封面优先作为封面（卡片预览打开期间有效），否则用默认封面
-		const cover = shareCoverPath()
-		const imageUrl = cover.length > 0 ? cover : '/static/share-cover.png'
-		const base = { title: '《' + bookTitle.value + '》' + chapterAt(currentChapterId.value).title, path: '/pages/reading/reader', imageUrl: imageUrl } as CustomShareContent
-		// 预生成+上传未完成即点转发时挂官方 promise 字段（基础库 2.12.0+）消除竞态：
-		// 封面（服务端 URL）就绪即以引文封面覆盖，2.7s 仍未就绪按静态封面 resolve
-		// （微信 3s 未 resolve 时按默认参数兜底，须提前给出确定结果）
-		if (cover.length == 0) {
-			base.promise = new Promise<SharePromiseContent>((resolve : (v : SharePromiseContent) => void) => {
-				const startedAt = Date.now()
-				const timer = setInterval(() : void => {
-					const c = shareCoverPath()
-					if (c.length > 0 || Date.now() - startedAt > 2700) {
-						clearInterval(timer)
-						resolve({
-							title: '《' + bookTitle.value + '》' + chapterAt(currentChapterId.value).title,
-							path: '/pages/reading/reader',
-							imageUrl: c.length > 0 ? c : '/static/share-cover.png'
-						} as SharePromiseContent)
-					}
-				}, 150)
-			})
-		}
-		return base
+		// 气泡分享卡片预生成的 5:4 引文封面优先作为封面（组装逻辑收口 utils/shareCover.uts）
+		return buildShareAppContent('《' + bookTitle.value + '》' + chapterAt(currentChapterId.value).title, '/pages/reading/reader', () : string => shareCoverPath())
 	})
 	onShareTimeline(() => {
 		return { title: t('reader.shareTitle'), imageUrl: '/static/share-cover.png' }

@@ -198,15 +198,13 @@ class ReadingService:
 
     async def update_order(self, db: AsyncSession, user_id: int, data: BookOrderBatch) -> int:
         """批量更新书架手动排序（不存在的 id 跳过），返回实际更新行数"""
+        order_map = {item.id: item.sort_order for item in data.items}
+        result = await db.execute(
+            select(UserBook).where(UserBook.user_id == user_id, UserBook.id.in_(order_map.keys()))
+        )
         updated = 0
-        for item in data.items:
-            result = await db.execute(
-                select(UserBook).where(UserBook.id == item.id, UserBook.user_id == user_id)
-            )
-            book = result.scalar_one_or_none()
-            if book is None:
-                continue
-            book.sort_order = item.sort_order
+        for book in result.scalars().all():
+            book.sort_order = order_map[book.id]
             updated += 1
         if updated > 0:
             await db.commit()
@@ -399,6 +397,15 @@ class ReadingService:
 
     # ==================== 阅读时长 ====================
 
+    async def _total_minutes(self, db: AsyncSession, user_id: int) -> int:
+        """累计阅读分钟数（reading_daily_stats 全行求和；当日无行时 sum 天然容错）"""
+        result = await db.execute(
+            select(func.coalesce(func.sum(ReadingDailyStat.minutes), 0)).where(
+                ReadingDailyStat.user_id == user_id
+            )
+        )
+        return int(result.scalar_one() or 0)
+
     async def _stats_pair(self, db: AsyncSession, user_id: int) -> tuple[int, int]:
         """(今日分钟数, 总分钟数)；当日无记录时该行不存在，须用 scalar_one_or_none 容错"""
         today = TimezoneUtil.today()
@@ -407,12 +414,7 @@ class ReadingService:
                 ReadingDailyStat.user_id == user_id, ReadingDailyStat.stat_date == today
             )
         )
-        total_row = await db.execute(
-            select(func.coalesce(func.sum(ReadingDailyStat.minutes), 0)).where(
-                ReadingDailyStat.user_id == user_id
-            )
-        )
-        return int(today_row.scalar_one_or_none() or 0), int(total_row.scalar_one() or 0)
+        return int(today_row.scalar_one_or_none() or 0), await self._total_minutes(db, user_id)
 
     async def add_minutes(self, db: AsyncSession, user_id: int, minutes: int) -> dict[str, int]:
         """
@@ -435,8 +437,11 @@ class ReadingService:
         row.minutes += accepted
         row.last_report_at = now
         await db.commit()
-        today_total, total = await self._stats_pair(db, user_id)
-        return {"today_minutes": today_total, "total_minutes": total}
+        # 当日分钟数直接取内存中的统计行（expire_on_commit=False，提交后属性仍有效），仅累计值需再查
+        return {
+            "today_minutes": row.minutes,
+            "total_minutes": await self._total_minutes(db, user_id),
+        }
 
     async def _get_or_create_today_stat(
         self, db: AsyncSession, user_id: int, today: date
@@ -704,49 +709,51 @@ class ReadingService:
             ReadingSession.started_at >= day_start,
             ReadingSession.started_at < day_end,
         )
-        day_rows = await db.execute(
-            select(func.date(ReadingSession.started_at), func.sum(ReadingSession.minutes))
-            .where(*sess_where)
-            .group_by(func.date(ReadingSession.started_at))
-        )
-        day_factors: dict[date, float] = {}
-        for d, mins in day_rows.fetchall():
-            m = int(mins)
-            day_factors[d] = day_map[d] / m if day_map.get(d, 0) > 0 and m > 0 else 0.0
-        book_rows = await db.execute(
+        # 会话明细一次取回「日 × 书 × 时」粒度聚合（原日/书/时三次分组查询合一），
+        # Python 侧二次归并出三份分布；校准仍按「日×书」「日×时」粒度取整（与旧口径一致）
+        detail_rows = await db.execute(
             select(
                 func.date(ReadingSession.started_at),
                 ReadingSession.book_title,
+                func.hour(ReadingSession.started_at),
                 func.sum(ReadingSession.minutes),
             )
             .where(*sess_where)
-            .group_by(func.date(ReadingSession.started_at), ReadingSession.book_title)
+            .group_by(
+                func.date(ReadingSession.started_at),
+                ReadingSession.book_title,
+                func.hour(ReadingSession.started_at),
+            )
         )
+        day_detail: dict[date, int] = {}
+        day_book: dict[tuple[date, str], int] = {}
+        day_hour: dict[tuple[date, int], int] = {}
+        for d, title, hour, mins in detail_rows.fetchall():
+            m = int(mins)
+            day_detail[d] = day_detail.get(d, 0) + m
+            day_book[(d, title)] = day_book.get((d, title), 0) + m
+            day_hour[(d, int(hour))] = day_hour.get((d, int(hour)), 0) + m
+        # 校准规则：每日明细分钟和按该日真源分钟等比缩放（f = 真源/明细），真源不覆盖的日期剔除，
+        # 向下取整保证分布之和恒不超过周期总时长（book_title 快照支撑删书后展示）
+        day_factors: dict[date, float] = {}
+        for d, m in day_detail.items():
+            day_factors[d] = day_map[d] / m if day_map.get(d, 0) > 0 and m > 0 else 0.0
         book_map: dict[str, int] = {}
-        for d, title, mins in book_rows.fetchall():
+        for (d, title), m in day_book.items():
             f = day_factors.get(d, 0.0)
             if f > 0:
-                book_map[title] = book_map.get(title, 0) + int(int(mins) * f)
+                book_map[title] = book_map.get(title, 0) + int(m * f)
         books = [
             {"book_title": t, "total_minutes": m}
             for t, m in sorted(book_map.items(), key=lambda kv: kv[1], reverse=True)[:3]
         ]
 
         # 时段分布：0-23 点逐时聚合（同样经每日校准）+ 偏好分段标签
-        hour_rows = await db.execute(
-            select(
-                func.date(ReadingSession.started_at),
-                func.hour(ReadingSession.started_at),
-                func.sum(ReadingSession.minutes),
-            )
-            .where(*sess_where)
-            .group_by(func.date(ReadingSession.started_at), func.hour(ReadingSession.started_at))
-        )
         hour_map: dict[int, int] = {}
-        for d, h, mins in hour_rows.fetchall():
+        for (d, h), m in day_hour.items():
             f = day_factors.get(d, 0.0)
             if f > 0:
-                hour_map[int(h)] = hour_map.get(int(h), 0) + int(int(mins) * f)
+                hour_map[h] = hour_map.get(h, 0) + int(m * f)
         hours = [{"minutes": hour_map.get(h, 0)} for h in range(24)]
         peak_tag = ""
         best = 0

@@ -10,6 +10,12 @@ _BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 class Settings(BaseSettings):
     DATABASE_URL: str
+
+    # ==================== 数据库连接池（SQLAlchemy 异步引擎） ====================
+    # 池内常驻连接数与超售上限（单进程 uvicorn 规模下的默认值，生产可经 .env 调整）
+    DB_POOL_SIZE: int = 10
+    DB_MAX_OVERFLOW: int = 20
+
     PROJECT_NAME: str = "无足鸟古诗词学习助手"
     API_V1_STR: str = "/api/v1"
 

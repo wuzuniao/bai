@@ -1,0 +1,51 @@
+/**
+ * 微信转发封面组装（utils 级共享，仅微信端编译）
+ * --------------------------------------------------------------------------
+ * 气泡分享卡片预生成的 5:4 封面（服务端 URL 优先）作为转发 imageUrl 的组装逻辑
+ * 在阅读页与首页诗两处消费，收口于此；封面就绪时机由 getCover 闭包按页注入
+ * （事件通道 + ref 直读双源），未就绪时挂官方 promise 字段消除竞态。
+ * 新增消费页时 getCover 须与 reader.uvue/index.uvue 的 shareCoverPath 同构。
+ */
+
+// #ifdef MP-WEIXIN
+/** onShareAppMessage promise 字段的 resolve 载荷（与 CustomShareContent.promise 泛型参数同构） */
+export type SharePromiseContent = {
+	title?: string
+	path?: string
+	imageUrl?: string
+}
+
+/** 转发封面未就绪时的静态兜底图 */
+export const SHARE_COVER_FALLBACK = '/static/share-cover.png'
+
+/**
+ * 组装 onShareAppMessage 返回内容
+ * @param title 转发标题
+ * @param path 转发路径（以 / 开头的完整页面路径）
+ * @param getCover 当前封面路径取值（''=未就绪；服务端 URL 或本地临时路径）
+ * @returns 封面就绪时直接携带；未就绪时以静态封面为默认参数并挂 promise 字段
+ *          （基础库 2.12.0+：封面就绪即覆盖，2.7s 未就绪按静态封面 resolve——
+ *          微信 3s 未 resolve 按默认参数兜底，须提前给出确定结果）
+ */
+export function buildShareAppContent(title : string, path : string, getCover : () => string) : CustomShareContent {
+	const cover = getCover()
+	const base = { title: title, path: path, imageUrl: cover.length > 0 ? cover : SHARE_COVER_FALLBACK } as CustomShareContent
+	if (cover.length == 0) {
+		base.promise = new Promise<SharePromiseContent>((resolve : (v : SharePromiseContent) => void) => {
+			const startedAt = Date.now()
+			const timer = setInterval(() : void => {
+				const c = getCover()
+				if (c.length > 0 || Date.now() - startedAt > 2700) {
+					clearInterval(timer)
+					resolve({
+						title: title,
+						path: path,
+						imageUrl: c.length > 0 ? c : SHARE_COVER_FALLBACK
+					} as SharePromiseContent)
+				}
+			}, 150)
+		})
+	}
+	return base
+}
+// #endif

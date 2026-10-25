@@ -58,7 +58,8 @@ CREATE TABLE IF NOT EXISTS `reading_notes` (
   `content` TEXT NULL COMMENT '想法正文（type=1；type=0 为 NULL）',
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  KEY `idx_rn_user_book` (`user_id`, `book_id`, `note_type`, `cid`, `origin`)
+  KEY `idx_rn_user_book` (`user_id`, `book_id`, `note_type`, `cid`, `origin`),
+  KEY `idx_rn_user_created` (`user_id`, `created_at`)
 ) COMMENT='阅读划线与想法（合一）';
 
 -- 3. 阅读书签（纯定位记录，与笔记语义分立）

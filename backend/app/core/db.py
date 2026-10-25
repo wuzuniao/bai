@@ -38,6 +38,8 @@ class Database:
             url,
             pool_pre_ping=True,
             pool_recycle=3600,
+            pool_size=settings.DB_POOL_SIZE,
+            max_overflow=settings.DB_MAX_OVERFLOW,
             isolation_level="READ COMMITTED",
             connect_args={"init_command": "SET time_zone='+08:00'"},
         )
