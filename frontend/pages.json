@@ -113,6 +113,8 @@
 						"navigationBarTitleText": "账号删除与数据说明 - 无足鸟古诗词"
 					}
 				},
+				// #ifndef MP-WEIXIN
+				// 会员支付页不进微信小程序（平台虚拟支付合规）：微信端隐藏全部入口（reward 页两按钮条件编译），settings 会员卡本就仅 App 渠道可见
 				{
 					"path": "member-pay",
 					"style": {
@@ -121,6 +123,7 @@
 						"navigationBarTitleText": "会员支付 - 无足鸟古诗词"
 					}
 				}
+				// #endif
 			]
 		}
 	],

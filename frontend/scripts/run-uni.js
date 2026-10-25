@@ -9,8 +9,10 @@
  *   默认填充为 src），会导致 CLI 构建报 "ENOENT: ... src/manifest.json"。
  *
  * 作用：
- *   在调用 uni CLI 前把 UNI_INPUT_DIR 指向项目根目录，使 CLI 与 HBuilderX
- *   共用同一套目录结构，两种构建方式并存。
+ *   1. 在调用 uni CLI 前把 UNI_INPUT_DIR 指向项目根目录，使 CLI 与 HBuilderX
+ *      共用同一套目录结构，两种构建方式并存。
+ *   2. 把 UNI_OUTPUT_DIR 指向 HBuilderX 标准输出位 unpackage/dist/<模式>/<平台>
+ *      （CLI 默认为 dist/<模式>/<平台>），微信开发者工具等始终从同一目录导入产物。
  *
  * 用法（由 package.json scripts 调用）：
  *   node scripts/run-uni.js <dev|build> <platform>
@@ -35,6 +37,7 @@ if (mode !== 'dev' && mode !== 'build') {
 const projectRoot = path.resolve(__dirname, '..')
 
 // uni CLI 参数：dev 模式无子命令，build 模式为 `build`
+const modeDir = mode === 'build' ? 'build' : 'dev'
 const args = mode === 'build' ? ['build', '-p', platform] : ['-p', platform]
 
 const uniBin = require.resolve('@dcloudio/vite-plugin-uni/bin/uni.js')
@@ -45,6 +48,7 @@ const child = spawn(process.execPath, [uniBin, ...args], {
   env: {
     ...process.env,
     UNI_INPUT_DIR: projectRoot,
+    UNI_OUTPUT_DIR: path.join(projectRoot, 'unpackage', 'dist', modeDir, platform),
   },
 })
 

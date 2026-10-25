@@ -16,9 +16,11 @@
 								<text class="asset-unit">{{ tr('reward.copper') }}</text>
 							</view>
 						</view>
+						<!-- #ifndef MP-WEIXIN -->
 						<view class="use-btn" @click="goMemberPay">
 							<text class="use-btn-text">{{ tr('reward.use') }}</text>
 						</view>
+						<!-- #endif -->
 					</view>
 					<view class="asset-total">
 						<text class="asset-total-label">{{ tr('reward.totalAssets') }}</text>
@@ -66,7 +68,9 @@
 					</view>
 					<view class="makeup-bar">
 						<text class="makeup-text">{{ makeupBarText }}</text>
+						<!-- #ifndef MP-WEIXIN --><!-- 会员支付页不进微信端，补签"查看"入口随之隐藏 -->
 						<text v-if="!isMember" class="makeup-btn" @click="goMemberPay">{{ tr('reward.view') }}</text>
+						<!-- #endif -->
 					</view>
 				</view>
 
