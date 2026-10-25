@@ -208,8 +208,8 @@ function recoverAndRetry(options: RequestOptions, resolve: (res: ApiResponse) =>
 	}
 }
 
-/** 读取本地 access_token */
-function getAccessToken() : string {
+/** 读取本地 access_token（导出供 uni.uploadFile 等非 request 通道携带鉴权头） */
+export function getAccessToken() : string {
 	const v = uni.getStorageSync('accessToken')
 	return v == null ? '' : v as string
 }

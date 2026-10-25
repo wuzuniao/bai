@@ -803,13 +803,19 @@
 		thoughtPanelRef.value?.hideThoughtView()
 	}
 
+	/** 转发封面路径直读转发（宿主 onShareAppMessage 经 ref 消费；emit 链真机不可靠） */
+	function coverImagePath() : string {
+		return shareCardRef.value?.coverImagePath() ?? ''
+	}
+
 	defineExpose({
 		beginSelection,
 		hideSelection,
 		setAnchors,
 		setDragRects,
 		showThoughtView,
-		hideThoughtView
+		hideThoughtView,
+		coverImagePath
 	})
 </script>
 

@@ -18,6 +18,7 @@ from .core.auth_client import auth_client  # 模块级单例实例（勿导入�
 from .core.config import settings
 from .core.exceptions import BusinessError
 from .core.response import response_service
+from .services.share_cover_service import share_cover_service
 from .utils.logger import logger
 
 
@@ -38,6 +39,18 @@ async def _loop_sync_revocations() -> None:
         await asyncio.sleep(settings.REVOCATION_SYNC_INTERVAL_SECONDS)
 
 
+async def _loop_cleanup_share_covers() -> None:
+    """循环：清理超过 TTL 的转发封面临时文件（每日一轮，TTL 见 SHARE_COVER_TTL_DAYS）"""
+    while True:
+        try:
+            removed = share_cover_service.cleanup_expired()
+            if removed > 0:
+                logger.info(f"转发封面清理完成：本轮删除 {removed} 个过期文件")
+        except Exception:
+            logger.exception("转发封面清理任务异常")
+        await asyncio.sleep(24 * 3600)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """应用生命周期：启动时预取 JWKS 公钥并拉起后台循环，关闭时停止"""
@@ -46,7 +59,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     tasks: list[asyncio.Task] = []
     if settings.AUTH_SERVICE_TOKEN:
-        tasks = [asyncio.create_task(_loop_sync_revocations())]
+        tasks.append(asyncio.create_task(_loop_sync_revocations()))
         logger.info(
             "后台任务已启动：令牌撤销同步（间隔 "
             f"{settings.REVOCATION_SYNC_INTERVAL_SECONDS} 秒）"
@@ -56,6 +69,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "未配置 AUTH_SERVICE_TOKEN：跳过令牌撤销同步后台任务"
             "（受保护接口仍可本地验签，但改密/退出/删号后旧令牌残留至自然过期）"
         )
+    tasks.append(asyncio.create_task(_loop_cleanup_share_covers()))
+    logger.info(
+        "后台任务已启动：转发封面临时目录清理（每日一轮，TTL "
+        f"{settings.SHARE_COVER_TTL_DAYS} 天）"
+    )
     yield
     for t in tasks:
         t.cancel()

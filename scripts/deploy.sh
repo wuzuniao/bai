@@ -463,6 +463,12 @@ generate_nginx_conf() {
 #   - 本文件由 bai 服务的 scripts/deploy.sh 生成维护（幂等），手动修改请同步模板
 #   - resolver 已统一在 00-resolver.conf 声明，站点配置内不可重复
 
+# 后端 API 按客户端 IP 限流（conf.d 处于 http 上下文，zone 顶层声明；zone 名带 bai
+# 前缀避免与共享 nginx 下其他项目配置冲突）。正常用户峰值远低于 1r/s（阅读中每
+# 15-30s 一次时长上报），冷启动并发拉取约 5-10 请求，burst=20 足以容纳不误伤；
+# 防脚本刷写接口（如 /reading/sessions 单请求 500 条流水）灌垃圾数据
+limit_req_zone $binary_remote_addr zone=bai_api_limit:10m rate=10r/s;
+
 # HTTP -> HTTPS 重定向
 server {
     listen 80;
@@ -502,6 +508,10 @@ server {
     set $bai_upstream http://bai-backend:11001;
 
     location /api/ {
+        # 按 IP 限流（zone 定义见文件顶部）：超限返回 429（与前端统一错误语义对齐，
+        # 前端 429 仅提示不跳登录）；/health 独立 location 不受限，不影响健康检查
+        limit_req zone=bai_api_limit burst=20 nodelay;
+        limit_req_status 429;
         proxy_pass $bai_upstream;
         proxy_set_header Host              $host;
         proxy_set_header X-Real-IP         $remote_addr;

@@ -54,8 +54,8 @@
 						<view v-if="!item.is_read" class="messages-page__card-bar"></view>
 						<view class="messages-page__card-body">
 							<text class="messages-page__card-title">{{ item.title }}</text>
-							<text class="messages-page__card-meta">{{ formatTime(item.created_at) }}</text>
 							<text class="messages-page__card-text">{{ item.content }}</text>
+							<text class="messages-page__card-meta">{{ formatTime(item.created_at) }}</text>
 						</view>
 					</view>
 

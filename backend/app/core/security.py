@@ -34,10 +34,11 @@ class SecurityService:
         """
         校验 auth 服务签发的 access_token（纯本地验签，不逐请求调用 auth）
         - 公钥来源：AuthClient 的 JWKS 缓存（内存 + 磁盘），未知 kid 自动重拉
-        - 校验项：RS256 签名 / iss（=AUTH_ISSUER）/ exp（leeway 60s）/ sub 存在
+        - 校验项：RS256 签名 / iss（=AUTH_ISSUER）/ exp（leeway 60s）/ azp（=AUTH_CLIENT_ID）
+          / sub 存在
         :param token: JWT 字符串（前端经 Authorization: Bearer 携带）
         :return: 解码后的 payload（含 iss/sub/roles/azp/jti/iat/exp）
-        :raises ValueError: token 无效、已过期、签名错误或签发方不匹配
+        :raises ValueError: token 无效、已过期、签名错误、签发方不匹配或签发目标不符
         """
         if not isinstance(token, str) or not token.strip():
             raise ValueError("令牌不能为空")
@@ -72,7 +73,14 @@ class SecurityService:
         except jwt.InvalidTokenError:
             raise ValueError("登录凭证无效")
 
-        # 4. sub 声明校验
+        # 4. azp 声明校验（签发目标 client）：auth 生态同 issuer 下存在多项目令牌
+        #    （bai/jin/yao/平台 auth），仅接受签发给本项目 client 的令牌，防止其他
+        #    项目令牌的 sub 被当作用户身份使用；无 azp 的历史旧令牌一并拒绝，
+        #    前端静默刷新链会自动换取带 azp 的新令牌
+        if payload.get("azp") != settings.AUTH_CLIENT_ID:
+            raise ValueError("登录凭证无效")
+
+        # 5. sub 声明校验
         if "sub" not in payload:
             raise ValueError("登录凭证格式不正确")
         return payload

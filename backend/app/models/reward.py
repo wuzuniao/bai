@@ -93,7 +93,7 @@ class CheckinRecord(Base):
         nullable=False,
         default=0,
         server_default="0",
-        comment="是否补签 0=正常签到 1=会员补签（不发奖励，仅恢复签到状态）",
+        comment="是否补签 0=正常签到 1=会员补签（奖励按被补日星期基准档）",
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default="CURRENT_TIMESTAMP"

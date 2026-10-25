@@ -59,6 +59,14 @@ class Settings(BaseSettings):
     # 留空回退桶默认域名。COS 签名不含 Host 头，换域名不影响预签名校验）
     COS_CUSTOM_DOMAIN: str = ""
 
+    # ==================== 转发封面临时存储（划词分享卡片） ====================
+    # 微信真机不接受本地临时文件路径作转发封面 imageUrl（开发者工具正常），封面
+    # PNG 上传后端经 URL 提供；目录按 TTL 轮询清理（main.py 后台任务每日一轮）。
+    # 不使用 COS（私有桶）；容器内为临时存储，重新部署即清空——已发出的转发卡片
+    # 由微信在发送时抓取缓存，不受影响
+    SHARE_COVER_DIR: str = "share_covers"
+    SHARE_COVER_TTL_DAYS: int = 7
+
     @property
     def cors_origins_list(self) -> list[str]:
         """解析 CORS_ALLOW_ORIGINS 为列表（去除空白与重复项）"""
