@@ -6,3 +6,4 @@ pydantic-settings>=2.0.0
 pyjwt[crypto]>=2.8.0
 httpx>=0.24.0
 cryptography>=42.0.0
+python-multipart>=0.0.6
