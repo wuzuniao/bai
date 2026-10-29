@@ -79,8 +79,8 @@
 					<view class="reward-head">
 						<text class="reward-title">{{ tr('reward.readEarn') }}</text>
 						<view class="reward-stat">
-							<view class="reward-stat-line"><text>{{ tr('reward.totalMinutes') }}</text><text class="reward-stat-num">{{ totalMinutes }}</text><text> {{ tr('rewards.minute') }}</text></view>
-							<view class="reward-stat-line"><text>{{ tr('reward.todayMinutes') }}</text><text class="reward-stat-num">{{ todayMinutes }}</text><text> {{ tr('rewards.minute') }}</text></view>
+							<view class="reward-stat-line"><text>{{ tr('reward.totalMinutes') }}</text><text class="reward-stat-num">{{ totalMinutes }}</text><text class="reward-stat-unit">{{ tr('rewards.minute') }}</text></view>
+							<view class="reward-stat-line"><text>{{ tr('reward.todayMinutes') }}</text><text class="reward-stat-num">{{ todayMinutes }}</text><text class="reward-stat-unit">{{ tr('rewards.minute') }}</text></view>
 						</view>
 					</view>
 					<view class="progress-track">
@@ -1134,6 +1134,9 @@
 	}
 
 	.reward-stat-line {
+		/* uni-app x 原生端 view 默认纵向排列，行内标签/数字/单位须显式横向 */
+		flex-direction: row;
+		align-items: center;
 		font-size: 23rpx;
 		color: $bai-mute;
 	}
@@ -1141,6 +1144,11 @@
 	.reward-stat-num {
 		font-weight: 500;
 		color: $bai-ink;
+	}
+
+	/* 单位与数字的间距：text 前导空格原生端会被裁掉，用 margin 实现跨端一致（同书架 stats-unit 口径） */
+	.reward-stat-unit {
+		margin-left: 8rpx;
 	}
 
 	.progress-track {
@@ -1161,14 +1169,14 @@
 	.tier-list {
 		margin-top: 15rpx;
 		flex-direction: column;
-		gap: 27rpx;
+		gap: 20rpx;
 	}
 
 	.tier-item {
 		border-radius: $bai-rounded-lg;
-		padding: 31rpx;
+		padding: 24rpx;
 		flex-direction: column;
-		gap: 19rpx;
+		gap: 15rpx;
 	}
 
 	.tier-dim {
@@ -1184,7 +1192,7 @@
 	.tier-top {
 		flex-direction: row;
 		align-items: center;
-		gap: 23rpx;
+		gap: 19rpx;
 	}
 
 	.tier-badge {
@@ -1240,7 +1248,8 @@
 	}
 
 	.tier-tag {
-		padding: 4rpx 15rpx;
+		/* 内边距收窄配合档位卡紧凑化（文字大小维持原值）；tag 与标题同行放不下时经 title-row wrap 掉行，卡高随内容 */
+		padding: 2rpx 12rpx;
 		border-radius: $bai-rounded-sm;
 		/* 极窄屏下标签自身超宽时约束到行宽，「再额外赠送」小字自动换行 */
 		max-width: 100%;
@@ -1277,7 +1286,6 @@
 		flex-direction: row;
 		align-items: center;
 		justify-content: space-between;
-		padding-top: 8rpx;
 		padding-left: 85rpx;
 	}
 

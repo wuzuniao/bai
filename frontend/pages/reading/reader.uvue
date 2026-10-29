@@ -376,6 +376,9 @@
 		return { id: id, title: '', label: '', contentTitle: '', active: false } as Chapter
 	}
 
+	/** 全书触底态（末章到底提示弹出后置真，底栏百分比按整本计 100%；经章跳复位回落实时章序） */
+	const bookFinished = ref(false)
+
 	/** 当前章节信息（标签/标题/底部进度均由此派生） */
 	const currentChapter = computed(() : Chapter => {
 		return chapterAt(currentChapterId.value)
@@ -387,6 +390,10 @@
 	})
 
 	const footerChapterIndex = computed(() : number => {
+		// 触底态（末章到底提示已弹）按整本章数计 → 百分比 100%；离开末章由 goToChapter 复位回落
+		if (bookFinished.value && currentChapterId.value == chapters.value.length - 1) {
+			return footerChapterCount.value
+		}
 		return Math.max(0, currentChapterId.value - (bookHasPreface.value ? 1 : 0))
 	})
 
@@ -1169,6 +1176,7 @@
 			currentChapterId.value = next
 			saveProgress()
 		} else {
+			bookFinished.value = true
 			showToast(t('reader.lastChapter'))
 		}
 	}
@@ -2378,6 +2386,7 @@
 		}
 		if (next > pageBreaks.value.length - 1) {
 			if (currentChapterId.value === chapters.value.length - 1) {
+				bookFinished.value = true
 				showToast(t('reader.lastChapter'))
 				return
 			}
@@ -2395,6 +2404,8 @@
 		if (id < 0 || id >= chapters.value.length) {
 			return
 		}
+		// 章跳离开原位置：触底态复位（百分比回落实时章序，重新触底时再置真）
+		bookFinished.value = false
 		if (pageTurn.value == '滚动') {
 			applyChapterSwitch(id, atLastPage)
 			if (!atLastPage) {

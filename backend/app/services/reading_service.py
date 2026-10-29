@@ -611,12 +611,16 @@ class ReadingService:
 
     REPORT_PERIODS = ("week", "month", "year")
 
-    # 时段偏好分段（按会话流水 started_at 小时归属，分钟和最大者作为偏好标签）
+    # 时段偏好分段（按会话流水 started_at 小时归属，分钟和最大者作为偏好标签；
+    # 7 段细划分与前端本地兜底报表 stats.uvue buildLocalReport 双份同步维护）
     _HOUR_SEGMENTS: list[tuple[str, int, int]] = [
         ("凌晨", 0, 5),
-        ("上午", 6, 11),
-        ("下午", 12, 17),
-        ("夜间", 18, 23),
+        ("清晨", 6, 8),
+        ("上午", 9, 11),
+        ("中午", 12, 13),
+        ("下午", 14, 17),
+        ("傍晚", 18, 19),
+        ("晚上", 20, 23),
     ]
 
     @staticmethod

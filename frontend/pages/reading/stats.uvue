@@ -104,8 +104,8 @@
 				</view>
 			</view>
 
-			<!-- 阅读时段分布（累计所选时间范围内每天的对应小时阅读时间；标题按实际高峰时段生成） -->
-			<view class="card">
+			<!-- 阅读时段分布（仅年粒度恢复展示：累计全年每天的对应小时阅读时间；标题按实际高峰时段生成） -->
+			<view v-if="period == 'year'" class="card">
 				<text class="card-title">{{ hoursTitle }}</text>
 				<view class="chart-wrap">
 					<view class="chart">
@@ -250,6 +250,7 @@
 	const bookList = ref<BookRow[]>([])
 	const hourBars = ref<BarCell[]>([])
 	const hourTicks = ref<string[]>(['', '', '', '', ''])
+	/** 时段卡标题（年粒度有高峰偏好时为「偏好{xx}阅读」，否则固定文案） */
 	const hoursTitle = ref(tr('stats.hoursTitle'))
 	/** 报表已渲染标记（区分「未加载」与「确认空数据」，避免载入完成前闪现空态提示） */
 	const reportReady = ref(false)
@@ -676,7 +677,7 @@
 			o['total_minutes'] = sorted[i].total
 			booksArr.push(o)
 		}
-		// 时段分布与偏好标签
+		// 时段分布与偏好标签（分段口径与后端 reading_service._HOUR_SEGMENTS 双份同步维护）
 		const hoursArr: UTSJSONObject[] = []
 		for (let h = 0; h < 24; h++) {
 			const o = {} as UTSJSONObject
@@ -686,9 +687,9 @@
 		}
 		let peakTag = ''
 		let best = 0
-		const segRanges: number[] = [0, 5, 6, 11, 12, 17, 18, 23]
-		const segNames: string[] = ['凌晨', '上午', '下午', '夜间']
-		for (let s = 0; s < 4; s++) {
+		const segRanges: number[] = [0, 5, 6, 8, 9, 11, 12, 13, 14, 17, 18, 19, 20, 23]
+		const segNames: string[] = ['凌晨', '清晨', '上午', '中午', '下午', '傍晚', '晚上']
+		for (let s = 0; s < segNames.length; s++) {
 			let sum = 0
 			for (let h = segRanges[s * 2]; h <= segRanges[s * 2 + 1]; h++) {
 				sum += hourMins[h]
@@ -883,6 +884,9 @@
 			calendarCells.value = []
 		}
 		buildHourBars(d.getArray('hours'))
+		// 时段偏好标题（按实际高峰分段生成：凌晨/清晨/上午/中午/下午/傍晚/晚上）
+		const tag = d.getString('peak_tag') ?? ''
+		hoursTitle.value = tag.length > 0 ? tf('stats.hoursPref', [segTagLabel(tag)]) : tr('stats.hoursTitle')
 		// 峰值提示条（本期无阅读时长则隐藏）
 		const peak = d['peak'] as UTSJSONObject | null
 		if (peak != null) {
@@ -908,21 +912,27 @@
 			}
 		}
 		bookList.value = list
-		// 时段偏好标题（按实际高峰分段生成：凌晨/上午/下午/夜间）
-		const tag = d.getString('peak_tag') ?? ''
-		hoursTitle.value = tag.length > 0 ? tf('stats.hoursPref', [segTagLabel(tag)]) : tr('stats.hoursTitle')
 		reportReady.value = true
 	}
 
-	/** 时段偏好标签 → 文案（后端/本地报表 peak_tag 为中文枚举，按值映射 i18n 词条） */
+	/** 时段偏好标签 → 文案（后端/本地报表 peak_tag 为中文枚举，按值映射 i18n 词条；未知值兜底凌晨段） */
 	function segTagLabel(tag: string) : string {
+		if (tag == '清晨') {
+			return tr('stats.segDawn')
+		}
 		if (tag == '上午') {
 			return tr('stats.segMorning')
+		}
+		if (tag == '中午') {
+			return tr('stats.segNoon')
 		}
 		if (tag == '下午') {
 			return tr('stats.segAfternoon')
 		}
-		if (tag == '夜间') {
+		if (tag == '傍晚') {
+			return tr('stats.segDusk')
+		}
+		if (tag == '晚上') {
 			return tr('stats.segNight')
 		}
 		return tr('stats.segEarly')

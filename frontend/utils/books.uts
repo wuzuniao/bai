@@ -204,7 +204,12 @@ export async function fetchBooksFromCloud() : Promise<LocalBook[]> {
 			const readingRaw = res.data!['reading']
 			const reading = readingRaw == null ? null : readingRaw as UTSJSONObject
 			if (reading != null) {
-				saveStats(reading.getNumber('today_minutes') ?? 0, reading.getNumber('total_minutes') ?? 0)
+				// 云端时长与本机镜像取较大值再覆盖：阅读页刚结算的分钟经 reportMinutes 异步上报，
+				// fetchBooks 与其竞态时拉到的云端值不含本次，直接覆盖会回退书架统计卡
+				const localStats = loadStats()
+				const today = Math.max(reading.getNumber('today_minutes') ?? 0, localStats.today)
+				const total = Math.max(reading.getNumber('total_minutes') ?? 0, localStats.total)
+				saveStats(today, total)
 			}
 			const arr = res.data!.getArray('list')
 			const cloud : LocalBook[] = []
@@ -227,6 +232,15 @@ export async function fetchBooksFromCloud() : Promise<LocalBook[]> {
 					book.dirty = local[li].dirty
 					if (local[li].dirty && await reconcileDirtyBook(book, local[li])) {
 						book.dirty = false
+					} else if (!local[li].dirty && local[li].lastReadAt > book.lastReadAt) {
+						// 本地进度较新（阅读页刚结算）不被云端旧值覆盖：进度回写为异步静默（syncQuiet），
+						// fetchBooks 与其竞态时拉到旧 last_read_at，直接覆盖会回退书架排序与进度显示
+						book.lastReadAt = local[li].lastReadAt
+						book.lastChapter = local[li].lastChapter
+						book.lastPageIndex = local[li].lastPageIndex
+						book.lastScrollTop = local[li].lastScrollTop
+						book.lastPercent = local[li].lastPercent
+						book.pdfRatio = local[li].pdfRatio
 					}
 				}
 				merged.push(book)
