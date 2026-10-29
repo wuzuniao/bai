@@ -196,6 +196,78 @@ function bookScopedKey(prefix : string) : string | null {
 	return bookLocked ? prefix + activeBookId : null
 }
 
+// ==================== 本地缓存 JSON 解析（JSON.parse<Array<自定义类型>> 在微信小程序产物中会运行时引用 import type 擦除后的类型名致 ReferenceError，故统一经 UTSJSONObject 手动映射；损坏项跳过） ====================
+
+/** 划线缓存 JSON → UnderlineEntry 列表 */
+function underlinesFromStored(raw : string) : UnderlineEntry[] {
+	const list : UnderlineEntry[] = []
+	const arr = JSON.parse<UTSJSONObject[]>(raw)
+	if (arr != null) {
+		for (let i = 0; i < arr.length; i++) {
+			const o = arr[i]
+			const cid = o.getNumber('cid')
+			const origin = o.getNumber('origin')
+			if (cid == null || origin == null) {
+				continue
+			}
+			const ranges : number[][] = []
+			const rawRanges = o.getArray('ranges')
+			if (rawRanges != null) {
+				for (let j = 0; j < rawRanges.length; j++) {
+					const pair = rawRanges[j] as Array<number>
+					if (pair.length >= 2) {
+						ranges.push([pair[0], pair[1]])
+					}
+				}
+			}
+			list.push({ cid: cid, origin: origin, ranges: ranges } as UnderlineEntry)
+		}
+	}
+	return list
+}
+
+/** 想法缓存 JSON → Thought 列表 */
+function thoughtsFromStored(raw : string) : Thought[] {
+	const list : Thought[] = []
+	const arr = JSON.parse<UTSJSONObject[]>(raw)
+	if (arr != null) {
+		for (let i = 0; i < arr.length; i++) {
+			const o = arr[i]
+			const fromCid = o.getNumber('fromCid')
+			const fromOrigin = o.getNumber('fromOrigin')
+			const fromStart = o.getNumber('fromStart')
+			const toCid = o.getNumber('toCid')
+			const toOrigin = o.getNumber('toOrigin')
+			const toEnd = o.getNumber('toEnd')
+			const quote = o.getString('quote')
+			const content = o.getString('content')
+			if (fromCid == null || fromOrigin == null || fromStart == null || toCid == null || toOrigin == null || toEnd == null || quote == null || content == null) {
+				continue
+			}
+			list.push({ fromCid: fromCid, fromOrigin: fromOrigin, fromStart: fromStart, toCid: toCid, toOrigin: toOrigin, toEnd: toEnd, quote: quote, content: content } as Thought)
+		}
+	}
+	return list
+}
+
+/** 书签缓存 JSON → Bookmark 列表 */
+function bookmarksFromStored(raw : string) : Bookmark[] {
+	const list : Bookmark[] = []
+	const arr = JSON.parse<UTSJSONObject[]>(raw)
+	if (arr != null) {
+		for (let i = 0; i < arr.length; i++) {
+			const o = arr[i]
+			const chapterId = o.getNumber('chapterId')
+			const pageIndex = o.getNumber('pageIndex')
+			if (chapterId == null || pageIndex == null) {
+				continue
+			}
+			list.push({ chapterId: chapterId, pageIndex: pageIndex } as Bookmark)
+		}
+	}
+	return list
+}
+
 /** 读取本地阅读设置（损坏/缺项容错返回默认值） */
 export function loadSettings() : ReaderSettings {
 	let s = { fontSize: 18, pageTurn: '滚动', theme: 'light', fontKey: 'sourcehan' } as ReaderSettings
@@ -249,7 +321,7 @@ export function loadBookmarks() : Bookmark[] {
 	}
 	const stored : any = uni.getStorageSync(key)
 	if (typeof stored == 'string' && (stored as string).length > 0) {
-		const list = JSON.parse<Array<Bookmark>>(stored as string)
+		const list = bookmarksFromStored(stored as string)
 		if (list != null) {
 			return list
 		}
@@ -443,7 +515,7 @@ export function loadUnderlines() : UnderlineEntry[] {
 	}
 	const stored : any = uni.getStorageSync(key)
 	if (typeof stored == 'string' && (stored as string).length > 0) {
-		const list = JSON.parse<Array<UnderlineEntry>>(stored as string)
+		const list = underlinesFromStored(stored as string)
 		if (list != null) {
 			return list
 		}
@@ -459,7 +531,7 @@ export function loadThoughts() : Thought[] {
 	}
 	const stored : any = uni.getStorageSync(key)
 	if (typeof stored == 'string' && (stored as string).length > 0) {
-		const list = JSON.parse<Array<Thought>>(stored as string)
+		const list = thoughtsFromStored(stored as string)
 		if (list != null) {
 			return list
 		}
@@ -623,12 +695,7 @@ async function migrateUnderlinesStorage(oldId : number, newId : number) : Promis
 	if (raw.length == 0) {
 		return
 	}
-	const list = JSON.parse<Array<UnderlineEntry>>(raw)
-	if (list == null) {
-		// 缓存损坏不可用：丢弃旧 key 不阻塞迁移（与读取方容错口径一致）
-		uni.removeStorageSync(UNDERLINE_STORAGE_KEY + oldId)
-		return
-	}
+	const list = underlinesFromStored(raw)
 	for (let i = 0; i < list.length; i++) {
 		const entry = list[i]
 		// 云端传输为扁平区间（[s1,e1,s2,e2]），空数组=整段取消
@@ -644,11 +711,7 @@ async function migrateThoughtsStorage(oldId : number, newId : number) : Promise<
 	if (raw.length == 0) {
 		return
 	}
-	const list = JSON.parse<Array<Thought>>(raw)
-	if (list == null) {
-		uni.removeStorageSync(THOUGHT_STORAGE_KEY + oldId)
-		return
-	}
+	const list = thoughtsFromStored(raw)
 	for (let i = 0; i < list.length; i++) {
 		const t = list[i]
 		await createThought(newId, t.fromCid, t.fromOrigin, t.fromStart, t.toCid, t.toOrigin, t.toEnd, t.quote, t.content)
@@ -663,11 +726,7 @@ async function migrateBookmarksStorage(oldId : number, newId : number) : Promise
 	if (raw.length == 0) {
 		return
 	}
-	const list = JSON.parse<Array<Bookmark>>(raw)
-	if (list == null) {
-		uni.removeStorageSync(BOOKMARK_STORAGE_KEY + oldId)
-		return
-	}
+	const list = bookmarksFromStored(raw)
 	await replaceBookmarks(newId, bookmarksToCloudItems(list))
 	uni.setStorageSync(BOOKMARK_STORAGE_KEY + newId, raw)
 	uni.removeStorageSync(BOOKMARK_STORAGE_KEY + oldId)
@@ -705,30 +764,24 @@ function containsThought(list : Thought[], t : Thought) : boolean {
 export async function repushBookNotes(bookId : number, cloudThoughts : Thought[]) : Promise<void> {
 	const uRaw = readNoteStorageRaw(UNDERLINE_STORAGE_KEY + bookId)
 	if (uRaw.length > 0) {
-		const ulist = JSON.parse<Array<UnderlineEntry>>(uRaw)
-		if (ulist != null) {
-			for (let i = 0; i < ulist.length; i++) {
-				const e = ulist[i]
-				await upsertUnderline(bookId, e.cid, e.origin, flatRanges(e))
-			}
+		const ulist = underlinesFromStored(uRaw)
+		for (let i = 0; i < ulist.length; i++) {
+			const e = ulist[i]
+			await upsertUnderline(bookId, e.cid, e.origin, flatRanges(e))
 		}
 	}
 	const bRaw = readNoteStorageRaw(BOOKMARK_STORAGE_KEY + bookId)
 	if (bRaw.length > 0) {
-		const blist = JSON.parse<Array<Bookmark>>(bRaw)
-		if (blist != null) {
-			await replaceBookmarks(bookId, bookmarksToCloudItems(blist))
-		}
+		const blist = bookmarksFromStored(bRaw)
+		await replaceBookmarks(bookId, bookmarksToCloudItems(blist))
 	}
 	const tRaw = readNoteStorageRaw(THOUGHT_STORAGE_KEY + bookId)
 	if (tRaw.length > 0) {
-		const tlist = JSON.parse<Array<Thought>>(tRaw)
-		if (tlist != null) {
-			for (let i = 0; i < tlist.length; i++) {
-				const t = tlist[i]
-				if (!containsThought(cloudThoughts, t)) {
-					await createThought(bookId, t.fromCid, t.fromOrigin, t.fromStart, t.toCid, t.toOrigin, t.toEnd, t.quote, t.content)
-				}
+		const tlist = thoughtsFromStored(tRaw)
+		for (let i = 0; i < tlist.length; i++) {
+			const t = tlist[i]
+			if (!containsThought(cloudThoughts, t)) {
+				await createThought(bookId, t.fromCid, t.fromOrigin, t.fromStart, t.toCid, t.toOrigin, t.toEnd, t.quote, t.content)
 			}
 		}
 	}

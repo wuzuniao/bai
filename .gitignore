@@ -4,6 +4,9 @@ unpackage/
 node_modules/
 # CLI 构建产物（deploy.sh / npm run build:h5 生成，可再生成）
 dist/
+# CLI 构建临时文件（run-uni.js 管理自动增删：鸿蒙产物暂存目录与构建态入口文件）
+.harmony-stash-bai/
+frontend/vite.config.js
 
 # 操作系统
 .DS_Store
