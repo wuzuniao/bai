@@ -140,7 +140,8 @@
 
 <script setup lang="uts">
 	import { getCurrentInstance } from 'vue'
-	import { SelSpan, SpanSeg, TextMetrics, ParaRect, ShareQuoteCtx, comparePos, normalizeSpan, applySpanUnderlineToStorage } from '@/utils/readerTypes.uts'
+	import type { SelSpan, SpanSeg, TextMetrics, ParaRect, ShareQuoteCtx } from '@/utils/readerTypesDefs.ts'
+	import { comparePos, normalizeSpan, applySpanUnderlineToStorage } from '@/utils/readerTypes.uts'
 	import ThoughtPanel from '@/components/selection/ThoughtPanel.uvue'
 	import ShareCard from '@/components/selection/ShareCard.uvue'
 	import { t } from '@/utils/i18n.uts'

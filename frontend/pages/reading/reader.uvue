@@ -297,10 +297,14 @@
 <script setup lang="uts">
 	import { READER_THEME_LIGHT, readerThemeOf, readerThemeIcon } from '@/utils/theme.uts'
 	import { useUserStore, avatarSrcOf } from '@/stores/user.uts'
-	import { LocalBook, BookProgress, findBook, isBookDirty, loadBookProgress, saveBookProgress, updateBookReading, createReadingClock } from '@/utils/books.uts'
-	import { parseChapters, readTextFile, ParsedChapter } from '@/utils/bookparse.uts'
-	import { Chapter, Paragraph, Bookmark, Thought, UnderlineEntry, NoteRecord, ShareQuoteCtx, SelSpan, SpanSeg, TextMetrics, ParaRect, ReaderSettings, fontOptionOf, loadStoredFontKey, setActiveBookId, loadUnderlines, loadThoughts, findUnderlineEntry, loadBookmarks, loadSettings, buildNoteRecords, buildShareQuoteCtx, fetchNotesToCache, fetchBookmarksToCache, VIRTUAL_BOOK_ID, SENTENCE_END_CHARS, thoughtAt, spanOfThought, buildSpanSegs } from '@/utils/readerTypes.uts'
-	import { PageSlice, computePageBreaks, computePageBreaksMeasured, computePageBreaksExact, ParaLineLayout } from '@/utils/pagination.uts'
+	import type { LocalBook, BookProgress } from '@/utils/booksDefs.ts'
+	import { findBook, isBookDirty, loadBookProgress, saveBookProgress, updateBookReading, createReadingClock } from '@/utils/books.uts'
+	import type { ParsedChapter } from '@/utils/bookparseDefs.ts'
+	import { parseChapters, readTextFile } from '@/utils/bookparse.uts'
+	import type { Chapter, Paragraph, Bookmark, Thought, UnderlineEntry, NoteRecord, ShareQuoteCtx, SelSpan, SpanSeg, TextMetrics, ParaRect, ReaderSettings } from '@/utils/readerTypesDefs.ts'
+	import { fontOptionOf, loadStoredFontKey, setActiveBookId, loadUnderlines, loadThoughts, findUnderlineEntry, loadBookmarks, loadSettings, buildNoteRecords, buildShareQuoteCtx, fetchNotesToCache, fetchBookmarksToCache, VIRTUAL_BOOK_ID, SENTENCE_END_CHARS, thoughtAt, spanOfThought, buildSpanSegs } from '@/utils/readerTypes.uts'
+	import type { PageSlice, ParaLineLayout } from '@/utils/paginationDefs.ts'
+	import { computePageBreaks, computePageBreaksMeasured, computePageBreaksExact } from '@/utils/pagination.uts'
 	// #ifdef APP-ANDROID
 	import { buildParaLayout } from '@/utils/textlayout.uts'
 	// #endif

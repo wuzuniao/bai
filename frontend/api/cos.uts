@@ -5,7 +5,8 @@
  * - 预签名 URL 由后端经 STS 临时密钥签发，密钥与临时凭证均不出后端，
  *   前端仅持 URL 直传/直取 COS（上传后需调完成登记维护云端清单）
  */
-import { request, ApiResponse, apiOpts } from '@/utils/request.uts'
+import type { ApiResponse } from '@/utils/requestDefs.ts'
+import { request, apiOpts } from '@/utils/request.uts'
 // 词典注册（复用请求层文案段）
 import '@/utils/locales/request.uts'
 

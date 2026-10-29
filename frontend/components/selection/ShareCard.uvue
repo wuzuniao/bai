@@ -46,7 +46,7 @@
 
 <script setup lang="uts">
 	import { getCurrentInstance } from 'vue'
-	import { ShareQuoteCtx } from '@/utils/readerTypes.uts'
+	import type { ShareQuoteCtx } from '@/utils/readerTypesDefs.ts'
 	import { t } from '@/utils/i18n.uts'
 	import { getAccessToken } from '@/utils/request.uts'
 	import { API_BASE_URL } from '@/utils/config.uts'

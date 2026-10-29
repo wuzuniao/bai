@@ -1,5 +1,5 @@
 // #ifdef APP-ANDROID
-import { ParaLineLayout } from '@/utils/pagination.uts'
+import type { ParaLineLayout } from '@/utils/paginationDefs.ts'
 import StaticBuilder from 'android.text.StaticLayout$Builder'
 import TextPaint from 'android.text.TextPaint'
 import Typeface from 'android.graphics.Typeface'

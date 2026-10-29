@@ -5,17 +5,11 @@
  * - 已读状态按 (公告, 用户, 项目) 维度分别维护（user_id 取令牌 sub）
  * - request 由 utils/request.uts 提供baseUrl 固定 AUTH_BASE_URL，401 静默刷新
  */
-import { request, ApiResponse, RequestOptions } from '@/utils/request.uts'
-
-/** 公告条目（列表接口返回项） */
-export type AnnouncementItem = {
-	id: number
-	title: string
-	content: string
-	created_at: string
-	updated_at: string
-	is_read: boolean
-}
+import type { ApiResponse, RequestOptions } from '@/utils/requestDefs.ts'
+import { request } from '@/utils/request.uts'
+// 共享类型抽离到 announcement.ts：UTS 编译器对 type-only 导入会改写为 *.ts 路径（HBuilderX 5.33），
+// 类型留在 .uts 会报“未导出”。本文件导入供内部使用并再导出给调用方。
+import type { AnnouncementItem, AnnouncementsPage } from './announcementDefs.ts'
 
 /** 构造请求选项（默认带认证头、10s 超时） */
 function opts(url: string, method: RequestMethod, data: UTSJSONObject | null) : RequestOptions {
@@ -82,13 +76,6 @@ export function getAnnouncements(page: number, pageSize: number) : Promise<Annou
 				reject(err)
 			})
 	})
-}
-
-/** 公告分页结果 */
-export type AnnouncementsPage = {
-	items: AnnouncementItem[]
-	hasMore: boolean
-	unreadCount: number
 }
 
 /** 查询公告未读数（通知组件查询用） */

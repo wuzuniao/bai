@@ -7,7 +7,8 @@
  * - ensureBookLocal：打开书籍前保障正文在本机（本地有直接用，本地无从云端下载）
  * - 一键双向同步（runBookSync）与云端恢复建档在 bookparse.uts（依赖其解析/落盘管线）
  */
-import { LocalBook, setBookFileLocal } from './books.uts'
+import type { LocalBook } from './booksDefs.ts'
+import { setBookFileLocal } from './books.uts'
 import { fetchDownloadUrl } from '../api/cos.uts'
 // #ifdef WEB
 import { webFsGet, webFsPut } from './webfs'

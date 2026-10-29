@@ -20,7 +20,7 @@
 </template>
 
 <script setup lang="uts">
-	import { BottomNavItem } from './navItem.uts'
+	import type { BottomNavItem } from './navItemDefs.ts'
 	import { t } from '@/utils/i18n.uts'
 	// 词典注册（底部导航文案）
 	import '@/utils/locales/common.uts'

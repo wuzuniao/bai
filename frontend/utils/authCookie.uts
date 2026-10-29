@@ -56,24 +56,9 @@ type ExchangedTokenSet = {
 	expires_in: number
 }
 
-/** 同步登录态的入参（传入的为项目令牌；内部交换平台令牌后写 Cookie） */
-export type SyncAuthCookieOptions = {
-	access_token: string
-	/** 项目 refresh_token（交换用不到，仅兼容调用点签名） */
-	refresh_token: string
-	/** 项目 access_token 有效期（秒）；<=0 时用缺省 TTL（仅作兜底） */
-	expires_in: number
-	/** 用户信息 JSON 字符串（可选）；缺省时保留 Cookie 旧值 */
-	userInfoJson?: string
-}
-
-/** 恢复成功回调入参（项目令牌 + 资料 JSON 字符串，写入本地 storage） */
-export type RestoredAuthState = {
-	access_token: string
-	refresh_token: string
-	/** 项目身份资料 JSON 字符串（GET /users/info 的 data，可能为空串） */
-	userInfoJson: string
-}
+// 共享类型抽离到 authCookie.ts：UTS 编译器对 type-only 导入要求落在 .ts，
+// 否则会被改写为 authCookie.ts 报错“未导出”。本文件导入供内部使用并再导出给调用方。
+import type { SyncAuthCookieOptions, RestoredAuthState } from './authCookieDefs.ts'
 
 // 共享恢复链 Promise（启动恢复与 401 兜底恢复共用，防并发重复交换/触发平台 rt 轮换重放）
 let restoreChain: Promise<RestoredAuthState | null> | null = null

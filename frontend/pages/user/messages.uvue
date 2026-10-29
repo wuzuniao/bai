@@ -86,7 +86,8 @@
 	 */
 	import BackButton from '@/components/common/BackButton.uvue'
 	import PageHeader from '@/components/common/PageHeader.uvue'
-	import { getAnnouncements, markAnnouncementRead, markAllAnnouncementsRead, AnnouncementItem, AnnouncementsPage } from '@/api/announcement.uts'
+	import type { AnnouncementItem, AnnouncementsPage } from '@/api/announcementDefs.ts'
+	import { getAnnouncements, markAnnouncementRead, markAllAnnouncementsRead } from '@/api/announcement.uts'
 	import { mainTopPx } from '@/utils/layout.uts'
 	import { t } from '@/utils/i18n.uts'
 	// 词典注册（messages 页文案 + 公共段）

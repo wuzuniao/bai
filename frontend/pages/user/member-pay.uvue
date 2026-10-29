@@ -160,7 +160,8 @@
 	 */
 	import { fetchActivitySummary } from '@/api/activity.uts'
 	import { purchaseMembership } from './api/membership.uts'
-	import { ApiResponse, forceRefreshToken } from '@/utils/request.uts'
+	import type { ApiResponse } from '@/utils/requestDefs.ts'
+	import { forceRefreshToken } from '@/utils/request.uts'
 	import { t, tf } from '@/utils/i18n.uts'
 	// 词典注册（memberpay 页文案 + 公共段）
 	import '@/pages/user/locales/memberpay.uts'

@@ -157,7 +157,7 @@
 	import ListCell from '@/components/list/ListCell.uvue'
 	import { useUserStore, avatarPathOf, avatarKeyOf, AVATAR_OPTION_KEYS } from '@/stores/user.uts'
 	import { validateConfirmPassword } from './utils/validators.uts'
-	import { ApiResponse } from '@/utils/request.uts'
+	import type { ApiResponse } from '@/utils/requestDefs.ts'
 	import { t, currentLocale, setLocale } from '@/utils/i18n.uts'
 	// 词典注册（profile 页文案 + 公共段）
 	import '@/pages/user/locales/profile.uts'

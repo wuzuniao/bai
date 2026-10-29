@@ -27,18 +27,9 @@ function prefaceLabel() : string {
 	return t('bookparse.preface')
 }
 
-export type ParsedChapter = {
-	/** 目录标题（完整标题行） */
-	title: string
-	/** 正文页章节标签（如：第 12 章；无编号章为整行标题） */
-	label: string
-	/** 正文页大标题（编号后标题部分） */
-	contentTitle: string
-	/** 章内段落（非空行） */
-	paragraphs: string[]
-	/** 序章标记（第一章前的前置内容生成；打开时仅对导入时标记 hasPreface 的书保留，保证旧书章 id 与存量进度对齐） */
-	preface: boolean
-}
+// 共享类型抽离到 bookparse.ts：UTS 编译器对 type-only 导入会改写为 *.ts 路径（HBuilderX 5.33），
+// 类型留在 .uts 会报“未导出”。本文件导入供内部使用并再导出给调用方。
+import type { ParsedChapter, SyncResult } from './bookparseDefs.ts'
 
 /** 标题行拆分结果（raw=原始行，label=编号前缀，contentTitle=编号后标题） */
 type ParsedTitleParts = {
@@ -620,18 +611,6 @@ type CloudItem = {
 	title: string
 	format: string
 	size: number
-}
-
-/** 同步结果统计 */
-export type SyncResult = {
-	/** 上传成功本数 */
-	uploaded: number
-	/** 下载成功本数 */
-	downloaded: number
-	/** 反向建档恢复本数（云端有对象而本地无书行） */
-	restored: number
-	/** 失败本数（单本失败不中断整体，继续同步其余） */
-	failed: number
 }
 
 /** 单本上传（取预签名 → 读本地字节 → PUT 直传；失败抛错） */

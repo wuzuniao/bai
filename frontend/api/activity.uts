@@ -6,7 +6,8 @@
  *   hasAccessToken 源头跳过请求，未登录走本地默认展示）
  * - 返回 ApiResponse（code=0 成功，data 为内层业务数据）
  */
-import { request, ApiResponse, apiOpts } from '@/utils/request.uts'
+import type { ApiResponse } from '@/utils/requestDefs.ts'
+import { request, apiOpts } from '@/utils/request.uts'
 
 
 /** 活动页聚合数据（余额 / 今日已获 / 阅读统计 / 本周签到 / 今日档位状态） */

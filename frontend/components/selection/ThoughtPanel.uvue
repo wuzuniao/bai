@@ -37,7 +37,7 @@
 							:key="qi"
 							class="thought-quote-text"
 							:style="'color:' + quoteColor"
-						>{{ '　　' }}<text v-if="qi == 0" class="thought-quote-mark">“</text>{{ ql }}<text v-if="qi == editorQuoteLines.length - 1" class="thought-quote-mark">”</text></text>
+						><text>{{ '　　' }}</text><text v-if="qi == 0" class="thought-quote-mark">“</text><text>{{ ql }}</text><text v-if="qi == editorQuoteLines.length - 1" class="thought-quote-mark">”</text></text>
 					</template>
 				</view>
 				<textarea
@@ -64,7 +64,8 @@
 
 <script setup lang="uts">
 	import { getCurrentInstance } from 'vue'
-	import { SpanSeg, Thought, applySpanUnderlineToStorage, saveThought } from '@/utils/readerTypes.uts'
+	import type { SpanSeg, Thought } from '@/utils/readerTypesDefs.ts'
+	import { applySpanUnderlineToStorage, saveThought } from '@/utils/readerTypes.uts'
 	import { t } from '@/utils/i18n.uts'
 	// 词典注册（划词子系统文案 + 公共段）
 	import '@/utils/locales/selectioncomp.uts'

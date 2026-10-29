@@ -5,7 +5,8 @@
  *   access_token / refresh_token / expires_in / token_type，由 store.setUser 落地
  * - 需登录态的接口（Authorization 由 request 自动附加）：user_id 由 JWT 提供
  */
-import { request, ApiResponse, RequestOptions } from '@/utils/request.uts'
+import type { ApiResponse, RequestOptions } from '@/utils/requestDefs.ts'
+import { request } from '@/utils/request.uts'
 import { AUTH_CLIENT_ID, WX_APPID } from '@/utils/config.uts'
 
 /** 构造请求选项（默认带认证头、10s 超时） */

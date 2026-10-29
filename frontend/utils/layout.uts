@@ -27,15 +27,9 @@ export function mainTopPx() : number {
 	return 96
 }
 
-/** 小程序胶囊按钮矩形（避让计算源） */
-export type CapsuleRect = {
-	/** 胶囊顶边（px） */
-	top : number
-	/** 胶囊左缘（px） */
-	left : number
-	/** 胶囊高度（px） */
-	height : number
-}
+// 共享类型抽离到 layout.ts：UTS 编译器对 type-only 导入会改写为 *.ts 路径（HBuilderX 5.33），
+// 类型留在 .uts 会报“未导出”。本文件导入供内部使用并再导出给调用方。
+import type { CapsuleRect } from './layoutDefs.ts'
 
 /** 微信小程序胶囊按钮矩形（条件编译内聚：非微信端恒返回 null），各页面导航避让据此换算 */
 export function mpCapsuleRect() : CapsuleRect | null {

@@ -79,8 +79,8 @@
 					<view class="reward-head">
 						<text class="reward-title">{{ tr('reward.readEarn') }}</text>
 						<view class="reward-stat">
-							<text class="reward-stat-line">{{ tr('reward.totalMinutes') }}<text class="reward-stat-num">{{ totalMinutes }}</text> {{ tr('rewards.minute') }}</text>
-							<text class="reward-stat-line">{{ tr('reward.todayMinutes') }}<text class="reward-stat-num">{{ todayMinutes }}</text> {{ tr('rewards.minute') }}</text>
+							<view class="reward-stat-line"><text>{{ tr('reward.totalMinutes') }}</text><text class="reward-stat-num">{{ totalMinutes }}</text><text> {{ tr('rewards.minute') }}</text></view>
+							<view class="reward-stat-line"><text>{{ tr('reward.todayMinutes') }}</text><text class="reward-stat-num">{{ todayMinutes }}</text><text> {{ tr('rewards.minute') }}</text></view>
 						</view>
 					</view>
 					<view class="progress-track">
@@ -123,7 +123,8 @@
 	import PageHeader from '@/components/common/PageHeader.uvue'
 	import { mainTopPx } from '@/utils/layout.uts'
 	import { getTodayMinutes, getTotalMinutes } from '@/utils/books.uts'
-	import { hasAccessToken, ApiResponse } from '@/utils/request.uts'
+	import type { ApiResponse } from '@/utils/requestDefs.ts'
+	import { hasAccessToken } from '@/utils/request.uts'
 	import { fetchActivitySummary, postCheckin, postCheckinMakeup, claimReadingReward } from '@/api/activity.uts'
 	import { REWARD_TIERS, fmtRemainMinutes, tierTotalReward } from '@/utils/rewards.uts'
 	import { useUserStore, hasMembershipRole } from '@/stores/user.uts'

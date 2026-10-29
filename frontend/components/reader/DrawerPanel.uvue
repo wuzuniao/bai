@@ -60,8 +60,9 @@
 </template>
 
 <script setup lang="uts">
-	import { Chapter, Bookmark, NoteRecord, spacedChapterTitle } from '@/utils/readerTypes.uts'
-	import { ReaderTheme } from '@/utils/theme.uts'
+	import type { Chapter, Bookmark, NoteRecord } from '@/utils/readerTypesDefs.ts'
+	import { spacedChapterTitle } from '@/utils/readerTypes.uts'
+	import type { ReaderTheme } from '@/utils/themeDefs.ts'
 	import BookmarkPanel from '@/components/reader/BookmarkPanel.uvue'
 	import { t } from '@/utils/i18n.uts'
 	// 词典注册（阅读器组件文案）

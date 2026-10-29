@@ -5,7 +5,8 @@
  * - 计价与时长由服务端真源下发（1 金币 / 30 天），前端不可传价格
  * - silent：未登录/令牌过期 401 不跳转登录页（动作前调用点已有登录校验）
  */
-import { request, ApiResponse, RequestOptions } from '@/utils/request.uts'
+import type { ApiResponse, RequestOptions } from '@/utils/requestDefs.ts'
+import { request } from '@/utils/request.uts'
 import { API_BASE_URL } from '@/utils/config.uts'
 
 /** 金币购买黑铁会员（months=购买月数 1~12；余额不足/授权失败后端 400，授权失败金币自动退回） */

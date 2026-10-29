@@ -10,22 +10,9 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { syncAuthCookie, clearAuthCookie, restoreAuthFromCookie, onAuthRestored, SyncAuthCookieOptions, RestoredAuthState } from '../utils/authCookie'
-
-/** 用户信息结构 */
-export type UserInfo = {
-	id: number
-	username: string
-	signature: string
-	/** 头像标识（数据库存 key，前端映射到 static 头像图） */
-	avatar_url: string
-	email: string
-	/** 是否已设置密码（微信登录用户可能无密码） */
-	has_password: boolean
-	/** 1-正常，0-待删除 */
-	status: number
-	/** 全局角色编码数组（如 ["admin"]），空数组=普通用户 */
-	roles: string[]
-}
+// 共享类型抽离到 user.ts：UTS 编译器对 type-only 导入会改写为 *.ts 路径（HBuilderX 5.33），
+// 类型留在 .uts 会报“未导出”。本文件导入供内部使用并再导出给调用方。
+import type { UserInfo } from './userDefs.ts'
 
 export const useUserStore = defineStore('user', () => {
 	// 用户信息（未登录为 null）

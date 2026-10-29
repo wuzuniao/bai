@@ -87,7 +87,7 @@
 	import PasswordInput from '@/components/form/PasswordInput.uvue'
 	import AgreementCheckbox from '@/components/form/AgreementCheckbox.uvue'
 	import { useUserStore } from '@/stores/user.uts'
-	import { ApiResponse } from '@/utils/request.uts'
+	import type { ApiResponse } from '@/utils/requestDefs.ts'
 	import { t } from '@/utils/i18n.uts'
 	// 词典注册（login 页文案 + 公共段）
 	import '@/pages/user/locales/login.uts'

@@ -92,8 +92,10 @@
 	import ReaderToast from '@/components/reader/ReaderToast.uvue'
 	import { READER_THEME_LIGHT } from '@/utils/theme.uts'
 	import { useUserStore, avatarSrcOf } from '@/stores/user.uts'
-	import { SelSpan, SpanSeg, TextMetrics, ParaRect, ShareQuoteCtx, Thought, UnderlineEntry, Paragraph, normalizeSpan, setActiveBookId, loadUnderlines, loadThoughts, fetchNotesToCache, VIRTUAL_BOOK_ID, SENTENCE_END_CHARS, thoughtAt, spanOfThought, thoughtTextOfSpan, buildSpanSegs } from '@/utils/readerTypes.uts'
-	import { POEM_LINES, PoemLine } from '@/utils/poem.uts'
+	import type { SelSpan, SpanSeg, TextMetrics, ParaRect, ShareQuoteCtx, Thought, UnderlineEntry, Paragraph } from '@/utils/readerTypesDefs.ts'
+	import { normalizeSpan, setActiveBookId, loadUnderlines, loadThoughts, fetchNotesToCache, VIRTUAL_BOOK_ID, SENTENCE_END_CHARS, thoughtAt, spanOfThought, thoughtTextOfSpan, buildSpanSegs } from '@/utils/readerTypes.uts'
+	import type { PoemLine } from '@/utils/poemDefs.ts'
+	import { POEM_LINES } from '@/utils/poem.uts'
 	import { scheduleResizeReload } from '@/utils/layout.uts'
 	import { t } from '@/utils/i18n.uts'
 	// #ifdef MP-WEIXIN

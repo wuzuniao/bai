@@ -3,17 +3,9 @@
  * 行结构 = 7 个字单元（拼音 + 汉字）+ 行尾标点，供首页划词、选区渲染与虚拟书 0 笔记坐标消费
  */
 
-/** 字单元（拼音 + 汉字） */
-export type PoemChar = {
-	char: string
-	pinyin: string
-}
-
-/** 诗行（7 字单元 + 行尾标点） */
-export type PoemLine = {
-	chars: PoemChar[]
-	punct: string
-}
+// 共享类型抽离到 poem.ts：UTS 编译器对 type-only 导入会改写为 *.ts 路径（HBuilderX 5.33），
+// 类型留在 .uts 会报“未导出”。本文件导入供内部使用并再导出给调用方。
+import type { PoemChar, PoemLine } from './poemDefs.ts'
 
 /** 诗文内容（8 联 16 行，逐字拼音取自设计稿） */
 export const POEM_LINES : PoemLine[] = [

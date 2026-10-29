@@ -7,7 +7,8 @@
  *   页面走本地缓存与默认样式；调用点经 hasAccessToken 源头跳过请求）
  * - 返回 ApiResponse（code=0 成功，data 为内层业务数据）
  */
-import { request, ApiResponse, apiOpts } from '@/utils/request.uts'
+import type { ApiResponse } from '@/utils/requestDefs.ts'
+import { request, apiOpts } from '@/utils/request.uts'
 import { t } from '@/utils/i18n.uts'
 // 词典注册（复用请求层文案段）
 import '@/utils/locales/request.uts'

@@ -1,3 +1,6 @@
+// 共享类型定义抽离到 .ts：HBuilderX 5.33 的 UTS 编译器对 type-only 导入会改写为 *.ts 路径，
+// 若类型仍留在 .uts 中会报“未导出”。此处仅放类型声明，运行逻辑见 navItem.uts。
+
 /** 底部导航项（导航数据与页面跳转由 BottomNavBar 统一管理，页面仅传 active） */
 export type BottomNavItem = {
 	/** 激活项标识（home / bookshelf / mine），与页面传入的 active 比对 */

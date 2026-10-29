@@ -79,8 +79,10 @@
 </template>
 
 <script setup lang="uts">
-	import { READER_THEME_LIGHT, READER_THEME_PAPER, readerThemeOf, ReaderTheme } from '@/utils/theme.uts'
-	import { ReaderSettings, FONT_OPTIONS, fontOptionOf, loadSettings, saveSettings, loadStoredFontKey } from '@/utils/readerTypes.uts'
+	import type { ReaderTheme } from '@/utils/themeDefs.ts'
+	import { READER_THEME_LIGHT, READER_THEME_PAPER, readerThemeOf } from '@/utils/theme.uts'
+	import type { ReaderSettings } from '@/utils/readerTypesDefs.ts'
+	import { FONT_OPTIONS, fontOptionOf, loadSettings, saveSettings, loadStoredFontKey } from '@/utils/readerTypes.uts'
 	import { t } from '@/utils/i18n.uts'
 	// 词典注册（阅读器组件文案 + 公共段）
 	import '@/utils/locales/readercomp.uts'
