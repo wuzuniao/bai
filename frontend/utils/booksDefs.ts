@@ -60,6 +60,7 @@ export type ReadingClock = {
 	/** 根节点触摸：记录操作时间；距上次操作超时则上一会话以「最后操作+10min」入账并重新起算（虚拟书 0 不计时） */
 	onActive : (bookId : number) => void
 	/** 结算本次阅读：会话入账（<1 分钟内部丢弃），结束点截断至「最后操作+10min」（页面后台停留期间不计时长）；
-	 *  调用方自行守卫虚拟书 0 与进度回写 */
-	settle : (bookId : number) => void
+	 *  调用方自行守卫虚拟书 0 与进度回写；返回本次入账分钟数（0=无）。
+	 *  quiet=true 卸载期安静结算：仅写本地镜像与会话队列（标记离线待补传聚合），不发起云端请求 */
+	settle : (bookId : number, quiet : boolean) => number
 }

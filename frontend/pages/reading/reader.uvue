@@ -1147,7 +1147,7 @@
 		if (bookId.value == VIRTUAL_BOOK_ID) {
 			return
 		}
-		readingClock.settle(bookId.value)
+		readingClock.settle(bookId.value, false)
 		// 滚动模式按锚点章回写（currentChapterId 是滚动加载推进的「到达章」，非视口顶所在章）
 		updateBookReading(bookId.value, scrollMode.value ? anchorCid : currentChapterId.value)
 	}
@@ -1157,6 +1157,8 @@
 		window.removeEventListener('mousemove', onWebMouseMove)
 		window.removeEventListener('mouseup', onWebMouseUp)
 		window.removeEventListener('wheel', onPageTouchStart)
+		document.removeEventListener('visibilitychange', onWebVisibilityChange)
+		window.removeEventListener('pagehide', onWebPageHide)
 		// #endif
 		saveProgress()
 		recordReadingSession()
@@ -2356,7 +2358,31 @@
 		window.addEventListener('mousemove', onWebMouseMove)
 		window.addEventListener('mouseup', onWebMouseUp)
 		window.addEventListener('wheel', onPageTouchStart)
+		// 时长结算兜底：uni-app x H5 页面级 onHide/onUnload 不随浏览器切标签/关标签触发（实测），
+		// 切走即结算（页面存活，普通上报链路可靠），切回重新起算；直接关标签/刷新经 pagehide 安静结算
+		document.addEventListener('visibilitychange', onWebVisibilityChange)
+		window.addEventListener('pagehide', onWebPageHide)
 	})
+
+	/** 切走标签页/最小化：结算本次阅读（含进度回写）；切回重新起算。onShow 若被框架同场景触发，
+	 *  settle 防双计与 onShown 幂等重置均无害 */
+	function onWebVisibilityChange() : void {
+		if (document.visibilityState == 'hidden') {
+			recordReadingSession()
+		} else {
+			readingClock.onShown()
+		}
+	}
+
+	/** 直接关闭标签页/刷新（未经 visibilitychange hidden）：安静结算，仅写本地镜像与离线流水队列，
+	 *  时长经下次进入书架补传聚合；进度本地落库，云端回写由下次结算/书架刷新覆盖 */
+	function onWebPageHide() : void {
+		saveProgress()
+		if (bookId.value == VIRTUAL_BOOK_ID) {
+			return
+		}
+		readingClock.settle(bookId.value, true)
+	}
 
 	// #endif
 

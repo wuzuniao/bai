@@ -877,29 +877,39 @@ export function createReadingClock(source : string) : ReadingClock {
 		onActive: (bookId : number) => {
 			const now = Date.now()
 			if (enterAt > 0 && lastActiveAt > 0 && now - lastActiveAt > READING_IDLE_TIMEOUT_MS && bookId != 0) {
-				addReadingSession(bookId, source, enterAt, lastActiveAt + READING_IDLE_TIMEOUT_MS)
+				addReadingSession(bookId, source, enterAt, lastActiveAt + READING_IDLE_TIMEOUT_MS, false)
 				enterAt = now
 			}
 			lastActiveAt = now
 		},
-		settle: (bookId : number) => {
+		settle: (bookId : number, quiet : boolean) : number => {
+			let mins = 0
 			if (enterAt > 0) {
 				const endAt = lastActiveAt > 0 ? Math.min(Date.now(), lastActiveAt + READING_IDLE_TIMEOUT_MS) : Date.now()
-				addReadingSession(bookId, source, enterAt, endAt)
+				mins = addReadingSession(bookId, source, enterAt, endAt, quiet)
 			}
 			enterAt = 0
 			lastActiveAt = 0
+			return mins
 		}
 	} as ReadingClock
 }
 
-/** 阅读会话入账（reader/pdfreader 结算统一入口）：时长统计走既有 addTodayMinutes；流水本地暂存 + 在线即传（失败保留待补传） */
-export function addReadingSession(bookId : number, source : string, startedMs : number, endedMs : number) : void {
+/** 阅读会话入账（reader/pdfreader 结算统一入口）：返回本次入账分钟数（0=不足 1 分钟丢弃）。
+ *  quiet=false 正常链路：本地镜像 + 云端分钟上报 + 流水本地暂存在线即传（失败保留待补传）；
+ *  quiet=true 卸载期安静结算（H5 关标签/刷新时页面级 onUnload 不触发）：异步请求不可靠，仅写
+ *  本地镜像与流水队列（offline=true），时长经下次进入书架的补传聚合入每日统计（防双计防丢失） */
+export function addReadingSession(bookId : number, source : string, startedMs : number, endedMs : number, quiet : boolean) : number {
 	const mins = Math.floor((endedMs - startedMs) / 60000)
 	if (mins <= 0) {
-		return
+		return 0
 	}
-	addTodayMinutes(mins)
+	if (quiet) {
+		const cur = loadStats()
+		saveStats(cur.today + mins, cur.total + mins)
+	} else {
+		addTodayMinutes(mins)
+	}
 	const list = loadPendingSessions()
 	list.push({
 		book_id: bookId,
@@ -908,15 +918,16 @@ export function addReadingSession(bookId : number, source : string, startedMs : 
 		ended_at: cnFormatMs(endedMs),
 		minutes: mins,
 		// 未登录记录：登录后补传时需聚合时长（已登录条目时长经 addTodayMinutes→分钟上报计入）
-		offline: !hasAccessToken()
+		offline: quiet || !hasAccessToken()
 	} as PendingSession)
 	while (list.length > SESSIONS_PENDING_CAP) {
 		list.shift()
 	}
 	savePendingSessions(list)
-	if (hasAccessToken()) {
+	if (!quiet && hasAccessToken()) {
 		flushPendingSessions()
 	}
+	return mins
 }
 
 /** flush 进行中标记（防结算直传与书架补传并发重传同一条目） */

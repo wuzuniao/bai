@@ -323,8 +323,37 @@
 		}
 		savePdfProgress(bookId.value, { percent: curPercent.value, ratio: pageRatio.value } as PdfProgress)
 		updateBookReading(bookId.value, -1, Math.round(curPercent.value))
-		readingClock.settle(bookId.value)
+		readingClock.settle(bookId.value, false)
 	}
+
+	// #ifdef WEB
+	onReady(() => {
+		// 时长结算兜底：uni-app x H5 页面级 onHide/onUnload 不随浏览器切标签/关标签触发（实测），
+		// 切走即结算（页面存活，普通上报链路可靠），切回重新起算；直接关标签/刷新经 pagehide 安静结算
+		document.addEventListener('visibilitychange', onWebVisibilityChange)
+		window.addEventListener('pagehide', onWebPageHide)
+	})
+
+	/** 切走标签页/最小化：结算本次阅读（含进度回写）；切回重新起算。onShow 若被框架同场景触发，
+	 *  settle 防双计与 onShown 幂等重置均无害 */
+	function onWebVisibilityChange() : void {
+		if (document.visibilityState == 'hidden') {
+			persistReading()
+		} else {
+			readingClock.onShown()
+		}
+	}
+
+	/** 直接关闭标签页/刷新（未经 visibilitychange hidden）：安静结算，仅写本地进度与离线流水队列，
+	 *  时长经下次进入书架补传聚合；云端回写由下次结算/书架刷新覆盖 */
+	function onWebPageHide() : void {
+		if (bookId.value == 0) {
+			return
+		}
+		savePdfProgress(bookId.value, { percent: curPercent.value, ratio: pageRatio.value } as PdfProgress)
+		readingClock.settle(bookId.value, true)
+	}
+	// #endif
 
 	/** 返回书架 */
 	function goBack() : void {
