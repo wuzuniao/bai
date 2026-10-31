@@ -62,11 +62,14 @@
 		return readerThemeIcon(name, props.night)
 	}
 
-	/** 目录安全读取：越界或数据未注入时返回空壳章（书签文案兜底） */
+	/** 目录安全读取：越界或数据未注入时返回空壳章（书签文案兜底）。
+	 *  App 原生端数组越界索引抛 IndexOutOfBoundsException（首帧章节未注入即中断），须先判界 */
 	function chapterAt(id : number) : Chapter {
-		const c = props.chapters[id]
-		if (c != null) {
-			return c
+		if (id >= 0 && id < props.chapters.length) {
+			const c = props.chapters[id]
+			if (c != null) {
+				return c
+			}
 		}
 		return { id: id, title: '', label: '', contentTitle: '', active: false } as Chapter
 	}

@@ -66,7 +66,7 @@
 				<view
 					v-for="(m, mi) in pageTurnModes"
 					:key="mi"
-					class="page-turn-btn"
+					class="page-turn-btn page-turn-gap"
 					:class="pageTurn === m ? 'page-turn-active' : 'page-turn-idle'"
 					:style="pageTurn === m ? '' : 'background-color:' + theme.controlBg + ';border-color:' + theme.controlBorder"
 					@click="selectPageTurn(m)"
@@ -317,7 +317,6 @@
 	.stepper-group {
 		flex-direction: row;
 		align-items: center;
-		gap: 23rpx;
 	}
 
 	.stepper-btn {
@@ -337,6 +336,9 @@
 	}
 
 	.stepper-val {
+		/* App 原生端 gap 不生效（规范 3.4）：减号/数值/加号间距由中段数值两侧 margin 承担 */
+		margin-left: 23rpx;
+		margin-right: 23rpx;
 		font-size: 27rpx;
 		font-weight: 700;
 		min-width: 46rpx;
@@ -346,7 +348,6 @@
 	.font-btn {
 		flex-direction: row;
 		align-items: center;
-		gap: 8rpx;
 		height: 69rpx;
 		padding: 0 27rpx;
 		border-radius: $bai-rounded-pill;
@@ -364,21 +365,22 @@
 		flex-direction: column;
 	}
 
+	/* App 原生端 gap 不生效（规范 3.4）：2×2 字体选项间距用「子项 margin + 容器负 margin」抵消边缘 */
 	.font-select-list {
 		flex-direction: row;
 		flex-wrap: wrap;
-		gap: 15rpx;
+		margin: -7.5rpx;
 	}
 
 	.font-option {
 		width: 260rpx;
+		margin: 7.5rpx;
 	}
 
 	.font-save-row {
 		margin-top: 19rpx;
 		flex-direction: row;
 		justify-content: flex-end;
-		gap: 15rpx;
 	}
 
 	.font-cancel-btn {
@@ -394,6 +396,7 @@
 	}
 
 	.font-save-btn {
+		margin-left: 15rpx;
 		padding: 12rpx 38rpx;
 		border-radius: $bai-rounded-pill;
 		background-color: $bai-ink;
@@ -409,7 +412,6 @@
 	.swatch-group {
 		flex-direction: row;
 		align-items: center;
-		gap: 23rpx;
 	}
 
 	.swatch {
@@ -423,6 +425,8 @@
 	}
 
 	.swatch-milky {
+		/* App 原生端 gap 不生效（规范 3.4）：两色块间距改 margin */
+		margin-left: 23rpx;
 		background-color: $bai-paper;
 		border: 1px solid $bai-pale;
 	}
@@ -431,11 +435,16 @@
 		border: 4rpx solid $bai-positive;
 	}
 
+	/* App 原生端 gap 不生效（规范 3.4）：按钮间距改子项 margin，容器负 margin 抵消首项前导量
+	   （净起始留白仍为 8rpx = -7rpx + 15rpx） */
 	.page-turn-group {
 		flex: 1;
 		flex-direction: row;
-		gap: 15rpx;
-		margin-left: 8rpx;
+		margin-left: -7rpx;
+	}
+
+	.page-turn-gap {
+		margin-left: 15rpx;
 	}
 
 	.page-turn-btn {

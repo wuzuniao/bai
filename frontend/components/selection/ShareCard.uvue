@@ -962,7 +962,6 @@
 
 	.share-actions {
 		flex-direction: row;
-		gap: 15rpx;
 		margin-top: 31rpx;
 		width: 590rpx;
 	}
@@ -983,6 +982,8 @@
 	}
 
 	.share-action-share {
+		/* App 原生端 gap 不生效（规范 3.4）：保存/分享按钮间距改 margin */
+		margin-left: 15rpx;
 		background-color: $bai-ink;
 		border-color: $bai-ink;
 	}

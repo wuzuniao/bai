@@ -39,11 +39,12 @@
 								<text class="chapter-title" :style="'color:' + titleColor">{{ chapterAt(cid).contentTitle }}</text>
 								<view class="chapter-divider"></view>
 							</view>
-							<view class="novel-body" :style="'font-size:' + fontSize + 'px;color:' + bodyColor + ';font-family:' + fontFamily">
+							<view class="novel-body">
 								<view
 									v-for="(item, vi) in chapterParagraphItems(cid)"
 									:key="cid + '-' + item.origin"
 									class="novel-paragraph para-scroll"
+									:class="vi > 0 ? 'novel-paragraph-gap' : ''"
 									:id="'scroll-para-' + cid + '-' + item.origin"
 									@longpress="onLongPress(item.origin, cid, $event, item.from, item.to)"
 									@click="onParaTap($event, item.origin, cid, item.from, item.to)"
@@ -54,7 +55,7 @@
 											:key="si"
 											:id="seg.anchor == 1 ? anchorStartId : (seg.anchor == 2 ? anchorEndId : '')"
 											:class="segClass(seg)"
-											:style="'font-size:' + fontSize + 'px'"
+											:style="'font-size:' + fontSize + 'px;color:' + bodyColor + ';font-family:' + fontFamily"
 										>{{ seg.text }}</text>
 									</text>
 								</view>
@@ -78,11 +79,12 @@
 							<text class="chapter-title" :style="'color:' + titleColor">{{ contentTitle }}</text>
 							<view class="chapter-divider"></view>
 						</view>
-						<view class="novel-body" :style="'font-size:' + fontSize + 'px;color:' + bodyColor + ';font-family:' + fontFamily">
+						<view class="novel-body">
 							<view
 								v-for="(item, vi) in currentPageItems"
 									:key="item.origin"
 									class="novel-paragraph para-page"
+									:class="vi > 0 ? 'novel-paragraph-gap' : ''"
 									:id="'ppara-' + item.origin"
 									@longpress="onLongPress(item.origin, -1, $event, item.from, item.to)"
 									@click="onParaTap($event, item.origin, -1, item.from, item.to)"
@@ -93,7 +95,7 @@
 										:key="si"
 										:id="seg.anchor == 1 ? anchorStartId : (seg.anchor == 2 ? anchorEndId : '')"
 										:class="segClass(seg)"
-										:style="'font-size:' + fontSize + 'px'"
+										:style="'font-size:' + fontSize + 'px;color:' + bodyColor + ';font-family:' + fontFamily"
 									>{{ seg.text }}</text>
 								</text>
 							</view>
@@ -118,11 +120,12 @@
 							<text class="chapter-title" :style="'color:' + titleColor">{{ prevChapterTitle }}</text>
 							<view class="chapter-divider"></view>
 						</view>
-						<view class="novel-body" :style="'font-size:' + fontSize + 'px;color:' + bodyColor + ';font-family:' + fontFamily">
+						<view class="novel-body">
 							<view
 								v-for="(item, vi) in prevPageItems"
 								:key="item.origin"
 								class="novel-paragraph"
+								:class="vi > 0 ? 'novel-paragraph-gap' : ''"
 							>
 								<text class="novel-text">
 									<text
@@ -130,7 +133,7 @@
 										:key="si"
 										:id="seg.anchor == 1 ? 'psel-anchor-start' : (seg.anchor == 2 ? 'psel-anchor-end' : '')"
 										:class="segClass(seg)"
-										:style="'font-size:' + fontSize + 'px'"
+										:style="'font-size:' + fontSize + 'px;color:' + bodyColor + ';font-family:' + fontFamily"
 									>{{ seg.text }}</text>
 								</text>
 							</view>
@@ -153,11 +156,12 @@
 							<text class="chapter-title" :style="'color:' + titleColor">{{ nextChapterTitle }}</text>
 							<view class="chapter-divider"></view>
 						</view>
-						<view class="novel-body" :style="'font-size:' + fontSize + 'px;color:' + bodyColor + ';font-family:' + fontFamily">
+						<view class="novel-body">
 							<view
 								v-for="(item, vi) in nextPageItems"
 								:key="item.origin"
 								class="novel-paragraph"
+								:class="vi > 0 ? 'novel-paragraph-gap' : ''"
 							>
 								<text class="novel-text">
 									<text
@@ -165,7 +169,7 @@
 										:key="si"
 										:id="seg.anchor == 1 ? 'nsel-anchor-start' : (seg.anchor == 2 ? 'nsel-anchor-end' : '')"
 										:class="segClass(seg)"
-										:style="'font-size:' + fontSize + 'px'"
+										:style="'font-size:' + fontSize + 'px;color:' + bodyColor + ';font-family:' + fontFamily"
 									>{{ seg.text }}</text>
 								</text>
 							</view>
@@ -277,18 +281,17 @@
 					v-for="(mp, mpi) in paragraphsOf(mcid)"
 					:key="'mp' + mcid + '-' + mpi"
 					:class="'measure-para-' + mcid"
-					:style="'font-size:' + fontSize + 'px;font-family:' + fontFamily"
 				>
-					<text class="measure-text">　　{{ mp.text }}</text>
+					<!-- App 原生端字号/字体只能落在 text 上，否则测量节点按默认字体排版，行数实测失真 -->
+					<text class="measure-text" :style="'font-size:' + fontSize + 'px;font-family:' + fontFamily">　　{{ mp.text }}</text>
 				</view>
 			</view>
 			<view
 				v-for="(probe, pri) in layoutProbes"
 				:key="'pr' + pri + '-' + probe.cid + '-' + probe.pi"
 				class="measure-probe"
-				:style="'font-size:' + fontSize + 'px;font-family:' + fontFamily"
 			>
-				<text class="measure-text">　　{{ probePrefixText(probe) }}</text>
+				<text class="measure-text" :style="'font-size:' + fontSize + 'px;font-family:' + fontFamily">　　{{ probePrefixText(probe) }}</text>
 			</view>
 		</view>
 	</view>
@@ -882,9 +885,11 @@
 	if (initCapsule != null) {
 		contentTopPx.value = initCapsule.top + initCapsule.height + 8
 	}
-	/** 底部安全区高度（px，全面屏手势条避让） */
+	/** 底部安全区高度（px，全面屏手势条避让）。
+	 *  safeArea.bottom 为 0（部分设备/旋转态/冷启动直达页面时未上报）会算出整窗高，正文区被挤出可视区，
+	 *  故仅在有效区间（0 < bottom ≤ 窗高）内换算，否则按无手势条处理 */
 	const safeAreaBottomPx = ref(0)
-	if (initSafeArea != null) {
+	if (initSafeArea != null && initSafeArea.bottom > 0 && initSafeArea.bottom <= initWin.windowHeight) {
 		safeAreaBottomPx.value = Math.max(0, initWin.windowHeight - initSafeArea.bottom)
 	}
 	/** 正文区底部留白（px）：贴底信息栏文字行（ReaderFooterBar 同式：贴底内边距 max(4, 安全区-10) + 文字行高约 19px）
@@ -1306,11 +1311,14 @@
 	const footerChapterCount = computed(() : number => {
 		return chapters.value.length - (bookHasPreface.value ? 1 : 0)
 	})
-	/** 章节安全读取：越界或数据未注入时返回空壳章（页眉/页脚/预渲染层/分享出处统一兜底） */
+	/** 章节安全读取：越界或数据未注入时返回空壳章（页眉/页脚/预渲染层/分享出处统一兜底）。
+	 *  App 原生端数组越界索引抛 IndexOutOfBoundsException（首屏渲染即中断白屏），必须先判界再取 */
 	function chapterAt(id : number) : Chapter {
-		const c = chapters.value[id]
-		if (c != null) {
-			return c
+		if (id >= 0 && id < chapters.value.length) {
+			const c = chapters.value[id]
+			if (c != null) {
+				return c
+			}
 		}
 		return { id: id, title: '', label: '', contentTitle: '', active: false } as Chapter
 	}
@@ -3225,7 +3233,6 @@
 	.chapter-label-row {
 		flex-direction: row;
 		align-items: center;
-		gap: 15rpx;
 		margin-bottom: 15rpx;
 	}
 
@@ -3237,6 +3244,8 @@
 	}
 
 	.chapter-label {
+		/* App 原生端 gap 不生效（规范 3.4）：圆点与标签间距改 margin */
+		margin-left: 15rpx;
 		font-size: 25rpx;
 		font-weight: 600;
 	}
@@ -3255,14 +3264,19 @@
 		opacity: 0.9;
 	}
 
-	/* 正文（行距 1.7 对齐主流阅读器 1.5-1.8 区间、首行缩进 2em、字距 0.02em、两端对齐、段落间距 21px） */
+	/* 正文（行距 1.7 对齐主流阅读器 1.5-1.8 区间、首行缩进 2em、字距 0.02em、两端对齐、段落间距 21px）。
+	   App 原生端 gap 不生效（规范 3.4）：段距改首段之后逐段 margin-top（与分页算法 paraGap=40rpx 同口径，
+	   续页首切片无段距） */
 	.novel-body {
 		flex-direction: column;
-		gap: 40rpx;
 	}
 
 	.novel-paragraph {
 		position: relative;
+	}
+
+	.novel-paragraph-gap {
+		margin-top: 40rpx;
 	}
 
 	.novel-text {

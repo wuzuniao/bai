@@ -383,7 +383,6 @@
 	.thought-actions {
 		flex-direction: row;
 		justify-content: flex-end;
-		gap: 15rpx;
 		margin-top: 19rpx;
 	}
 
@@ -399,6 +398,8 @@
 	}
 
 	.thought-btn-confirm {
+		/* App 原生端 gap 不生效（规范 3.4）：取消/保存间距改 margin */
+		margin-left: 15rpx;
 		padding: 12rpx 38rpx;
 		border-radius: $bai-rounded-pill;
 		background-color: $bai-ink;

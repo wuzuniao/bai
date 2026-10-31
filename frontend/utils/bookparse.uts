@@ -10,7 +10,7 @@ import { hasAccessToken } from './request.uts'
 import { t } from './i18n'
 // 词典注册（导入管线文案）
 import './locales/bookparse.uts'
-// #ifdef MP-WEIXIN || APP-ANDROID
+// #ifdef MP-WEIXIN
 import { decodeGbkBytes } from './gbk'
 // #endif
 // #ifdef APP
@@ -204,7 +204,7 @@ export function readTextFile(path : string) : Promise<string> {
 		try {
 			const fsm = uni.getFileSystemManager()
 			// vdom 引擎的 FS 同步 API 为 options-object 风格且 readSync/statSync 不可用（项目规范 3.4），
-			// 改整读：UTF-8 优先，乱码判定后按 binary 字节串经纯 JS 码表解 GBK（与微信端同一解码函数）；
+			// 改整读：UTF-8 优先，检出乱码后按 ArrayBuffer + UTS TextDecoder('gbk') 解码；
 			// readFileSync 返回可空 string，空即读取失败
 			const text = fsm.readFileSync(path, 'utf-8')
 			if (text == null) {
@@ -217,12 +217,14 @@ export function readTextFile(path : string) : Promise<string> {
 				resolve(textStr)
 				return
 			}
-			const raw = fsm.readFileSync(path, 'binary')
+			// 非 UTF-8（GBK 等）：vdom 的 readFileSync 编码白名单仅 utf-8 / base64（传 binary 抛 1200002），
+			// 不带编码读取返回 ArrayBuffer，交给 UTS TextDecoder('gbk')（Android 4.31+ 支持）解码
+			const raw = fsm.readFileSync(path, null)
 			if (raw == null) {
 				reject(new Error(t('bookparse.readFail')))
 				return
 			}
-			resolve(decodeGbkBytes(raw as string))
+			resolve(new TextDecoder('gbk').decode(raw as ArrayBuffer))
 		} catch (e) {
 			reject(new Error(t('bookparse.readFail')))
 		}

@@ -207,20 +207,11 @@
 
 	const emit = defineEmits(['sync', 'dismiss', 'toast', 'thoughtViewClosed', 'spanChanged', 'dragStarted', 'queryAnchors', 'shareImage'])
 
-	/** ===== 想法/分享子组件引用（浮层功能内聚子组件，本组件经 ref 接线转发）。类型用结构化
-	 *  暴露面而非组件名——vdom 模式下 ref<组件名 | null> 的类型 lowering 会引用未生成的
-	 *  *Class 符号导致编译失败（项目规范 3.4） ===== */
-	type ThoughtPanelExpose = {
-		showThoughtView : (quote : string, content : string, selBottom : number, selTop : number) => void
-		hideThoughtView : () => void
-		openEditor : (quote : string) => void
-	}
-	type ShareCardExpose = {
-		coverImagePath : () => string
-		open : () => void
-	}
-	const thoughtPanelRef = ref<ThoughtPanelExpose | null>(null)
-	const shareCardRef = ref<ShareCardExpose | null>(null)
+	/** ===== 想法/分享子组件引用（浮层功能内聚子组件，本组件经 ref 接线转发）。
+	 *  vdom 模式下自定义 Expose 类型 ref 会在运行时 cast 失败（项目规范 3.4），
+	 *  统一用内置 ComponentPublicInstance + $callMethod（方法名为字符串，子组件改名须同步调用点） ===== */
+	const thoughtPanelRef = ref<ComponentPublicInstance | null>(null)
+	const shareCardRef = ref<ComponentPublicInstance | null>(null)
 
 	/** 气泡定位（px，视口坐标）：体中心跟随焦点（钳制屏幕内），垂直优先上方、空间不足转下方 */
 	const popoverLeft = ref(0)
@@ -691,7 +682,7 @@
 		selSpan.value = null
 		selectionLaidOut.value = false
 		dragRects = []
-		thoughtPanelRef.value?.hideThoughtView()
+		thoughtPanelRef.value?.$callMethod('hideThoughtView')
 		emit('spanChanged', null)
 	}
 
@@ -821,29 +812,29 @@
 			doCopy()
 		} else if (action === 'idea') {
 			// 打开想法编辑器（子组件内聚：输入/保存/同步划线），编辑期间保留选区
-			thoughtPanelRef.value?.openEditor(props.text)
+			thoughtPanelRef.value?.$callMethod('openEditor', props.text)
 		} else if (action === 'underline') {
 			doUnderline()
 		} else if (action === 'query') {
 			emit('toast', t('sel.queryTodo'))
 			delayDismiss()
 		} else if (action === 'share') {
-			shareCardRef.value?.open()
+			shareCardRef.value?.$callMethod('open')
 		}
 	}
 
 	/** ===== 宿主调用入口（划词协议 + 想法查看卡片开关转发子组件） ===== */
 	function showThoughtView(quote : string, content : string, selBottom : number, selTop : number) : void {
-		thoughtPanelRef.value?.showThoughtView(quote, content, selBottom, selTop)
+		thoughtPanelRef.value?.$callMethod('showThoughtView', quote, content, selBottom, selTop)
 	}
 
 	function hideThoughtView() : void {
-		thoughtPanelRef.value?.hideThoughtView()
+		thoughtPanelRef.value?.$callMethod('hideThoughtView')
 	}
 
 	/** 转发封面路径直读转发（宿主 onShareAppMessage 经 ref 消费；emit 链真机不可靠） */
 	function coverImagePath() : string {
-		return shareCardRef.value?.coverImagePath() ?? ''
+		return (shareCardRef.value?.$callMethod('coverImagePath') as string | null) ?? ''
 	}
 
 	defineExpose({
@@ -917,7 +908,6 @@
 		position: relative;
 		flex-direction: row;
 		align-items: center;
-		gap: 6rpx;
 		padding: 12rpx 15rpx;
 		/* 背景内联绑定（夜间提亮一档与暗底区分，日间墨黑） */
 		border-radius: $bai-rounded-md;
@@ -927,13 +917,11 @@
 	.popover-body-two {
 		flex-direction: column;
 		align-items: flex-start;
-		gap: 0;
 	}
 
 	.popover-row {
 		flex-direction: row;
 		align-items: center;
-		gap: 6rpx;
 	}
 
 	.popover-divider-h {
@@ -946,7 +934,6 @@
 	.popover-btn {
 		flex-direction: column;
 		align-items: center;
-		gap: 6rpx;
 		padding: 6rpx 14rpx;
 	}
 
@@ -956,12 +943,17 @@
 	}
 
 	.popover-text {
+		/* App 原生端 gap 不生效（规范 3.4）：图标与文字间距改 margin */
+		margin-top: 6rpx;
 		font-size: 21rpx;
 		font-weight: 500;
 		color: $bai-on-primary;
 	}
 
 	.popover-divider {
+		/* App 原生端 gap 不生效（规范 3.4）：按钮与竖分隔线间距改两侧 margin */
+		margin-left: 6rpx;
+		margin-right: 6rpx;
 		width: 1px;
 		height: 46rpx;
 		background-color: rgba($bai-on-primary, 0.2);

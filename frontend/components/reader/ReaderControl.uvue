@@ -135,18 +135,11 @@
 
 	const emit = defineEmits(['back', 'toggleDrawer', 'toggleSettings', 'listen', 'selectChapter', 'goBookmark', 'goNote', 'toast', 'change', 'bookmarksChanged'])
 
-	/** ===== 子组件引用（真源在子组件，本组件只做转发与镜像派生）。类型用结构化暴露面而非
-	 *  组件名——vdom 模式下 ref<组件名 | null> 的类型 lowering 会引用未生成的 *Class 符号
-	 *  导致编译失败（项目规范 3.4） ===== */
-	type DrawerPanelExpose = {
-		addBookmark : (chapterId : number, pageIndex : number) => void
-		removeBookmark : (chapterId : number, pageIndex : number) => void
-	}
-	type SettingsPanelExpose = {
-		setTheme : (key : string) => void
-	}
-	const drawerPanelRef = ref<DrawerPanelExpose | null>(null)
-	const settingsPanelRef = ref<SettingsPanelExpose | null>(null)
+	/** ===== 子组件引用（真源在子组件，本组件只做转发与镜像派生）。
+	 *  vdom 模式下自定义 Expose 类型 ref 会在运行时 cast 失败（项目规范 3.4），
+	 *  统一用内置 ComponentPublicInstance + $callMethod（方法名为字符串，子组件改名须同步调用点） ===== */
+	const drawerPanelRef = ref<ComponentPublicInstance | null>(null)
+	const settingsPanelRef = ref<ComponentPublicInstance | null>(null)
 
 	/** ===== 设置镜像（真源在 SettingsPanel：面板 change 上行同步，用于主题派生渲染） ===== */
 	const settingsMirror = ref<ReaderSettings>(loadSettings())
@@ -194,7 +187,7 @@
 
 	/** 日/夜切换（三项导航）：真源在设置面板，经 ref 调用（面板 change 上行后本组件镜像与页面渲染同步） */
 	function toggleNightMode() : void {
-		settingsPanelRef.value?.setTheme(nightMode.value ? 'light' : 'night')
+		settingsPanelRef.value?.$callMethod('setTheme', nightMode.value ? 'light' : 'night')
 	}
 
 	/** ===== 子组件事件转发（镜像同步 + 上行页面） ===== */
@@ -225,11 +218,11 @@
 
 	/** 书签增删转发（宿主下拉/上推手势落定经 ref 调用，逐层下传书签真源组件） */
 	function addBookmark(chapterId : number, pageIndex : number) : void {
-		drawerPanelRef.value?.addBookmark(chapterId, pageIndex)
+		drawerPanelRef.value?.$callMethod('addBookmark', chapterId, pageIndex)
 	}
 
 	function removeBookmark(chapterId : number, pageIndex : number) : void {
-		drawerPanelRef.value?.removeBookmark(chapterId, pageIndex)
+		drawerPanelRef.value?.$callMethod('removeBookmark', chapterId, pageIndex)
 	}
 
 	defineExpose({
@@ -272,7 +265,6 @@
 	.menu-top-left {
 		flex-direction: row;
 		align-items: center;
-		gap: 23rpx;
 	}
 
 	/* 返回按钮与其他子页统一：图标 80rpx */
@@ -291,6 +283,8 @@
 
 	/* 书名+章节名同列（纵向排列，随 menu-top-left 垂直居中；flex:1 约束宽度使长文本省略生效） */
 	.title-col {
+		/* App 原生端 gap 不生效（规范 3.4）：返回按钮与书名列间距改 margin */
+		margin-left: 23rpx;
 		flex: 1;
 		flex-direction: column;
 	}
@@ -361,7 +355,6 @@
 		flex: 1;
 		flex-direction: column;
 		align-items: center;
-		gap: 8rpx;
 	}
 
 	.bottom-nav-icon {
@@ -370,6 +363,8 @@
 	}
 
 	.bottom-nav-text {
+		/* App 原生端 gap 不生效（规范 3.4）：图标与文字间距改 margin */
+		margin-top: 8rpx;
 		font-size: 21rpx;
 	}
 </style>

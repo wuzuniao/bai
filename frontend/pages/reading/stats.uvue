@@ -1,6 +1,6 @@
 <template>
 	<view class="page">
-		<PageShell :title="tr('stats.title')" :desc="tr('stats.desc')" @scrolltolower="onShellBottom">
+		<PageShell :title="tr('stats.title')" :desc="tr('stats.desc')" :center="false" @scrolltolower="onShellBottom">
 			<!-- 周期 Tab（周/月/年）与排行榜入口 -->
 			<view class="tabs-row">
 				<view class="tabs">

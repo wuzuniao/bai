@@ -4,14 +4,14 @@
 			<view class="settings-grip"></view>
 		</view>
 		<view class="drawer-header">
-			<view :class="drawerTab === 'catalog' ? 'drawer-tab-active' : 'drawer-tab-plain'" @click="switchDrawerTab('catalog')">
+			<view class="drawer-tab-gap" :class="drawerTab === 'catalog' ? 'drawer-tab-active' : ''" @click="switchDrawerTab('catalog')">
 				<text :class="drawerTab === 'catalog' ? 'drawer-tab-title' : 'drawer-tab-plain'">{{ t('readercomp.tabCatalog') }}</text>
 				<text v-if="drawerTab === 'catalog'" class="drawer-tab-sort" @click="onSortTap">{{ orderDesc ? '↓↑' : '⇅' }}</text>
 			</view>
-			<view :class="drawerTab === 'note' ? 'drawer-tab-active' : 'drawer-tab-plain'" @click="switchDrawerTab('note')">
+			<view class="drawer-tab-gap" :class="drawerTab === 'note' ? 'drawer-tab-active' : ''" @click="switchDrawerTab('note')">
 				<text :class="drawerTab === 'note' ? 'drawer-tab-title' : 'drawer-tab-plain'">{{ t('readercomp.tabNotes') }}</text>
 			</view>
-			<view :class="drawerTab === 'bookmark' ? 'drawer-tab-active' : 'drawer-tab-plain'" @click="switchDrawerTab('bookmark')">
+			<view :class="drawerTab === 'bookmark' ? 'drawer-tab-active' : ''" @click="switchDrawerTab('bookmark')">
 				<text :class="drawerTab === 'bookmark' ? 'drawer-tab-title' : 'drawer-tab-plain'">{{ t('readercomp.tabBookmark') }}</text>
 			</view>
 		</view>
@@ -100,13 +100,10 @@
 	}>()
 	const emit = defineEmits(['selectChapter', 'goNote', 'goBookmark', 'toast', 'changed'])
 
-	/** 书签子组件引用（书签增删 ref 转发）。类型用结构化暴露面而非组件名——vdom 模式下
-	 *  ref<组件名 | null> 的类型 lowering 会引用未生成的 *Class 符号导致编译失败（项目规范 3.4） */
-	type BookmarkPanelExpose = {
-		addBookmark : (chapterId : number, pageIndex : number) => void
-		removeBookmark : (chapterId : number, pageIndex : number) => void
-	}
-	const bookmarkPanelRef = ref<BookmarkPanelExpose | null>(null)
+	/** 书签子组件引用（书签增删 ref 转发）。vdom 模式下自定义 Expose 类型 ref 会在运行时
+	 *  cast 失败（项目规范 3.4），统一用内置 ComponentPublicInstance + $callMethod
+	 *  （方法名为字符串，子组件改名须同步调用点） */
+	const bookmarkPanelRef = ref<ComponentPublicInstance | null>(null)
 
 	/** ===== 目录抽屉（页签/排序为面板内 UI 状态，组件自管理） ===== */
 	const drawerTab = ref('catalog')
@@ -178,11 +175,11 @@
 
 	/** 书签增删转发（宿主下拉/上推手势落定经 ref 调用，逐层下传书签真源组件） */
 	function addBookmark(chapterId : number, pageIndex : number) : void {
-		bookmarkPanelRef.value?.addBookmark(chapterId, pageIndex)
+		bookmarkPanelRef.value?.$callMethod('addBookmark', chapterId, pageIndex)
 	}
 
 	function removeBookmark(chapterId : number, pageIndex : number) : void {
-		bookmarkPanelRef.value?.removeBookmark(chapterId, pageIndex)
+		bookmarkPanelRef.value?.$callMethod('removeBookmark', chapterId, pageIndex)
 	}
 
 	defineExpose({
@@ -214,14 +211,17 @@
 	.drawer-header {
 		flex-direction: row;
 		align-items: center;
-		gap: 46rpx;
 		padding: 31rpx 38rpx 23rpx 38rpx;
+	}
+
+	/* App 原生端 gap 不生效（规范 3.4）：页签间距改 margin，仅前两项加（末项不加避免尾部多余留白） */
+	.drawer-tab-gap {
+		margin-right: 46rpx;
 	}
 
 	.drawer-tab-active {
 		flex-direction: row;
 		align-items: flex-end;
-		gap: 4rpx;
 		padding-bottom: 4rpx;
 	}
 
@@ -232,12 +232,14 @@
 	}
 
 	.drawer-tab-sort {
+		margin-left: 4rpx;
 		font-size: 27rpx;
 		line-height: 34rpx;
 		font-weight: 600;
 		color: $bai-positive;
 	}
 
+	/* 仅用于页签文本（外层 view 不套此 class：App 原生端 view 上的 font-size/color 不生效且告警） */
 	.drawer-tab-plain {
 		font-size: 33rpx;
 		color: $bai-mute;

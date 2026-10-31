@@ -79,8 +79,8 @@
 					<view class="reward-head">
 						<text class="reward-title">{{ tr('reward.readEarn') }}</text>
 						<view class="reward-stat">
-							<view class="reward-stat-line"><text>{{ tr('reward.totalMinutes') }}</text><text class="reward-stat-num">{{ fmtMinuteCount(totalMinutes) }}</text><text class="reward-stat-unit">{{ tr('rewards.minute') }}</text></view>
-							<view class="reward-stat-line reward-stat-line--second"><text>{{ tr('reward.todayMinutes') }}</text><text class="reward-stat-num">{{ fmtMinuteCount(todayMinutes) }}</text><text class="reward-stat-unit">{{ tr('rewards.minute') }}</text></view>
+							<view class="reward-stat-line"><text class="reward-stat-label">{{ tr('reward.totalMinutes') }}</text><text class="reward-stat-num">{{ fmtMinuteCount(totalMinutes) }}</text><text class="reward-stat-unit">{{ tr('rewards.minute') }}</text></view>
+							<view class="reward-stat-line reward-stat-line--second"><text class="reward-stat-label">{{ tr('reward.todayMinutes') }}</text><text class="reward-stat-num">{{ fmtMinuteCount(todayMinutes) }}</text><text class="reward-stat-unit">{{ tr('rewards.minute') }}</text></view>
 						</view>
 					</view>
 					<view class="progress-track">
@@ -1146,6 +1146,10 @@
 		/* uni-app x 原生端 view 默认纵向排列，行内标签/数字/单位须显式横向 */
 		flex-direction: row;
 		align-items: center;
+	}
+
+	/* 字号/颜色逐 text 落地：App 原生端不支持 view 上的 font-size/color（告警且不继承给子 text） */
+	.reward-stat-label {
 		font-size: 23rpx;
 		color: $bai-mute;
 	}
@@ -1156,6 +1160,7 @@
 	}
 
 	.reward-stat-num {
+		font-size: 23rpx;
 		font-weight: 500;
 		color: $bai-ink;
 	}
@@ -1163,6 +1168,8 @@
 	/* 单位与数字的间距：text 前导空格原生端会被裁掉，用 margin 实现跨端一致（同书架 stats-unit 口径） */
 	.reward-stat-unit {
 		margin-left: 8rpx;
+		font-size: 23rpx;
+		color: $bai-mute;
 	}
 
 	.progress-track {

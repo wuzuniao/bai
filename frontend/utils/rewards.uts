@@ -54,9 +54,11 @@ export function fmtRemainMinutes(mins: number) : string {
 /**
  * 分钟数 → 分钟整数文本（分钟单位不计小数）
  * 用于「今日已读 / 总阅读时长」等直接展示分钟数值的位置；向下取整（已读不夸大），
- * 与 fmtRemainMinutes 的剩余时长向上取整口径区分
+ * 与 fmtRemainMinutes 的剩余时长向上取整口径区分。
+ * 以 const 函数值而非顶层 function 导出——vdom 模板直呼导入的顶层 function 会生成裸函数引用，
+ * App 编译报「找不到名称 invoke」（同 utils/i18n.uts 的 t/tf 口径）
  */
-export function fmtMinuteCount(mins: number) : string {
+export const fmtMinuteCount = (mins : number) : string => {
 	// #ifdef APP-ANDROID
 	return Math.floor(mins).toInt().toString()
 	// #endif

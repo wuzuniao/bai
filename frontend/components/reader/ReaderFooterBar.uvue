@@ -145,7 +145,6 @@
 	.footer-left {
 		flex-direction: row;
 		align-items: center;
-		gap: 15rpx;
 	}
 
 	.footer-dot {
@@ -156,6 +155,8 @@
 	}
 
 	.footer-time {
+		/* App 原生端 gap 不生效（规范 3.4）：圆点与时间间距改 margin */
+		margin-left: 15rpx;
 		font-size: 25rpx;
 		color: $bai-mute;
 	}
@@ -163,7 +164,6 @@
 	.footer-right {
 		flex-direction: row;
 		align-items: center;
-		gap: 15rpx;
 	}
 
 	.footer-progress {
@@ -172,6 +172,8 @@
 	}
 
 	.footer-percent {
+		/* App 原生端 gap 不生效（规范 3.4）：章进度与百分比间距改 margin */
+		margin-left: 15rpx;
 		font-size: 21rpx;
 		color: $bai-mute;
 		padding: 4rpx 12rpx;

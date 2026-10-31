@@ -795,8 +795,12 @@ export function buildNoteRecords(underlines : UnderlineEntry[], thoughts : Thoug
 	const records : NoteRecord[] = []
 	const usedThoughts : boolean[] = thoughts.map((_t : Thought, _i : number) : boolean => false)
 	for (const e of underlines) {
-		// 划线文本按记录所在章取：跨章划线的卡片引用不能用当前章段落数组
+		// 划线文本按记录所在章取：跨章划线的卡片引用不能用当前章段落数组；
+		// App 原生端越界索引抛 IndexOutOfBoundsException（首帧章节未注入即中断），须先判界
 		const paras = e.cid >= 0 && e.cid < chapterParas.length ? chapterParas[e.cid] : ([] as Paragraph[])
+		if (e.origin < 0 || e.origin >= paras.length) {
+			continue
+		}
 		const p = paras[e.origin]
 		if (p == null) {
 			continue
