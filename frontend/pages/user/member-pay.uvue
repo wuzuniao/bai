@@ -1,11 +1,13 @@
 <template>
 	<view class="pay-page">
-		<!-- 返回按钮：固定近黑背景使用 arrow-back-light（夜间白色变体），定位规则与 BackButton 一致；
-		     零高定位层限宽与主内容同口径，宽屏时按钮对齐内容列而非视口缘；
+		<!-- 返回按钮：固定近黑背景使用 arrow-back-light（夜间白色变体）；
+		     实高占位（margin-top 撑状态栏高度 + 按钮实高），vdom 原生渲染下 absolute 越界子元素
+		     会被裁剪致点击失效（规范 3.4），不得依赖 overflow: visible 越界；
+		     定位层限宽与主内容同口径，宽屏时按钮对齐内容列而非视口缘；
 		     Web 端不渲染（浏览器自带返回，与 BackButton 同口径） -->
 		<view class="pay-page__back-cap">
 			<!-- #ifndef WEB -->
-			<view class="pay-page__back" :style="'top:' + backTop + 'px'" @click="goBack">
+			<view class="pay-page__back" :style="'margin-top:' + backTop + 'px'" @click="goBack">
 				<image class="pay-page__back-icon" src="/static/icons/arrow-back-light.svg" mode="aspectFit" />
 			</view>
 			<!-- #endif -->
@@ -162,6 +164,7 @@
 	import { purchaseMembership } from './api/membership.uts'
 	import type { ApiResponse } from '@/utils/requestDefs.ts'
 	import { forceRefreshToken } from '@/utils/request.uts'
+	import { rpxToPx } from '@/utils/layout.uts'
 	import { t, tf } from '@/utils/i18n.uts'
 	// 词典注册（memberpay 页文案 + 公共段）
 	import '@/pages/user/locales/memberpay.uts'
@@ -172,14 +175,16 @@
 		uni.setNavigationBarTitle({ title: t('memberpay.title') })
 	})
 
-	/** 顶部定位：返回按钮取状态栏高度，内容再避让；Web 端不渲染返回键，内容距顶收紧
-	 * （-5 与 windowHeight*0.006 为视觉校准微调量，改动前需真机核对返回键与胶囊/状态栏的相对位置） */
+	/** 顶部定位：返回键实高占位，backTop 取状态栏高度（margin-top 撑位）；
+	 *  主内容 padding-top 扣除返回键层实高，保持标题区原纵向中心
+	 * （-5 与 windowHeight*0.006 为视觉校准微调量，改动前需真机核对返回键与胶囊/状态栏的相对位置；
+	 *  上方 80rpx 为返回按钮实高，样式改动需同步） */
 	const backTop = ref(44)
 	const mainTop = ref(90)
 	const win = uni.getWindowInfo()
 	if (win.statusBarHeight > 0) {
 		backTop.value = win.statusBarHeight - 5 + win.windowHeight * 0.006
-		mainTop.value = win.statusBarHeight + 90
+		mainTop.value = win.statusBarHeight + 90 - backTop.value - rpxToPx(80)
 	}
 	// #ifdef WEB
 	mainTop.value = 32
@@ -338,7 +343,7 @@
 		flex-direction: column;
 	}
 
-	/* ===== 返回按钮（零高定位层：限宽与主内容同口径，Web 480 / 其余 750） ===== */
+	/* ===== 返回按钮（实高占位层：限宽与主内容同口径，Web 480 / 其余 750） ===== */
 	.pay-page__back-cap {
 		width: 100%;
 		/* #ifdef WEB */
@@ -349,15 +354,10 @@
 		/* #endif */
 		margin-left: auto;
 		margin-right: auto;
-		position: relative;
-		/* 零高层显式放开裁剪（uni-h5 view 基础样式默认 hidden），否则 absolute 按钮不可见 */
-		overflow: visible;
 	}
 
 	.pay-page__back {
-		position: absolute;
-		left: 48rpx;
-		z-index: 10;
+		margin-left: 48rpx;
 		width: 80rpx;
 		height: 80rpx;
 		flex-direction: row;
@@ -489,7 +489,7 @@
 		font-size: 28rpx;
 		line-height: 28rpx;
 		font-weight: 400;
-		text-decoration: line-through;
+		text-decoration-line: line-through;
 	}
 
 	.pay-page__pill {
@@ -514,7 +514,9 @@
 	/* ===== 底部操作区 ===== */
 	.pay-page__action {
 		padding: 24rpx 48rpx;
+		/* #ifndef APP */
 		padding-bottom: calc(24rpx + env(safe-area-inset-bottom));
+		/* #endif */
 		box-sizing: border-box;
 		flex-direction: column;
 	}
@@ -568,7 +570,10 @@
 
 	.pay-sheet {
 		box-sizing: border-box;
-		padding: 40rpx 40rpx calc(40rpx + env(safe-area-inset-bottom));
+		padding: 40rpx;
+		/* #ifndef APP */
+		padding-bottom: calc(40rpx + env(safe-area-inset-bottom));
+		/* #endif */
 		background-color: #2f3131;
 		border-top-width: 1px;
 		border-top-style: solid;
@@ -740,7 +745,9 @@
 		background-color: #0e0f0c;
 		z-index: 70;
 		padding: 0 48rpx;
+		/* #ifndef APP */
 		padding-bottom: calc(48rpx + env(safe-area-inset-bottom));
+		/* #endif */
 		flex-direction: column;
 	}
 

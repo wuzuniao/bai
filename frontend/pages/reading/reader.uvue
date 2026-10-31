@@ -3263,7 +3263,10 @@
 	.novel-text {
 		line-height: 1.7;
 		letter-spacing: 0.4rpx;
+		/* App 的 text-align 仅支持 left/center/right，两端对齐在 App 回落默认左对齐 */
+		/* #ifndef APP */
 		text-align: justify;
+		/* #endif */
 	}
 
 	/* 每行字数标定节点：屏幕外占位，折行条件（宽度/字号/字距/行高/字体）与正文 novel-text 完全同款 */
@@ -3290,15 +3293,19 @@
 
 	/* 划线标注（划线统一为连续实线，颜色取弱文本 mute；纹理与首页诗词卡片划线条带保持一致） */
 	.para-underlined {
-		text-decoration: underline;
-		text-decoration-style: solid;
+		/* App 仅支持 text-decoration-line，线色/线型回落默认（非 App 端保持弱文本色实线） */
+		text-decoration-line: underline;
+		/* #ifndef APP */
 		text-decoration-color: $bai-mute;
+		/* #endif */
 	}
 
 	/* 想法段：实线下划线（正蓝色），与划线波浪线区分，点击可查看想法 */
 	.para-thought {
-		text-decoration: underline;
+		text-decoration-line: underline;
+		/* #ifndef APP */
 		text-decoration-color: $bai-positive;
+		/* #endif */
 	}
 
 	/* 划词高亮（Stitch: 正蓝 14% 背景；微圆角 2px，rounded 令牌未覆盖，保留字面值） */

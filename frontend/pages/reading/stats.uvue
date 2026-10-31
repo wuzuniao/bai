@@ -1137,7 +1137,8 @@
 
 	.metric-value-row {
 		flex-direction: row;
-		align-items: baseline;
+		/* App 不支持 baseline（仅 center/flex-start/flex-end/stretch）：底对齐 + 单位上移近似基线 */
+		align-items: flex-end;
 		margin-top: 8rpx;
 	}
 
@@ -1151,6 +1152,8 @@
 		color: $bai-body;
 		font-size: 26rpx;
 		margin-left: 8rpx;
+		/* 补偿 40rpx 数字与 26rpx 单位的字体降深差，使基线视觉对齐 */
+		margin-bottom: 3rpx;
 	}
 
 	/* ── 柱状图（纯 view：右侧纵坐标刻度 + 列 flex:1，柱底部对齐填充块） ── */

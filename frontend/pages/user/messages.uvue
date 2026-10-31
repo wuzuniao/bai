@@ -214,7 +214,9 @@
 
 <style lang="scss">
 	.messages-page {
+		/* #ifndef APP */
 		min-height: 100vh;
+		/* #endif */
 		background-color: $bai-canvas-soft;
 		position: relative;
 		box-sizing: border-box;
@@ -235,7 +237,9 @@
 		padding-right: 48rpx;
 		padding-bottom: 64rpx;
 		box-sizing: border-box;
+		/* #ifndef APP */
 		min-height: 100vh;
+		/* #endif */
 	}
 
 	/* ===== 工具栏：分类（公告）+ 全部已读 ===== */

@@ -54,7 +54,8 @@
 		max-width: 336px;
 		/* #endif */
 		/* #ifndef WEB */
-		max-width: 70%;
+		/* App 不支持百分比 max-width；525rpx = 750 设计宽的 70% */
+		max-width: 525rpx;
 		/* #endif */
 	}
 

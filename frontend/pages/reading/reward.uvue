@@ -924,7 +924,8 @@
 
 	.checkin-title-row {
 		flex-direction: row;
-		align-items: baseline;
+		/* App 不支持 baseline（仅 center/flex-start/flex-end/stretch）：底对齐 + 小字号上移近似基线 */
+		align-items: flex-end;
 		gap: 8rpx;
 	}
 
@@ -932,6 +933,7 @@
 		font-size: 35rpx;
 		font-weight: 600;
 		color: $bai-ink;
+		margin-bottom: 2rpx;
 	}
 
 	.checkin-days {
@@ -1112,7 +1114,7 @@
 		font-size: 21rpx;
 		font-weight: 500;
 		color: $bai-ink;
-		text-decoration: underline;
+		text-decoration-line: underline;
 	}
 
 	/* 阅读领铜币卡（令牌 card-content: 白底 圆角 xl 24px 内边距 24px + 进度条 + 五档阶梯） */
@@ -1254,8 +1256,9 @@
 		/* 内边距收窄配合档位卡紧凑化（文字大小维持原值）；tag 与标题同行放不下时经 title-row wrap 掉行，卡高随内容 */
 		padding: 2rpx 12rpx;
 		border-radius: $bai-rounded-sm;
-		/* 极窄屏下标签自身超宽时约束到行宽，「再额外赠送」小字自动换行 */
-		max-width: 100%;
+		/* 极窄屏下标签自身超宽时约束到行宽，「再额外赠送」小字自动换行；
+		   App 不支持百分比 max-width，取行内可用宽度上界（750 设计宽基准） */
+		max-width: 453rpx;
 	}
 
 	.tier-tag-badge {

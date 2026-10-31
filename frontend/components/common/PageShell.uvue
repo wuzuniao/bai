@@ -2,7 +2,7 @@
 	<view class="page-shell">
 		<BackButton />
 		<scroll-view class="page-shell__scroll" direction="vertical" :show-scrollbar="false" @scrolltolower="onScrollBottom">
-			<view class="page-shell__canvas" :class="center ? 'page-shell__canvas--center' : ''" :style="'padding-top:' + mainTop + 'px'">
+			<view class="page-shell__canvas" :class="center ? 'page-shell__canvas--center' : ''" :style="'padding-top:' + mainTop + 'px' + (center && appViewportH > 0 ? ';min-height:' + appViewportH + 'px' : '')">
 				<PageHeader v-if="title.length > 0" :title="title" :desc="desc" />
 				<slot />
 			</view>
@@ -43,6 +43,11 @@
 	// #ifdef WEB
 	mainTop.value = 32
 	// #endif
+	/** App 视口高（px）：App 不支持 min-height: 100vh，表单页居中所需最小高度由窗口高注入 */
+	const appViewportH = ref(0)
+	// #ifdef APP
+	appViewportH.value = uni.getWindowInfo().windowHeight
+	// #endif
 
 	function onScrollBottom() : void {
 		emit('scrolltolower')
@@ -77,9 +82,11 @@
 		flex-direction: column;
 	}
 
-	/* 表单页画布：垂直居中并占满视口（登录/注册/找回） */
+	/* 表单页画布：垂直居中并占满视口（登录/注册/找回；App 不支持 100vh，最小高度由 appViewportH 内联注入） */
 	.page-shell__canvas--center {
+		/* #ifndef APP */
 		min-height: 100vh;
+		/* #endif */
 		padding-bottom: 72rpx;
 		justify-content: center;
 		align-items: center;
