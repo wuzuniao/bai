@@ -13,47 +13,51 @@
 			<!-- #endif -->
 		</view>
 
-		<!-- 主内容：标题区 / 权益卡 / 价格区（单屏布局，无滚动） -->
-		<view class="pay-page__main" :style="'padding-top:' + mainTop + 'px'">
-			<view class="pay-page__heading">
-				<text class="pay-page__title">{{ t('memberpay.planName') }}</text>
-				<text class="pay-page__subtitle">{{ t('memberpay.subtitle') }}</text>
-			</view>
+		<!-- 主内容：标题区 / 权益卡 / 价格区。
+		     内容总高固定（约 1124rpx），9:16 屏上超出可视区；普通 view + flex:1 居中会让内容
+		     上下溢出并被容器裁剪（APP 实测标题上半截被裁），故外层改为滚动容器：短屏滚动可达、长屏无滚动 -->
+		<scroll-view class="pay-page__scroll" direction="vertical" :show-scrollbar="false">
+			<view class="pay-page__main" :style="'padding-top:' + mainTop + 'px'">
+				<view class="pay-page__heading">
+					<text class="pay-page__title">{{ t('memberpay.planName') }}</text>
+					<text class="pay-page__subtitle">{{ t('memberpay.subtitle') }}</text>
+				</view>
 
-			<view class="pay-page__perks">
-				<view class="pay-page__perk">
-					<text class="pay-page__perk-title">{{ t('memberpay.perk1Title') }}</text>
-					<text class="pay-page__perk-text">{{ t('memberpay.perk1Text') }}</text>
+				<view class="pay-page__perks">
+					<view class="pay-page__perk">
+						<text class="pay-page__perk-title">{{ t('memberpay.perk1Title') }}</text>
+						<text class="pay-page__perk-text">{{ t('memberpay.perk1Text') }}</text>
+					</view>
+					<view class="pay-page__perk pay-page__perk--second">
+						<text class="pay-page__perk-title">{{ t('memberpay.perk2Title') }}</text>
+						<text class="pay-page__perk-text">{{ t('memberpay.perk2Text') }}</text>
+					</view>
 				</view>
-				<view class="pay-page__perk pay-page__perk--second">
-					<text class="pay-page__perk-title">{{ t('memberpay.perk2Title') }}</text>
-					<text class="pay-page__perk-text">{{ t('memberpay.perk2Text') }}</text>
-				</view>
-			</view>
 
-			<view class="pay-page__pricing">
-				<view class="pay-page__price-row">
-					<!-- #ifdef APP -->
-					<text class="pay-page__price">¥6</text>
-					<!-- #endif -->
-					<!-- #ifdef MP-WEIXIN -->
-					<text class="pay-page__price">1 {{ t('memberpay.coin') }}</text>
-					<!-- #endif -->
-					<text class="pay-page__price-unit">{{ t('memberpay.priceUnit') }}</text>
-				</view>
-				<view class="pay-page__price-meta">
-					<!-- #ifdef APP -->
-					<text class="pay-page__price-origin">{{ t('memberpay.priceOriginApp') }}</text>
-					<!-- #endif -->
-					<!-- #ifdef MP-WEIXIN -->
-					<text class="pay-page__price-origin">{{ t('memberpay.priceOriginMp') }}</text>
-					<!-- #endif -->
-					<view class="pay-page__pill">
-						<text class="pay-page__pill-text">{{ t('memberpay.save') }}</text>
+				<view class="pay-page__pricing">
+					<view class="pay-page__price-row">
+						<!-- #ifdef APP -->
+						<text class="pay-page__price">¥6</text>
+						<!-- #endif -->
+						<!-- #ifdef MP-WEIXIN -->
+						<text class="pay-page__price">1 {{ t('memberpay.coin') }}</text>
+						<!-- #endif -->
+						<text class="pay-page__price-unit">{{ t('memberpay.priceUnit') }}</text>
+					</view>
+					<view class="pay-page__price-meta">
+						<!-- #ifdef APP -->
+						<text class="pay-page__price-origin">{{ t('memberpay.priceOriginApp') }}</text>
+						<!-- #endif -->
+						<!-- #ifdef MP-WEIXIN -->
+						<text class="pay-page__price-origin">{{ t('memberpay.priceOriginMp') }}</text>
+						<!-- #endif -->
+						<view class="pay-page__pill">
+							<text class="pay-page__pill-text">{{ t('memberpay.save') }}</text>
+						</view>
 					</view>
 				</view>
 			</view>
-		</view>
+		</scroll-view>
 
 		<!-- 底部操作区：APP 端纯展示（应用商店内购待接入）；微信小程序端点击弹出支付确认卡 -->
 		<view class="pay-page__action">
@@ -176,7 +180,7 @@
 	})
 
 	/** 顶部定位：返回键实高占位，backTop 取状态栏高度（margin-top 撑位）；
-	 *  主内容 padding-top 扣除返回键层实高，保持标题区原纵向中心
+	 *  主内容 padding-top 扣除返回键层实高，保持标题区距页顶的原视觉间距（滚动区顶部留白）
 	 * （-5 与 windowHeight*0.006 为视觉校准微调量，改动前需真机核对返回键与胶囊/状态栏的相对位置；
 	 *  上方 80rpx 为返回按钮实高，样式改动需同步） */
 	const backTop = ref(44)
@@ -370,9 +374,14 @@
 		height: 80rpx;
 	}
 
-	/* ===== 主内容（宽屏限宽居中，与 PageShell 画布同口径：Web 480 / 其余 750） ===== */
-	.pay-page__main {
+	/* ===== 主内容滚动区（短屏内容可滚动，长屏无滚动；限宽与居中由内部 main 承担） ===== */
+	.pay-page__scroll {
 		flex: 1;
+		width: 100%;
+	}
+
+	/* 主内容（宽屏限宽居中，与 PageShell 画布同口径：Web 480 / 其余 750） */
+	.pay-page__main {
 		width: 100%;
 		/* #ifdef WEB */
 		max-width: 480px;
@@ -387,7 +396,6 @@
 		padding-right: 48rpx;
 		padding-bottom: 48rpx;
 		flex-direction: column;
-		justify-content: center;
 	}
 
 	/* 标题区 */
@@ -400,7 +408,8 @@
 	.pay-page__title {
 		color: #e8ebe6;
 		font-size: 96rpx;
-		line-height: 104rpx;
+		/* 行高 1.25em：行高小于字形高度时 App 原生端会裁掉字顶（项目规范 3.3） */
+		line-height: 120rpx;
 		font-weight: 700;
 		text-align: center;
 	}
@@ -487,7 +496,7 @@
 	.pay-page__price-origin {
 		color: #868685;
 		font-size: 28rpx;
-		line-height: 28rpx;
+		line-height: 35rpx;
 		font-weight: 400;
 		text-decoration-line: line-through;
 	}

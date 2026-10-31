@@ -233,7 +233,7 @@
 
 	.drawer-tab-sort {
 		font-size: 27rpx;
-		line-height: 27rpx;
+		line-height: 34rpx;
 		font-weight: 600;
 		color: $bai-positive;
 	}

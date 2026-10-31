@@ -394,7 +394,8 @@
 		flex-shrink: 0;
 		color: $bai-ink;
 		font-size: 112rpx;
-		line-height: 112rpx;
+		/* 行高 1.25em：行高小于字形高度时 App 原生端会裁掉字顶（项目规范 3.3） */
+		line-height: 140rpx;
 		font-weight: 700;
 		font-style: italic;
 		lines: 1;
@@ -422,7 +423,7 @@
 	.settings-page__kinetic-name {
 		color: $bai-canvas;
 		font-size: 64rpx;
-		line-height: 64rpx;
+		line-height: 80rpx;
 		font-weight: 400;
 		lines: 1;
 		text-overflow: ellipsis;

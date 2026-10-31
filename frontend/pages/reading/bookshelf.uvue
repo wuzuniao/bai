@@ -1424,7 +1424,8 @@
 		margin-left: 8rpx;
 		padding-bottom: 2rpx;
 		font-size: 23rpx;
-		line-height: 23rpx;
+		/* 行高 1.25em：行高小于字形高度时 App 原生端会裁掉字顶（项目规范 3.3）；同组小字同理 */
+		line-height: 29rpx;
 		font-weight: 600;
 		color: $bai-ink;
 	}
@@ -1432,7 +1433,7 @@
 	.stats-label {
 		margin-top: 8rpx;
 		font-size: 19rpx;
-		line-height: 19rpx;
+		line-height: 24rpx;
 		font-weight: 500;
 		color: $bai-mute;
 	}
@@ -1448,7 +1449,7 @@
 
 	.stats-pill-text {
 		font-size: 23rpx;
-		line-height: 23rpx;
+		line-height: 29rpx;
 		font-weight: 500;
 		color: $bai-ink;
 	}
@@ -1465,7 +1466,7 @@
 	.stats-pill-coin {
 		margin-left: 12rpx;
 		font-size: 23rpx;
-		line-height: 23rpx;
+		line-height: 29rpx;
 		font-weight: 600;
 		color: $bai-warning-deep;
 	}
@@ -1660,7 +1661,7 @@
 
 	.nav-finish-text {
 		font-size: 23rpx;
-		line-height: 23rpx;
+		line-height: 29rpx;
 		font-weight: 600;
 		color: $bai-on-primary;
 	}
@@ -1711,7 +1712,7 @@
 	.style-btn-text {
 		margin-left: 8rpx;
 		font-size: 23rpx;
-		line-height: 23rpx;
+		line-height: 29rpx;
 		font-weight: 500;
 		color: $bai-body;
 	}
@@ -1728,7 +1729,7 @@
 
 	.edit-delete-text {
 		font-size: 23rpx;
-		line-height: 23rpx;
+		line-height: 29rpx;
 		font-weight: 600;
 		color: $bai-negative;
 	}
@@ -1872,7 +1873,7 @@
 
 	.delete-cancel-text {
 		font-size: 23rpx;
-		line-height: 23rpx;
+		line-height: 29rpx;
 		font-weight: 600;
 		color: $bai-body;
 	}
@@ -1886,7 +1887,7 @@
 
 	.delete-confirm-text {
 		font-size: 23rpx;
-		line-height: 23rpx;
+		line-height: 29rpx;
 		font-weight: 600;
 		color: $bai-on-primary;
 	}

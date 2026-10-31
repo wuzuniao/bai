@@ -29,7 +29,8 @@
 	.page-header__title {
 		color: $bai-ink;
 		font-size: 64rpx;
-		line-height: 72rpx;
+		/* 行高 1.25em：行高小于字形高度时 App 原生端会裁掉字顶（项目规范 3.3） */
+		line-height: 80rpx;
 		font-weight: 600;
 	}
 
