@@ -121,7 +121,6 @@
 <script setup lang="uts">
 	import BackButton from '@/components/common/BackButton.uvue'
 	import PageHeader from '@/components/common/PageHeader.uvue'
-	import { mainTopPx } from '@/utils/layout.uts'
 	import { getTodayMinutes, getTotalMinutes } from '@/utils/books.uts'
 	import type { ApiResponse } from '@/utils/requestDefs.ts'
 	import { hasAccessToken } from '@/utils/request.uts'
@@ -204,8 +203,12 @@
 		return tf('reward.makeupLeftN', [makeupLeft.value.toString()])
 	})
 
-	/** 顶部留白：返回按钮（状态栏高度 + 40px）之下再留 12px（计算逻辑见 utils/layout.uts） */
-	const mainTop = ref(mainTopPx())
+	// 顶部留白：非 Web 端返回按钮已实高占位（状态栏 + 40px），画布只留按钮下 12px
+	const mainTop = ref(12)
+	// Web 端不渲染返回键，页头距顶 32px
+	// #ifdef WEB
+	mainTop.value = 32
+	// #endif
 
 	/** 今日星期（1=周一 ... 7=周日，自然周口径） */
 	function getTodayWeekday() : number {
@@ -235,21 +238,20 @@
 	})
 	// #endif
 
-	onShow(() => {
-		if (hasAccessToken()) {
-			fetchActivitySummary().then((res: ApiResponse) => {
-				if (res.code == 0 && res.data != null) {
-					applySummary(res.data!)
-				}
-			}, (_e: Error) => {
-				// 云端失败降级：阅读分钟走本地缓存，其余保持未签/未领取默认
-				applyLocalFallback()
-			})
-		} else {
-			applyLocalFallback()
-		}
-	})
 
+
+
+	/** 默认签到格（未登录/兜底：按星期奖励档构建未签格） */
+	function buildDefaultDay(weekday: number) : DayView {
+		return {
+			weekday: weekday,
+			date: weekDateOf(weekday),
+			label: weekLabel(weekday),
+			reward: DEFAULT_WEEK_REWARDS[weekday - 1],
+			checked: false,
+			isToday: weekday == getTodayWeekday()
+		} as DayView
+	}
 	/** 云端聚合数据应用（嵌套对象经索引访问 + null 判断后 as 转换，见 request.uts uts2js 说明） */
 	function applySummary(data: UTSJSONObject) : void {
 		const balanceRaw = data['balance']
@@ -278,7 +280,7 @@
 			const next: DayView[] = []
 			if (arr != null && arr.length == 7) {
 				for (let i = 0; i < arr.length; i++) {
-					const item = arr[i]
+					const item = arr[i] as UTSJSONObject
 					const weekday = item.getNumber('weekday') ?? (i + 1)
 					next.push({
 						weekday: weekday,
@@ -301,7 +303,7 @@
 		if (tierArr != null && tierArr.length > 0) {
 			const next: TierView[] = []
 			for (let i = 0; i < tierArr.length; i++) {
-				const item = tierArr[i]
+				const item = tierArr[i] as UTSJSONObject
 				const fallback = i < REWARD_TIERS.length ? REWARD_TIERS[i] : null
 				next.push({
 					minutes: item.getNumber('tier_minutes') ?? (fallback != null ? fallback.minutes : 0),
@@ -315,7 +317,6 @@
 			tiers.value = next
 		}
 	}
-
 	/** 未登录/云端失败兜底：阅读分钟走本地缓存，签到格全未签、档位按本地分钟推算 */
 	function applyLocalFallback() : void {
 		const local = getTodayMinutes()
@@ -340,18 +341,20 @@
 		}
 		tiers.value = nextTiers
 	}
-
-	/** 默认签到格（未登录/兜底：按星期奖励档构建未签格） */
-	function buildDefaultDay(weekday: number) : DayView {
-		return {
-			weekday: weekday,
-			date: weekDateOf(weekday),
-			label: weekLabel(weekday),
-			reward: DEFAULT_WEEK_REWARDS[weekday - 1],
-			checked: false,
-			isToday: weekday == getTodayWeekday()
-		} as DayView
-	}
+	onShow(() => {
+		if (hasAccessToken()) {
+			fetchActivitySummary().then((res: ApiResponse) => {
+				if (res.code == 0 && res.data != null) {
+					applySummary(res.data!)
+				}
+			}, (_e: Error) => {
+				// 云端失败降级：阅读分钟走本地缓存，其余保持未签/未领取默认
+				applyLocalFallback()
+			})
+		} else {
+			applyLocalFallback()
+		}
+	})
 
 	/** 响应内余额与今日已获应用（签到/领取成功后回填） */
 	function applyBalanceFromData(d: UTSJSONObject) : void {
@@ -367,83 +370,7 @@
 
 	// ==================== 签到 ====================
 
-	function onDayTap(d: DayView) : void {
-		if (!d.isToday) {
-			if (isDayMissed(d)) {
-				makeupDay(d)
-			} else if (d.checked) {
-				showToast(tr('toast.dayCheckedAlready'))
-			} else {
-				showToast(tr('toast.dayNotArrived'))
-			}
-			return
-		}
-		if (checkedToday.value) {
-			showToast(tr('toast.todayCheckedAlready'))
-			return
-		}
-		if (!hasAccessToken()) {
-			showToast(tr('toast.loginFirst'))
-			return
-		}
-		if (checkinLoading.value) {
-			return
-		}
-		checkinLoading.value = true
-		postCheckin().then((res: ApiResponse) => {
-			checkinLoading.value = false
-			if (res.code == 0 && res.data != null) {
-				const data = res.data!
-				const reward = data.getNumber('reward') ?? 0
-				checkedToday.value = true
-				streakDays.value = data.getNumber('streak_days') ?? (streakDays.value + 1)
-				applyBalanceFromData(data)
-				markDayChecked(getTodayWeekday())
-				showToast(tf('toast.checkinOkN', [reward.toString()]))
-			}
-		}, (e: Error) => {
-			checkinLoading.value = false
-			showToast(e.message)
-		})
-	}
 
-	/**
-	 * 会员补签漏签日（黑铁及以上每月 3 次；奖励按被补日星期基准档发放）
-	 * 前端本地 roles 判定仅做交互引导，会员身份与限额以后端令牌比对为准
-	 */
-	function makeupDay(d: DayView) : void {
-		if (!hasAccessToken()) {
-			showToast(tr('toast.makeupLoginFirst'))
-			return
-		}
-		if (!isMember.value) {
-			showToast(tr('toast.makeupMemberOnly'))
-			return
-		}
-		if (makeupLeft.value <= 0) {
-			showToast(tr('toast.makeupQuotaUsed'))
-			return
-		}
-		if (makeupBusy.value) {
-			return
-		}
-		makeupBusy.value = true
-		postCheckinMakeup(d.date).then((res: ApiResponse) => {
-			makeupBusy.value = false
-			if (res.code == 0 && res.data != null) {
-				const data = res.data!
-				const reward = data.getNumber('reward') ?? 0
-				makeupUsed.value = data.getNumber('makeup_used') ?? (makeupUsed.value + 1)
-				streakDays.value = data.getNumber('streak_days') ?? streakDays.value
-				applyBalanceFromData(data)
-				markDayChecked(d.weekday)
-				showToast(tf('toast.makeupOkN', [reward.toString()]))
-			}
-		}, (e: Error) => {
-			makeupBusy.value = false
-			showToast(e.message)
-		})
-	}
 
 	/** 签到成功后本地格子状态更新（整体替换数组确保视图刷新） */
 	function markDayChecked(weekday: number) : void {
@@ -469,37 +396,6 @@
 
 	// ==================== 阅读档位 ====================
 
-	function onTierTap(t: TierView) : void {
-		if (t.state == 'claimed') {
-			return
-		}
-		if (t.state == 'claimable') {
-			if (!hasAccessToken()) {
-				showToast(tr('toast.claimLoginFirst'))
-				return
-			}
-			if (claimBusy.value) {
-				return
-			}
-			claimBusy.value = true
-			claimReadingReward(t.minutes).then((res: ApiResponse) => {
-				claimBusy.value = false
-				if (res.code == 0 && res.data != null) {
-					const data = res.data!
-					const reward = data.getNumber('reward') ?? tierTotalReward(t)
-					applyBalanceFromData(data)
-					setTierState(t.minutes, 'claimed')
-					showToast(tf('toast.claimOkN', [reward.toString()]))
-				}
-			}, (e: Error) => {
-				claimBusy.value = false
-				showToast(e.message)
-			})
-			return
-		}
-		// 未达成：去阅读累计时长
-		goReading()
-	}
 
 	/** 档位状态更新（整体替换数组确保视图刷新） */
 	function setTierState(minutes: number, state: string) : void {
@@ -726,7 +622,7 @@
 	}
 
 	function tierDesc(t: TierView) : string {
-		const total = tierTotalReward(t)
+		const total = tierTotalReward(t.base, t.bonus)
 		if (t.state == 'claimed') {
 			return tf('reward.tierClaimedN', [total.toString()])
 		}
@@ -782,12 +678,119 @@
 			toastVisible.value = false
 		}, 1500)
 	}
+	/**
+	 * 会员补签漏签日（黑铁及以上每月 3 次；奖励按被补日星期基准档发放）
+	 * 前端本地 roles 判定仅做交互引导，会员身份与限额以后端令牌比对为准
+	 */
+	function makeupDay(d: DayView) : void {
+		if (!hasAccessToken()) {
+			showToast(tr('toast.makeupLoginFirst'))
+			return
+		}
+		if (!isMember.value) {
+			showToast(tr('toast.makeupMemberOnly'))
+			return
+		}
+		if (makeupLeft.value <= 0) {
+			showToast(tr('toast.makeupQuotaUsed'))
+			return
+		}
+		if (makeupBusy.value) {
+			return
+		}
+		makeupBusy.value = true
+		postCheckinMakeup(d.date).then((res: ApiResponse) => {
+			makeupBusy.value = false
+			if (res.code == 0 && res.data != null) {
+				const data = res.data!
+				const reward = data.getNumber('reward') ?? 0
+				makeupUsed.value = data.getNumber('makeup_used') ?? (makeupUsed.value + 1)
+				streakDays.value = data.getNumber('streak_days') ?? streakDays.value
+				applyBalanceFromData(data)
+				markDayChecked(d.weekday)
+				showToast(tf('toast.makeupOkN', [reward.toString()]))
+			}
+		}, (e: Error) => {
+			makeupBusy.value = false
+			showToast(e.message)
+		})
+	}
+	function onDayTap(d: DayView) : void {
+		if (!d.isToday) {
+			if (isDayMissed(d)) {
+				makeupDay(d)
+			} else if (d.checked) {
+				showToast(tr('toast.dayCheckedAlready'))
+			} else {
+				showToast(tr('toast.dayNotArrived'))
+			}
+			return
+		}
+		if (checkedToday.value) {
+			showToast(tr('toast.todayCheckedAlready'))
+			return
+		}
+		if (!hasAccessToken()) {
+			showToast(tr('toast.loginFirst'))
+			return
+		}
+		if (checkinLoading.value) {
+			return
+		}
+		checkinLoading.value = true
+		postCheckin().then((res: ApiResponse) => {
+			checkinLoading.value = false
+			if (res.code == 0 && res.data != null) {
+				const data = res.data!
+				const reward = data.getNumber('reward') ?? 0
+				checkedToday.value = true
+				streakDays.value = data.getNumber('streak_days') ?? (streakDays.value + 1)
+				applyBalanceFromData(data)
+				markDayChecked(getTodayWeekday())
+				showToast(tf('toast.checkinOkN', [reward.toString()]))
+			}
+		}, (e: Error) => {
+			checkinLoading.value = false
+			showToast(e.message)
+		})
+	}
 
 	/** "去阅读"：跳书架选书（阅读器需指定书籍打开，无上下文不直达正文页） */
 	function goReading() : void {
 		uni.navigateTo({
 			url: '/pages/reading/bookshelf'
 		})
+	}
+	function onTierTap(t: TierView) : void {
+		if (t.state == 'claimed') {
+			return
+		}
+		if (t.state == 'claimable') {
+			if (!hasAccessToken()) {
+				showToast(tr('toast.claimLoginFirst'))
+				return
+			}
+			if (claimBusy.value) {
+				return
+			}
+			claimBusy.value = true
+			claimReadingReward(t.minutes).then((res: ApiResponse) => {
+				claimBusy.value = false
+				if (res.code == 0 && res.data != null) {
+					const data = res.data!
+					const reward = data.getNumber('reward') ?? tierTotalReward(t.base, t.bonus)
+					applyBalanceFromData(data)
+					setTierState(t.minutes, 'claimed')
+					showToast(tf('toast.claimOkN', [reward.toString()]))
+				}
+			}, (e: Error) => {
+				claimBusy.value = false
+				showToast(e.message)
+			})
+			return
+		}
+		// 未达成：去阅读累计时长
+		goReading()
 	}
 
 	/** 补签"查看"：跳转会员支付页（月卡每月赠 3 次补签） */

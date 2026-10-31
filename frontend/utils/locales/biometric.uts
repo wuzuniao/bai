@@ -2,13 +2,13 @@
  * 指纹登录词典段（utils/biometric.uts）
  * 模块载入时注册进 i18n 全局词典；biometric.uts 引入本文件即完成注册。
  */
-import { registerDict, Dict } from '../i18n'
+import { registerDict } from '../i18n'
 
-const zh: Dict = new Map<string, string>([
+const zh = new Map<string, string>([
 	['biometric.authContent', '请验证指纹以登录']
 ])
 
-const en: Dict = new Map<string, string>([
+const en = new Map<string, string>([
 	['biometric.authContent', 'Verify your fingerprint to sign in']
 ])
 

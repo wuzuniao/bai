@@ -14,8 +14,8 @@
 	/**
 	 * PageShell —— 次级页面骨架组件（返回按钮 + 滚动画布 + 页头）
 	 * --------------------------------------------------------------------------
-	 * 收敛 user 子包与活动页共用的页面壳：BackButton 定位、状态栏避让
-	 * （mainTopPx，utils/layout.uts）、画布左右 48rpx/底部 64rpx 内边距与 PageHeader。
+	 * 收敛 user 子包与活动页共用的页面壳：BackButton 定位（组件实高占位，vdom 越界
+	 * 裁剪见规范 3.4）、画布左右 48rpx/底部 64rpx 内边距与 PageHeader。
 	 * center=true 用于登录/注册/找回等表单页（画布垂直居中 + 占满视口高）；
 	 * title 传空串时不渲染 PageHeader（标题在卡片内的页面）。
 	 * 站内信页为原生滚动（onReachBottom 触底分页）不适用本组件；reward 页边距
@@ -25,7 +25,6 @@
 	 */
 	import BackButton from '@/components/common/BackButton.uvue'
 	import PageHeader from '@/components/common/PageHeader.uvue'
-	import { mainTopPx } from '@/utils/layout.uts'
 
 	const props = defineProps<{
 		/** 页头主标题（空串不渲染页头） */
@@ -38,8 +37,12 @@
 
 	const emit = defineEmits(['scrolltolower'])
 
-	/** 顶部留白：返回按钮（状态栏高度 + 40px）之下再留 12px */
-	const mainTop = ref(mainTopPx())
+	// 画布顶部留白：非 Web 端返回按钮已实高占位（状态栏 + 40px），画布只留按钮下 12px
+	const mainTop = ref(12)
+	// Web 端不渲染返回键，页头距顶 32px
+	// #ifdef WEB
+	mainTop.value = 32
+	// #endif
 
 	function onScrollBottom() : void {
 		emit('scrolltolower')

@@ -2,9 +2,9 @@
  * 注册页词典段（pages/user/register.uvue）
  * 模块载入时注册进 i18n 全局词典；register.uvue 引入本文件即完成注册。
  */
-import { registerDict, Dict } from '../../../utils/i18n'
+import { registerDict } from '../../../utils/i18n'
 
-const zh: Dict = new Map<string, string>([
+const zh = new Map<string, string>([
 	['register.title', '注册账号'],
 	['register.subtitle', '创建账号，开启您的阅读之旅。'],
 	['register.usernameLabel', '用户名'],
@@ -27,7 +27,7 @@ const zh: Dict = new Map<string, string>([
 	['register.codeSent', '验证码已发送']
 ])
 
-const en: Dict = new Map<string, string>([
+const en = new Map<string, string>([
 	['register.title', 'Create Account'],
 	['register.subtitle', 'Create an account and start your reading journey.'],
 	['register.usernameLabel', 'Username'],

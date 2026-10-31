@@ -212,6 +212,7 @@
 </template>
 
 <script setup lang="uts">
+
 	import BottomNavBar from '@/components/common/BottomNavBar.uvue'
 	import { PLACEHOLDER_STYLE } from '@/utils/theme.uts'
 	import type { LocalBook } from '@/utils/booksDefs.ts'
@@ -221,27 +222,35 @@
 	import { ensureBookLocal } from '@/utils/cloudsync.uts'
 	import type { ApiResponse } from '@/utils/requestDefs.ts'
 	import { hasAccessToken } from '@/utils/request.uts'
-	import { mpCapsuleRect, CONTENT_CAP_PX, scheduleResizeReload } from '@/utils/layout.uts'
+	import { mpCapsuleRect, CONTENT_CAP_PX, scheduleResizeReload, rpxToPx } from '@/utils/layout.uts'
 	import { REWARD_TIERS, fmtRemainMinutes, tierTotalReward } from '@/utils/rewards.uts'
 	import { fetchActivitySummary, claimReadingReward } from '@/api/activity.uts'
 	import { t, tf } from '@/utils/i18n.uts'
+
 	// 词典注册（bookshelf 页文案 + 公共段）
 	import '@/utils/locales/bookshelf.uts'
 	import '@/utils/locales/common.uts'
 	import { useUserStore, hasMembershipRole } from '@/stores/user.uts'
+
 	// #ifdef WEB
 	import { webPickBooks } from '@/utils/webfs'
+
 	// #endif
 
 	const userStore = useUserStore()
 
 	/** 书架书籍（云端元数据 + 本机正文缓存合并列表，顺序即云端手动排序结果；未导入时仅显示添加格） */
+
 	const books = ref<LocalBook[]>([])
+
 	/** 排序下拉选项与当前模式（内部键：manual/recent/added，文案经 sortLabel 取词；置于 books 之后：排序视图 computed 依赖此声明） */
+
 	const sortOptions = ref<string[]>(['manual', 'recent', 'added'])
+
 	const currentSort = ref('manual')
 
 	/** 排序选项文案（渲染期取词，随语言切换刷新） */
+
 	function sortLabel(key: string) : string {
 		if (key == 'recent') {
 			return t('bookshelf.sortRecent')
@@ -251,14 +260,21 @@
 		}
 		return t('bookshelf.sortManual')
 	}
+
 	/** 今日已读分钟数（阅读页结算，onShow 刷新） */
+
 	const todayMinutes = ref(0)
+
 	/** 阅读档位领取状态（locked/claimable/claimed，与后端一致；登录后 summary 覆盖，未登录按本地分钟推算） */
+
 	const tierStates = ref<string[]>([])
+
 	/** 胶囊领取请求进行中标记（防重复点击） */
+
 	const claimBusy = ref(false)
 
 	/** 下一个未领取档位索引（-1=今日全部领完，胶囊隐藏） */
+
 	function nextClaimIndex() : number {
 		const states = tierStates.value
 		for (let i = 0; i < states.length; i++) {
@@ -270,6 +286,7 @@
 	}
 
 	/** 胶囊态：none=全领完隐藏 / claimable=已达成可领取 / locked=未达成引导去活动页 */
+
 	const pillState = computed((): string => {
 		const i = nextClaimIndex()
 		if (i < 0) {
@@ -279,15 +296,17 @@
 	})
 
 	/** 胶囊奖励额（基础 + 额外赠送） */
+
 	const pillReward = computed((): number => {
 		const i = nextClaimIndex()
 		if (i < 0) {
 			return 0
 		}
-		return tierTotalReward(REWARD_TIERS[i])
+		return tierTotalReward(REWARD_TIERS[i].base, REWARD_TIERS[i].bonus)
 	})
 
 	/** 胶囊引导文案：locked 显示「再读 X 分钟」，claimable 显示「已达成」 */
+
 	const pillLeadText = computed((): string => {
 		const i = nextClaimIndex()
 		if (i < 0) {
@@ -298,18 +317,25 @@
 		}
 		return tf('bookshelf.readMore', [fmtRemainMinutes(REWARD_TIERS[i].minutes - todayMinutes.value)])
 	})
+
 	/** 书架卡片统一样式：plain 白卡 / photo 深灰卡 */
+
 	const shelfStyle = ref('plain')
 
 	/** 内联搜索栏状态（置于过滤 computed 之前：排序视图依赖此声明；Stitch: 打开时隐藏搜索图标，输入显示清空钮） */
+
 	const searchOpen = ref(false)
+
 	const searchText = ref('')
+
 	const searchFocused = ref(false)
 
 	/** 是否搜索过滤中（关键字去首尾空白后非空；控制网格过滤、添加格隐藏与空态提示） */
+
 	const isSearching = computed(() : boolean => searchText.value.trim().length > 0)
 
 	/** 排序视图：先按书名过滤搜索关键字（包含匹配，忽略大小写与首尾空白），再按当前模式排序——手动顺序=云端拖拽排序原序；最近阅读/添加时间为倒序视图（最后添加/最近阅读的排第一行第一个；次序键相同保持原相对次序） */
+
 	const sortedBooks = computed<LocalBook[]>(() : LocalBook[] => {
 		const kw = searchText.value.trim().toLowerCase()
 		let list = books.value
@@ -326,9 +352,11 @@
 	})
 
 	/** 搜索空态（有关键字但无匹配书籍） */
+
 	const searchEmpty = computed(() : boolean => isSearching.value && sortedBooks.value.length == 0)
 
 	/** 网格分行（每行 3 本，仅真实书籍；添加格在模板中独立于数据渲染） */
+
 	const shelfRows = computed<LocalBook[][]>(() : LocalBook[][] => {
 		const rows : LocalBook[][] = []
 		const list = sortedBooks.value
@@ -340,30 +368,49 @@
 	})
 
 	/** 末行是否行内补添加格（非搜索中、有书且末行未满 3；条件在 UTS 侧算好，模板仅消费布尔） */
+
 	const addCellInLastRow = computed(() : boolean => {
 		const n = sortedBooks.value.length
 		return !isSearching.value && n > 0 && n % 3 != 0
 	})
 
 	/** 是否新起一行放添加格（非搜索中的空书架或末行满员；与 addCellInLastRow 恒互斥） */
+
 	const addCellNewRow = computed(() : boolean => {
 		return !isSearching.value && sortedBooks.value.length % 3 == 0
 	})
 
 	/** 从缓存读取书架卡片样式（云端偏好由 App 启动/本页刷新时落缓存） */
+
 	function readStyleFromCache() : void {
 		shelfStyle.value = loadBookshelfStyle()
 	}
 
-	/** 同步渲染本地缓存（先展示后刷新，避免网络等待白屏） */
-	function loadShelf() : void {
-		books.value = loadBooks()
-		todayMinutes.value = getTodayMinutes()
-		readStyleFromCache()
-		applyLocalTierStates()
+	const menuOpen = ref(false)
+
+	const plusMenuOpen = ref(false)
+
+	/** 云端同步入口可见性：黑铁及以上会员（含管理员），与后端 cos_service 口径一致；非会员不开放入口 */
+
+	const isSyncMember = computed((): boolean => {
+		return hasMembershipRole(userStore.userInfo)
+	})
+
+	/** 关闭全部浮层（点击遮罩或底部导航触发） */
+
+	function closeMenus() : void {
+		menuOpen.value = false
+		plusMenuOpen.value = false
+	}
+
+	function closeSearch() : void {
+		searchOpen.value = false
+		searchText.value = ''
+		searchFocused.value = false
 	}
 
 	/** 档位状态本地推算（未登录即终值；登录后 refreshTierStates 以云端覆盖，防已领档重复显示可领） */
+
 	function applyLocalTierStates() : void {
 		const local = todayMinutes.value
 		const states: string[] = []
@@ -373,40 +420,8 @@
 		tierStates.value = states
 	}
 
-	/** 云端档位领取状态拉取（登录态；失败保持本地推算，下次进入再试） */
-	async function refreshTierStates() : Promise<void> {
-		if (!hasAccessToken()) {
-			return
-		}
-		try {
-			const res = await fetchActivitySummary()
-			if (res.code == 0 && res.data != null) {
-				const arr = res.data!.getArray('reading_tiers')
-				if (arr != null && arr.length == REWARD_TIERS.length) {
-					const states: string[] = []
-					for (let i = 0; i < arr.length; i++) {
-						states.push(arr[i].getString('state') ?? 'locked')
-					}
-					tierStates.value = states
-				}
-			}
-		} catch (e) {
-			// 云端失败保持本地推算态，下次进入再试
-		}
-	}
-
-	/** 云端刷新（onShow 每次执行）：清理旧版数据 → 书架/时长以云端覆盖缓存 → 重渲染；空书架且会员时静默自动云端恢复 */
-	async function refreshShelf() : Promise<void> {
-		cleanupLegacyBooks()
-		loadShelf()
-		books.value = await fetchBooksFromCloud()
-		todayMinutes.value = getTodayMinutes()
-		readStyleFromCache()
-		await refreshTierStates()
-		await autoRestoreFromCloud()
-	}
-
 	/** 空书架自动云端恢复（登录+黑铁及以上会员；云端有书籍对象时逐本建档下载，静默执行无弹窗） */
+
 	async function autoRestoreFromCloud() : Promise<void> {
 		if (books.value.length > 0) {
 			return
@@ -425,12 +440,58 @@
 		}
 	}
 
+	/** 同步渲染本地缓存（先展示后刷新，避免网络等待白屏） */
+
+	function loadShelf() : void {
+		books.value = loadBooks()
+		todayMinutes.value = getTodayMinutes()
+		readStyleFromCache()
+		applyLocalTierStates()
+	}
+
+	/** 云端档位领取状态拉取（登录态；失败保持本地推算，下次进入再试） */
+
+	async function refreshTierStates() : Promise<void> {
+		if (!hasAccessToken()) {
+			return
+		}
+		try {
+			const res = await fetchActivitySummary()
+			if (res.code == 0 && res.data != null) {
+				const arr = res.data!.getArray('reading_tiers')
+				if (arr != null && arr.length == REWARD_TIERS.length) {
+					const states: string[] = []
+					for (let i = 0; i < arr.length; i++) {
+						states.push((arr[i] as UTSJSONObject).getString('state') ?? 'locked')
+					}
+					tierStates.value = states
+				}
+			}
+		} catch (e) {
+			// 云端失败保持本地推算态，下次进入再试
+		}
+	}
+
+	/** 云端刷新（onShow 每次执行）：清理旧版数据 → 书架/时长以云端覆盖缓存 → 重渲染；空书架且会员时静默自动云端恢复 */
+
+	async function refreshShelf() : Promise<void> {
+		cleanupLegacyBooks()
+		loadShelf()
+		books.value = await fetchBooksFromCloud()
+		todayMinutes.value = getTodayMinutes()
+		readStyleFromCache()
+		await refreshTierStates()
+		await autoRestoreFromCloud()
+	}
+
 	/** 书架顺序本地持久化（手动排序云端同步在拖拽落定处单独触发） */
+
 	function saveShelf() : void {
 		saveBooks(books.value)
 	}
 
 	/** 书架卡片下方的进度文案（txt：未读 / 第 N 章 / 序 / 共 M 章——序章不计入章号与总数；PDF：共 N 页 / 已读 X% · 共 N 页） */
+
 	function metaOf(book : LocalBook) : string {
 		if (book.format == 'PDF') {
 			if (book.lastReadAt > 0 && book.lastPercent > 0) {
@@ -453,6 +514,7 @@
 	}
 
 	/** 卡片状态角标（''=无 / 'local'=仅本地 / 'cloud'=仅云端）：id>0=已在云端登记，path=本机正文；两侧都有则不显示角标 */
+
 	function badgeOf(book : LocalBook) : string {
 		if (book.id > 0) {
 			return book.path.length == 0 ? 'cloud' : ''
@@ -461,6 +523,7 @@
 	}
 
 	/** 切换书架卡片统一样式（缓存 + 云端偏好跟随） */
+
 	function setStyle(style : string) : void {
 		if (shelfStyle.value == style) {
 			return
@@ -470,23 +533,34 @@
 	}
 
 	/** 顶部导航行顶部（px）：小程序端与右上角胶囊同行，Web/App 端为状态栏下 14px */
+
 	const navTop = ref(14)
+
 	/** 顶部导航行高（px）：小程序端取胶囊高度，其余端为 40px 设计值 */
+
 	const navHeight = ref(40)
+
 	/** 右侧胶囊避让边距（px）：操作按钮右缘置于胶囊左侧 8px；非小程序端 0（沿用样式默认 38rpx） */
+
 	const navRight = ref(0)
+
 	/** 内容区左缘偏移（px）：主内容限宽（CONTENT_CAP_PX，Web 480/App 750）居中后内容左缘距视口左缘的距离（宽屏浮层菜单对齐用，窄屏恒 0） */
+
 	const capLeftPx = ref(0)
 
 	/** 加号弹层右缘（px）：right 锚定 .page 右缘（菜单向左伸展，直接用已测量的限宽偏移，不做单位换算）。
 	 * 小程序端随胶囊避让（navRight=右缘距视口右距离）；其余端固定列右缘内距（38rpx≈20px，390 设计稿） */
+
 	const plusMenuRight = computed(() : number => {
 		return capLeftPx.value + (navRight.value > 0 ? navRight.value : 20)
 	})
 
 	/** 编辑模式：卡片可勾选删除、可拖拽调序 */
+
 	const editMode = ref(false)
+
 	/** 编辑模式选中的书籍 id 集合 */
+
 	const selectedKeys = ref<number[]>([])
 
 	function isSelected(book : LocalBook) : boolean {
@@ -503,6 +577,7 @@
 	}
 
 	/** 进入编辑模式（+ 菜单「编辑书架」；编辑为全量管理操作，同时收起搜索避免过滤视图与拖拽索引错位） */
+
 	function enterEdit() : void {
 		editMode.value = true
 		selectedKeys.value = []
@@ -512,6 +587,7 @@
 	}
 
 	/** 完成编辑并保存 */
+
 	function finishEdit() : void {
 		editMode.value = false
 		selectedKeys.value = []
@@ -519,10 +595,13 @@
 	}
 
 	/** 删除确认弹窗显隐与「同时删除云端数据」勾选（默认不勾选，仅删本地） */
+
 	const deleteConfirmOpen = ref(false)
+
 	const deleteCloudToo = ref(false)
 
 	/** 所选中是否含云端书籍（已登录且黑铁及以上会员，含 id>0）：确认框据此显示云端删除勾选行（离线导入负数 id 书无云端数据；非会员删除云端对象会被后端 403 拒绝，不展示该选项） */
+
 	const hasCloudSelected = computed(() : boolean => {
 		if (!hasAccessToken() || !isSyncMember.value) {
 			return false
@@ -537,6 +616,7 @@
 	})
 
 	/** 删除提示文案随「同时删除云端数据」勾选切换（所选无云端书籍时仅本设备口径） */
+
 	const deleteDescText = computed(() : string => {
 		if (hasCloudSelected.value && deleteCloudToo.value) {
 			return t('bookshelf.descWithCloud')
@@ -548,6 +628,7 @@
 	})
 
 	/** 删除按钮：弹出确认框（勾选「同时删除云端数据」才一并删云端） */
+
 	function deleteSelected() : void {
 		if (selectedKeys.value.length == 0) {
 			return
@@ -557,16 +638,19 @@
 	}
 
 	/** 关闭删除确认弹窗（遮罩/取消按钮共用） */
+
 	function closeDeleteConfirm() : void {
 		deleteConfirmOpen.value = false
 	}
 
 	/** 勾选切换「同时删除云端数据」 */
+
 	function toggleDeleteCloud() : void {
 		deleteCloudToo.value = !deleteCloudToo.value
 	}
 
 	/** 确认删除：本地清理必做；勾选且为云端书籍时一并删云端（笔记/书签后端级联）；不勾选仅删本地（云端保留，下次拉取回显） */
+
 	function confirmDelete() : void {
 		const ids = selectedKeys.value
 		deleteConfirmOpen.value = false
@@ -585,24 +669,41 @@
 	}
 
 	/** ===== 拖拽排序（编辑模式，长按按住即拖） ===== */
+
 	/** 拖拽中的书籍全局索引；-1 为未拖拽 */
+
 	const dragIndex = ref(-1)
+
 	/** 拖拽位移（px，相对卡片当前布局位） */
+
 	const dragX = ref(0)
+
 	const dragY = ref(0)
+
 	/** 触摸是否已判定为拖动（区分点击选中；拖后拦截误触 click） */
+
 	let dragMoved = false
+
 	let dragStartX = 0
+
 	let dragStartY = 0
+
 	/** 拖拽卡片的初始布局位（视口坐标，touchstart 时经 SelectorQuery 异步取得） */
+
 	let dragOriginX = 0
+
 	let dragOriginY = 0
+
 	/** 布局基准是否已就位（rect 异步回调返回前不响应拖动） */
+
 	let dragOriginReady = false
 
 	/** 勾选点点击：阻止冒泡后切换选中（避免触发卡片自身点击） */
-	function onCheckTap(book : LocalBook, e : UniPointerEvent) : void {
-		e.stopPropagation()
+
+	function onCheckTap(book : LocalBook, e : any) : void {
+		// vdom 模板 $event 为 Any（项目规范 3.4），内部断言为指针事件
+		const pe = e as UniPointerEvent
+		pe.stopPropagation()
 		if (!editMode.value) {
 			return
 		}
@@ -610,6 +711,7 @@
 	}
 
 	/** 卡片动态 class：编辑模式的暗显/选中/拖拽态 */
+
 	function cardClass(gi : number, book : LocalBook) : string {
 		if (!editMode.value) {
 			return ''
@@ -621,6 +723,7 @@
 	}
 
 	/** 拖拽卡片的位移内联样式（px） */
+
 	function cardStyle(gi : number) : string {
 		if (dragIndex.value != gi) {
 			return ''
@@ -628,9 +731,11 @@
 		return 'transform:translate(' + dragX.value + 'px,' + dragY.value + 'px)'
 	}
 
-	function onCardTouchStart(e : UniTouchEvent, gi : number) : void {
+	function onCardTouchStart(e : any, gi : number) : void {
+		// vdom 模板 $event 为 Any（项目规范 3.4），内部断言为触摸事件
+		const te = e as UniTouchEvent
 		// 仅手动顺序模式可拖拽调序（最近阅读/添加时间为视图排序，拖拽不改变其语义）
-		if (!editMode.value || currentSort.value != 'manual' || dragIndex.value != -1 || e.touches.length == 0) {
+		if (!editMode.value || currentSort.value != 'manual' || dragIndex.value != -1 || te.touches.length == 0) {
 			return
 		}
 		if (gi >= books.value.length) {
@@ -638,41 +743,43 @@
 		}
 		dragMoved = false
 		dragOriginReady = false
-		dragStartX = e.touches[0].clientX
-		dragStartY = e.touches[0].clientY
+		dragStartX = te.touches[0].clientX
+		dragStartY = te.touches[0].clientY
 		dragIndex.value = gi
 		dragX.value = 0
 		dragY.value = 0
 		// 异步取卡片当前布局位置作为拖拽基准
-		uni.createSelectorQuery().select('#book-card-' + gi).boundingClientRect((rect : NodeInfo | null) : void => {
+		uni.createSelectorQuery().select('#book-card-' + gi).boundingClientRect((res : any) : void => {
+			const rect = res == null ? null : (res as NodeInfo | null)
 			if (rect != null && dragIndex.value == gi) {
-				dragOriginX = rect.left
-				dragOriginY = rect.top
+				dragOriginX = rect.left ?? 0
+				dragOriginY = rect.top ?? 0
 				dragOriginReady = true
 			}
 		}).exec()
 	}
 
-	function onCardTouchMove(e : UniTouchEvent, gi : number) : void {
-		if (dragIndex.value != gi || e.touches.length == 0 || !dragOriginReady) {
+	function onCardTouchMove(e : any, gi : number) : void {
+		const te = e as UniTouchEvent
+		if (dragIndex.value != gi || te.touches.length == 0 || !dragOriginReady) {
 			return
 		}
-		const dx = e.touches[0].clientX - dragStartX
-		const dy = e.touches[0].clientY - dragStartY
+		const dx = te.touches[0].clientX - dragStartX
+		const dy = te.touches[0].clientY - dragStartY
 		if (!dragMoved && Math.abs(dx) + Math.abs(dy) <= 6) {
 			return
 		}
 		dragMoved = true
 		// 网格几何（px）：卡宽 206 / 卡高 360（封面 285 + 文字 75）/ 列距 28 / 行距 38 / 内容左缘 38（rpx）
-		const cellW = uni.upx2px(206)
-		const cellH = uni.upx2px(360)
-		const gapX = uni.upx2px(28)
-		const gapY = uni.upx2px(38)
+		const cellW = rpxToPx(206)
+		const cellH = rpxToPx(360)
+		const gapX = rpxToPx(28)
+		const gapY = rpxToPx(38)
 		dragX.value = dx
 		dragY.value = dy
 		// 由浮动卡片中心计算目标格位（浮点卡左上角 = 原点 + 位移；格位序号 = 中心相对网格首行左缘的步距取整），实时重排让位
 		const rowCount = Math.ceil(books.value.length / 3)
-		const col = Math.max(0, Math.min(2, Math.round((dragOriginX + dx - uni.upx2px(38)) / (cellW + gapX))))
+		const col = Math.max(0, Math.min(2, Math.round((dragOriginX + dx - rpxToPx(38)) / (cellW + gapX))))
 		const row0 = Math.floor(gi / 3)
 		const row0Top = dragOriginY - row0 * (cellH + gapY)
 		const row = Math.max(0, Math.min(rowCount - 1, Math.round((dragOriginY + dy - row0Top) / (cellH + gapY))))
@@ -687,8 +794,8 @@
 		dragStartX += (target % 3 - gi % 3) * (cellW + gapX)
 		dragStartY += (Math.floor(target / 3) - row0) * (cellH + gapY)
 		dragIndex.value = target
-		dragX.value = e.touches[0].clientX - dragStartX
-		dragY.value = e.touches[0].clientY - dragStartY
+		dragX.value = te.touches[0].clientX - dragStartX
+		dragY.value = te.touches[0].clientY - dragStartY
 	}
 
 	function onCardTouchEnd() : void {
@@ -705,6 +812,48 @@
 	}
 
 	/** 卡片点击：编辑模式切换选中（拦截拖拽后误触），非编辑模式进入阅读 */
+
+	/** 长按书籍卡片：非编辑模式下快捷进入编辑书架并选中该本（编辑模式长按已被拖拽手势占用，直接忽略） */
+
+	function onCardLongPress(book : LocalBook) : void {
+		if (editMode.value) {
+			return
+		}
+		enterEdit()
+		toggleSelect(book)
+	}
+
+	/** 按当前端唤起文件选择：微信小程序=聊天会话文件（wx.chooseMessageFile），App=系统文件选择器，
+	 * Web=系统文件选择器（IndexedDB 暂存字节）；选择后统一解析入库 */
+
+	/** 点击书籍进入阅读：txt 进文本阅读器，PDF 进原文件渲染页（携带书籍 id）；本设备无正文时先尝试从云端下载（会员），下载失败提示重试、无权限提示重导 */
+
+	async function openBook(book: LocalBook) : Promise<void> {
+		if (book.path.length == 0) {
+			if (userStore.userInfo == null || !isSyncMember.value) {
+				uni.showToast({ title: t('bookshelf.fileMissing'), icon: 'none', duration: 2500 })
+				return
+			}
+			uni.showLoading({ title: t('bookshelf.cloudDownloading') })
+			const ok = await ensureBookLocal(book)
+			uni.hideLoading()
+			if (!ok) {
+				uni.showToast({ title: t('bookshelf.cloudDownloadFail'), icon: 'none', duration: 2500 })
+				return
+			}
+			books.value = loadBooks()
+		}
+		if (book.format == 'PDF') {
+			uni.navigateTo({
+				url: '/pages/reading/pdfreader?bookId=' + book.id
+			})
+			return
+		}
+		uni.navigateTo({
+			url: '/pages/reading/reader?bookId=' + book.id
+		})
+	}
+
 	function onCardTap(book : LocalBook) : void {
 		if (dragMoved) {
 			dragMoved = false
@@ -717,32 +866,96 @@
 		toggleSelect(book)
 	}
 
-	/** 长按书籍卡片：非编辑模式下快捷进入编辑书架并选中该本（编辑模式长按已被拖拽手势占用，直接忽略） */
-	function onCardLongPress(book : LocalBook) : void {
-		if (editMode.value) {
+	/** 添加格点击：非编辑模式下触发导入（与 + 菜单同功能）；编辑模式无动作 */
+
+
+	const importing = ref(false)
+
+	async function handlePickedFiles(files : PickedFileItem[]) : Promise<void> {
+		if (files.length == 0) {
 			return
 		}
-		enterEdit()
-		toggleSelect(book)
+		importing.value = true
+		uni.showLoading({ title: t('bookshelf.importing'), mask: true })
+		let okCount = 0
+		let firstErr = ''
+		let failedNames : string[] = []
+		for (let i = 0; i < files.length; i++) {
+			const f = files[i]
+			try {
+				await importBook(f.name, f.path, f.size)
+				okCount++
+			} catch (e) {
+				if (firstErr.length == 0) {
+					firstErr = e instanceof Error ? e.message : t('bookshelf.importFail')
+				}
+				failedNames.push(f.name)
+			}
+		}
+		uni.hideLoading()
+		importing.value = false
+		loadShelf()
+		if (files.length == 1) {
+			// 单本：不量化本数，成功/失败各一句（失败沿用格式错误信息定位原因）
+			if (okCount > 0) {
+				uni.showToast({ title: t('bookshelf.importedOne'), icon: 'none' })
+			} else {
+				uni.showToast({ title: firstErr, icon: 'none', duration: 2500 })
+			}
+			return
+		}
+		// 多本：报成功本数，失败的逐书名提示（控制台同步完整打印，不受 toast 截断限制）
+		if (okCount == files.length) {
+			uni.showToast({ title: tf('bookshelf.importedN', [okCount.toString()]), icon: 'none' })
+		} else if (okCount > 0) {
+			uni.showToast({ title: tf('bookshelf.importedNFails', [okCount.toString(), failedNames.join('、')]), icon: 'none', duration: 2500 })
+		} else {
+			uni.showToast({ title: tf('bookshelf.importFailedN', [failedNames.join('、')]), icon: 'none', duration: 2500 })
+		}
+		console.log('导入失败书籍：' + failedNames.join('、'))
 	}
 
-	/** 添加格点击：非编辑模式下触发导入（与 + 菜单同功能）；编辑模式无动作 */
+	function startImport() : void {
+		if (importing.value) {
+			return
+		}
+		plusMenuOpen.value = false
+		closeMenus()
+		// #ifdef MP-WEIXIN || APP-ANDROID || APP-IOS
+		uni.chooseFile({
+			count: 9,
+			success: (res : ChooseFileSuccess) => {
+				const items : PickedFileItem[] = []
+				for (let i = 0; i < res.tempFiles.length; i++) {
+					const f = res.tempFiles[i]
+					items.push({ name: f.name, path: f.path, size: f.size } as PickedFileItem)
+				}
+				handlePickedFiles(items)
+			},
+			fail: (_e) => {
+				// 用户取消静默
+			}
+		})
+		// #endif
+		// #ifdef WEB
+		webPickBooks().then((files) => {
+			if (files.length > 0) {
+				handlePickedFiles(files)
+			}
+		}, (e) => {
+			uni.showToast({ title: e instanceof Error ? e.message : t('bookshelf.pickFail'), icon: 'none', duration: 2500 })
+		})
+		// #endif
+	}
+
 	function onAddCellTap() : void {
 		if (!editMode.value) {
 			startImport()
 		}
 	}
 
-	/** 排序/加号浮层菜单开关 */
-	const menuOpen = ref(false)
-	const plusMenuOpen = ref(false)
-
-	/** 云端同步入口可见性：黑铁及以上会员（含管理员），与后端 cos_service 口径一致；非会员不开放入口 */
-	const isSyncMember = computed((): boolean => {
-		return hasMembershipRole(userStore.userInfo)
-	})
-
 	/** 加号菜单「云端同步」：登录+会员校验后执行一次双向同步（本地↔云端差异互补），结果弹窗提示 */
+
 	async function openCloudSync() : Promise<void> {
 		plusMenuOpen.value = false
 		closeMenus()
@@ -806,13 +1019,17 @@
 	})
 
 	// 微信小程序分享：转发好友与朋友圈（封面统一 /static/share-cover.png，复制自 yao 项目）
+
 	// #ifdef MP-WEIXIN
+
 	onShareAppMessage(() => {
 		return { title: t('bookshelf.shareTitle'), imageUrl: '/static/share-cover.png' }
 	})
+
 	onShareTimeline(() => {
 		return { title: t('bookshelf.shareTitle'), imageUrl: '/static/share-cover.png' }
 	})
+
 	// #endif
 
 	onShow(() => {
@@ -820,18 +1037,14 @@
 	})
 
 	// #ifndef APP-ANDROID || APP-IOS || APP-HARMONY
+
 	onResize(() : void => {
 		// 微信端折叠切换自愈（其他端空实现）：布局残留按新窗口重载
 		const win = uni.getWindowInfo()
 		scheduleResizeReload(win.windowWidth, '/pages/reading/bookshelf')
 	})
-	// #endif
 
-	/** 关闭全部浮层（点击遮罩或底部导航触发） */
-	function closeMenus() : void {
-		menuOpen.value = false
-		plusMenuOpen.value = false
-	}
+	// #endif
 
 	function toggleMenu() : void {
 		menuOpen.value = !menuOpen.value
@@ -849,43 +1062,8 @@
 	}
 
 	/** ===== 导入书籍（+ 菜单与书架添加格同入口） ===== */
-	/** 导入进行中（防重复触发） */
-	const importing = ref(false)
 
-	/** 按当前端唤起文件选择：微信小程序=聊天会话文件（wx.chooseMessageFile），App=系统文件选择器，
-	 * Web=系统文件选择器（IndexedDB 暂存字节）；选择后统一解析入库 */
-	function startImport() : void {
-		if (importing.value) {
-			return
-		}
-		plusMenuOpen.value = false
-		closeMenus()
-		// #ifdef MP-WEIXIN || APP-ANDROID || APP-IOS
-		uni.chooseFile({
-			count: 9,
-			success: (res : ChooseFileSuccess) => {
-				const items : PickedFileItem[] = []
-				for (let i = 0; i < res.tempFiles.length; i++) {
-					const f = res.tempFiles[i]
-					items.push({ name: f.name, path: f.path, size: f.size } as PickedFileItem)
-				}
-				handlePickedFiles(items)
-			},
-			fail: (_e) => {
-				// 用户取消静默
-			}
-		})
-		// #endif
-		// #ifdef WEB
-		webPickBooks().then((files) => {
-			if (files.length > 0) {
-				handlePickedFiles(files)
-			}
-		}, (e) => {
-			uni.showToast({ title: e instanceof Error ? e.message : t('bookshelf.pickFail'), icon: 'none', duration: 2500 })
-		})
-		// #endif
-	}
+	/** 导入进行中（防重复触发） */
 
 	/** 各端统一的已选文件描述（字段对齐原生 ChooseFileTempFile；Web 端 path 为 webpick:// 暂存引用） */
 	type PickedFileItem = {
@@ -895,51 +1073,11 @@
 	}
 
 	/** 逐本导入所选文件并汇总结果（扩展名过滤与格式提示在 importBook 内统一处理） */
-	async function handlePickedFiles(files : PickedFileItem[]) : Promise<void> {
-		if (files.length == 0) {
-			return
-		}
-		importing.value = true
-		uni.showLoading({ title: t('bookshelf.importing'), mask: true })
-		let okCount = 0
-		let firstErr = ''
-		let failedNames : string[] = []
-		for (let i = 0; i < files.length; i++) {
-			const f = files[i]
-			try {
-				await importBook(f.name, f.path, f.size)
-				okCount++
-			} catch (e) {
-				if (firstErr.length == 0) {
-					firstErr = e instanceof Error ? e.message : t('bookshelf.importFail')
-				}
-				failedNames.push(f.name)
-			}
-		}
-		uni.hideLoading()
-		importing.value = false
-		loadShelf()
-		if (files.length == 1) {
-			// 单本：不量化本数，成功/失败各一句（失败沿用格式错误信息定位原因）
-			if (okCount > 0) {
-				uni.showToast({ title: t('bookshelf.importedOne'), icon: 'none' })
-			} else {
-				uni.showToast({ title: firstErr, icon: 'none', duration: 2500 })
-			}
-			return
-		}
-		// 多本：报成功本数，失败的逐书名提示（控制台同步完整打印，不受 toast 截断限制）
-		if (okCount == files.length) {
-			uni.showToast({ title: tf('bookshelf.importedN', [okCount.toString()]), icon: 'none' })
-		} else if (okCount > 0) {
-			uni.showToast({ title: tf('bookshelf.importedNFails', [okCount.toString(), failedNames.join('、')]), icon: 'none', duration: 2500 })
-		} else {
-			uni.showToast({ title: tf('bookshelf.importFailedN', [failedNames.join('、')]), icon: 'none', duration: 2500 })
-		}
-		console.log('导入失败书籍：' + failedNames.join('、'))
-	}
+
+
 
 	/** 加号菜单「导入书籍」 */
+
 	function onImportTap() : void {
 		startImport()
 	}
@@ -947,12 +1085,6 @@
 	function openSearch() : void {
 		searchOpen.value = true
 		closeMenus()
-	}
-
-	function closeSearch() : void {
-		searchOpen.value = false
-		searchText.value = ''
-		searchFocused.value = false
 	}
 
 	function clearSearch() : void {
@@ -967,34 +1099,8 @@
 		searchFocused.value = false
 	}
 
-	/** 点击书籍进入阅读：txt 进文本阅读器，PDF 进原文件渲染页（携带书籍 id）；本设备无正文时先尝试从云端下载（会员），下载失败提示重试、无权限提示重导 */
-	async function openBook(book: LocalBook) : Promise<void> {
-		if (book.path.length == 0) {
-			if (userStore.userInfo == null || !isSyncMember.value) {
-				uni.showToast({ title: t('bookshelf.fileMissing'), icon: 'none', duration: 2500 })
-				return
-			}
-			uni.showLoading({ title: t('bookshelf.cloudDownloading') })
-			const ok = await ensureBookLocal(book)
-			uni.hideLoading()
-			if (!ok) {
-				uni.showToast({ title: t('bookshelf.cloudDownloadFail'), icon: 'none', duration: 2500 })
-				return
-			}
-			books.value = loadBooks()
-		}
-		if (book.format == 'PDF') {
-			uni.navigateTo({
-				url: '/pages/reading/pdfreader?bookId=' + book.id
-			})
-			return
-		}
-		uni.navigateTo({
-			url: '/pages/reading/reader?bookId=' + book.id
-		})
-	}
-
 	/** 点击"领 1 铜币"进入赠币福利页（编辑模式禁用） */
+
 	function openReward() : void {
 		if (editMode.value) {
 			return
@@ -1005,6 +1111,7 @@
 	}
 
 	/** 统计卡整体点击（胶囊外区域）：进入「我的阅读」统计页 */
+
 	function openStats() : void {
 		uni.navigateTo({
 			url: '/pages/reading/stats'
@@ -1012,6 +1119,40 @@
 	}
 
 	/** 统计卡胶囊点击：已达成未领且已登录直接领取；未达成/未登录去活动页看进度（编辑模式禁用） */
+
+	/** 直接领取第 i 档奖励（与活动页同接口，成功后本地状态流转到下一档） */
+
+	/** 本地档位状态流转（整体替换数组确保视图刷新） */
+
+	function markTierClaimed(i: number) : void {
+		const states = tierStates.value
+		const next: string[] = []
+		for (let j = 0; j < states.length; j++) {
+			next.push(states[j])
+		}
+		next[i] = 'claimed'
+		tierStates.value = next
+	}
+
+	function claimNextTier(i: number) : void {
+		if (claimBusy.value) {
+			return
+		}
+		const tier = REWARD_TIERS[i]
+		claimBusy.value = true
+		claimReadingReward(tier.minutes).then((res: ApiResponse) => {
+			claimBusy.value = false
+			if (res.code == 0 && res.data != null) {
+				const reward = res.data!.getNumber('reward') ?? tierTotalReward(tier.base, tier.bonus)
+				uni.showToast({ title: tf('toast.claimOkN', [reward.toString()]), icon: 'none' })
+				markTierClaimed(i)
+			}
+		}, (e: Error) => {
+			claimBusy.value = false
+			uni.showToast({ title: e.message, icon: 'none' })
+		})
+	}
+
 	function onPillTap() : void {
 		if (editMode.value) {
 			return
@@ -1027,36 +1168,6 @@
 		openReward()
 	}
 
-	/** 直接领取第 i 档奖励（与活动页同接口，成功后本地状态流转到下一档） */
-	function claimNextTier(i: number) : void {
-		if (claimBusy.value) {
-			return
-		}
-		const tier = REWARD_TIERS[i]
-		claimBusy.value = true
-		claimReadingReward(tier.minutes).then((res: ApiResponse) => {
-			claimBusy.value = false
-			if (res.code == 0 && res.data != null) {
-				const reward = res.data!.getNumber('reward') ?? tierTotalReward(tier)
-				uni.showToast({ title: tf('toast.claimOkN', [reward.toString()]), icon: 'none' })
-				markTierClaimed(i)
-			}
-		}, (e: Error) => {
-			claimBusy.value = false
-			uni.showToast({ title: e.message, icon: 'none' })
-		})
-	}
-
-	/** 本地档位状态流转（整体替换数组确保视图刷新） */
-	function markTierClaimed(i: number) : void {
-		const states = tierStates.value
-		const next: string[] = []
-		for (let j = 0; j < states.length; j++) {
-			next.push(states[j])
-		}
-		next[i] = 'claimed'
-		tierStates.value = next
-	}
 </script>
 
 <style lang="scss">

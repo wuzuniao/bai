@@ -90,8 +90,11 @@
 
 	const userStore = useUserStore()
 
-	// 通知按钮组件引用：页面显示时刷新未读状态（响应站内信页标记已读后的返回）
-	const noticeRef = ref<NoticeButton | null>(null)
+	// 通知按钮组件引用：页面显示时刷新未读状态（响应站内信页标记已读后的返回）。
+	// vdom 模式（规范 3.4）下 ref 标注为页面自定义 Expose 类型会在运行时 cast 失败
+	// （组件实例类不实现页面接口），官方方式为 ComponentPublicInstance + $callMethod；
+	// 方法名为字符串，组件内方法改名时需同步此处。
+	const noticeRef = ref<ComponentPublicInstance | null>(null)
 
 	// 微信小程序分享：转发好友与朋友圈（封面统一 /static/share-cover.png，复制自 yao 项目）
 	// #ifdef MP-WEIXIN
@@ -105,7 +108,7 @@
 
 	// 页面显示：刷新登录态与通知未读状态
 	onShow(() => {
-		noticeRef.value?.refresh()
+		noticeRef.value?.$callMethod('refresh')
 	})
 
 	// 会员卡片渠道可见性：仅 App 商店分发渠道可见（小程序/H5 无此入口）。

@@ -8,7 +8,8 @@
  *   刷新失败再经父域 SSO Cookie 平台令牌恢复重试一次，仍失败才清态跳登录（并发 401 共享同一次刷新请求）
  */
 import { AUTH_BASE_URL, AUTH_CLIENT_ID, API_BASE_URL } from './config'
-import { syncAuthCookie, recoverAuthFromCookie, SyncAuthCookieOptions, RestoredAuthState } from './authCookie'
+import { syncAuthCookie, recoverAuthFromCookie } from './authCookie'
+import type { SyncAuthCookieOptions, RestoredAuthState } from './authCookieDefs.ts'
 import { t } from './i18n'
 // 词典注册（请求层文案）
 import './locales/request.uts'
@@ -80,7 +81,7 @@ function silentRefresh() : Promise<string> {
 	if (refreshPromise != null) {
 		return refreshPromise as Promise<string>
 	}
-	refreshPromise = new Promise<string>((resolve, reject) => {
+	const refreshPromiseLocal = new Promise<string>((resolve, reject) => {
 		const body = {} as UTSJSONObject
 		body['grant_type'] = 'refresh_token'
 		body['refresh_token'] = getRefreshToken()
@@ -125,13 +126,14 @@ function silentRefresh() : Promise<string> {
 			}
 		})
 	})
-	// 结束后重置共享标记
-	refreshPromise.then((_token: string) => {
+	refreshPromise = refreshPromiseLocal
+	// 结束后重置共享标记（拒绝原因无类型，平台边界显式 any）
+	refreshPromiseLocal.then((_token : string) : void => {
 		refreshPromise = null
-	}, (_e) => {
+	}, (_e : any) : void => {
 		refreshPromise = null
 	})
-	return refreshPromise as Promise<string>
+	return refreshPromiseLocal
 }
 
 /**
@@ -174,9 +176,10 @@ function recoverAndRetry(options: RequestOptions, resolve: (res: ApiResponse) =>
 		})
 	}
 	if (getRefreshToken() != '') {
-		silentRefresh().then((_token: string) => {
+		silentRefresh().then((_token : string) : void => {
 			retry()
-		}, (_e) => {
+		}, (_e : any) : void => {
+			// 拒绝原因无类型（平台边界），显式 any
 			recover()
 		})
 	} else {

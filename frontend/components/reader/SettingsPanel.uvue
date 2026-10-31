@@ -141,17 +141,16 @@
 	const pageTurnModes = ['滚动', '覆盖', '平移']
 	// #endif
 
-	/** 恢复本地设置（宿主持镜像驱动渲染，两侧读同一存储真源保持一致；翻页模式做端侧支持校验） */
-	{
-		const s = loadSettings()
-		fontSize.value = s.fontSize
-		pageTurn.value = pageTurnModes.indexOf(s.pageTurn) >= 0 ? s.pageTurn : pageTurnModes[0]
-		themeKey.value = s.theme
-		selectedBg.value = readerThemeOf(s.theme).readerBg
-		// 字体沿用独立 key（历史版本存储结构不变）
-		fontKey.value = loadStoredFontKey()
-		savedFontKey.value = fontKey.value
-	}
+	/** 恢复本地设置（宿主持镜像驱动渲染，两侧读同一存储真源保持一致；翻页模式做端侧支持校验）。
+	 *  UTS script setup 顶层不支持裸块语句，原块内变量提升并改名避免遮蔽 */
+	const savedSettings = loadSettings()
+	fontSize.value = savedSettings.fontSize
+	pageTurn.value = pageTurnModes.indexOf(savedSettings.pageTurn) >= 0 ? savedSettings.pageTurn : pageTurnModes[0]
+	themeKey.value = savedSettings.theme
+	selectedBg.value = readerThemeOf(savedSettings.theme).readerBg
+	// 字体沿用独立 key（历史版本存储结构不变）
+	fontKey.value = loadStoredFontKey()
+	savedFontKey.value = fontKey.value
 
 	/** 字体选项与当前生效字体名（按钮展示） */
 	const fontOptions = FONT_OPTIONS

@@ -2,9 +2,9 @@
  * 书架页词典段（pages/reading/bookshelf.uvue）
  * 模块载入时注册进 i18n 全局词典；bookshelf.uvue 引入本文件即完成注册。
  */
-import { registerDict, Dict } from '../i18n'
+import { registerDict } from '../i18n'
 
-const zh: Dict = new Map<string, string>([
+const zh = new Map<string, string>([
 	['bookshelf.title', '书架'],
 	['bookshelf.shareTitle', '书架'],
 	['bookshelf.searchPh', '搜索书名...'],
@@ -56,7 +56,7 @@ const zh: Dict = new Map<string, string>([
 	['bookshelf.importFailedN', '导入失败：{0}']
 ])
 
-const en: Dict = new Map<string, string>([
+const en = new Map<string, string>([
 	['bookshelf.title', 'Bookshelf'],
 	['bookshelf.shareTitle', 'Bookshelf'],
 	['bookshelf.searchPh', 'Search books...'],

@@ -114,52 +114,33 @@
 	const pageW = ref(0)
 	const pageH = ref(0)
 	// 窗口信息 setup 顶层同步初始化：划词气泡组件 setup 求值早于页面 onLoad，
-	// 气泡单/双行判定与定位钳制依赖 pageW/pageH 就绪（与阅读页同模式）
-	{
-		const win = uni.getWindowInfo()
-		let top = 48
-		if (win.statusBarHeight > 0) {
-			top = win.statusBarHeight + 1
-		}
-		// #ifdef MP-WEIXIN
-		// 小程序端避开右上角胶囊按钮（胶囊规格：高 32px、top = 状态栏 + 4~8px，
-		// 取状态栏 + 48 保证卡片顶部与胶囊底留 8~12px 间距）
-		if (win.statusBarHeight > 0) {
-			top = win.statusBarHeight + 48
-		}
-		// #endif
-		topInset.value = top
-		pageW.value = win.windowWidth
-		pageH.value = win.windowHeight
+	// 气泡单/双行判定与定位钳制依赖 pageW/pageH 就绪（与阅读页同模式）。
+	// UTS script setup 顶层不支持裸块语句与跨语句空值智能转换，故直接平铺并显式命名
+	const initialWin = uni.getWindowInfo()
+	let initialTop = 48
+	if (initialWin.statusBarHeight > 0) {
+		initialTop = initialWin.statusBarHeight + 1
 	}
-
-	/** 折叠屏展开/折叠、旋转、桌面拖宽：窗口尺寸变化后更新页面尺寸并重建排版度量（rpx 换算系数随窗口宽变化），
-	 *  清除进行中的选区。App 端暂无 onResize 事件，由 onShow 比对窗口尺寸兜底（回前台时尺寸已变则重标定） */
-	function syncViewport() : void {
-		const win = uni.getWindowInfo()
-		if (win.windowWidth == pageW.value && win.windowHeight == pageH.value) {
-			return
-		}
-		pageW.value = win.windowWidth
-		pageH.value = win.windowHeight
-		poemMetrics.value = buildPoemMetrics()
-		clearSelection()
-		// 微信端折叠切换自愈（其他端空实现）：布局残留错乱按新窗口重载
-		scheduleResizeReload(pageW.value, '/pages/index/index')
+	// #ifdef MP-WEIXIN
+	// 小程序端避开右上角胶囊按钮（胶囊规格：高 32px、top = 状态栏 + 4~8px，
+	// 取状态栏 + 48 保证卡片顶部与胶囊底留 8~12px 间距）
+	if (initialWin.statusBarHeight > 0) {
+		initialTop = initialWin.statusBarHeight + 48
 	}
-	// #ifndef APP-ANDROID || APP-IOS || APP-HARMONY
-	onResize(() : void => {
-		syncViewport()
-	})
 	// #endif
+	topInset.value = initialTop
+	pageW.value = initialWin.windowWidth
+	pageH.value = initialWin.windowHeight
 
 	// 微信小程序分享：转发好友与朋友圈（朋友圈封面统一 /static/share-cover.png，复制自 yao 项目）
-	// #ifdef MP-WEIXIN
-	/** 气泡分享卡片预生成的封面路径（服务端 URL 优先；''=未就绪） */
+	/** 气泡分享卡片预生成的封面路径（服务端 URL 优先；''=未就绪）。Android 端分享长图导出
+	 *  降级后事件仍上行空路径，handler 与 ref 保持全端存在——模板绑定不可指向条件编译外的函数（项目规范 3.4） */
 	const cardShareImage = ref('')
 	function onCardShareImage(path : string) : void {
 		cardShareImage.value = path
 	}
+
+	// #ifdef MP-WEIXIN
 
 	/** 当前转发封面路径（''=未就绪）：事件通道优先，ref 直读兜底（emit 事件链真机不可靠，
 	 *  ref 链与 beginSelection 同机制、真机已验证；与 reader.uvue shareCoverPath 同构，同步义务） */
@@ -167,7 +148,7 @@
 		if (cardShareImage.value.length > 0) {
 			return cardShareImage.value
 		}
-		return popoverRef.value?.coverImagePath() ?? ''
+		return (popoverRef.value?.$callMethod('coverImagePath') as string | null) ?? ''
 	}
 
 	onShareAppMessage(() : CustomShareContent => {
@@ -179,10 +160,6 @@
 	})
 	// #endif
 
-	onShow(() => {
-		syncViewport()
-		loadHomeNotes()
-	})
 
 	/** ===== 首页诗划词气泡（复用阅读页 SelectionPopover：选区/手柄/拖动与五项动作内聚组件） ===== */
 	/** 诗行字符容量：7 字 + 行尾标点（选区/划线/想法统一坐标口径，标点占每行末位 idx=7） */
@@ -190,9 +167,11 @@
 	/** 诗行内容宽（rpx，行尾标点区右缘，窄屏选区/划线换算特判用） */
 	const LINE_TEXT_W_RPX = 510
 
-	/** 划词气泡与提示组件引用 */
-	const popoverRef = ref<SelectionPopover | null>(null)
-	const toastRef = ref<ReaderToast | null>(null)
+	/** 划词气泡与提示组件引用。vdom 模式（规范 3.4）下 ref 标注为页面自定义 Expose 类型会在运行时
+	 *  cast 失败（组件实例类不实现页面接口），官方方式为 ComponentPublicInstance + $callMethod；
+	 *  方法名为字符串，组件内方法改名时需同步此处调用点。 */
+	const popoverRef = ref<ComponentPublicInstance | null>(null)
+	const toastRef = ref<ComponentPublicInstance | null>(null)
 
 	/** 气泡浮层配色（首页固定日间，取自阅读日间主题真源；panelBg 与阅读页想法面板同字段） */
 	const popoverBg = READER_THEME_LIGHT.popoverBg
@@ -226,6 +205,8 @@
 		return base / 750
 	})
 
+	const wideCharLH = computed(() : number => Math.round(wideUnitW.value * 1.24))
+	const widePinyinLH = computed(() : number => Math.max(12, Math.round(wideUnitW.value * 0.48)))
 	/** 排版度量构建（划词换算，窄屏）：诗行单行无缩进，行盒高 = 拼音区 27rpx + 汉字行高 50rpx = 77rpx；
 	 *  字步进 69rpx（单元 54 + 右距 15）均匀映射前 7 列，行尾标点区 27rpx 收敛于末列；
 	 *  perLine 借用阅读页「首行容量 = perLine - 2」公式：首页无缩进容量恒满行，取行字符数 + 2，
@@ -292,8 +273,6 @@
 	 *  标点排版：标点单元贴单元底（flex-end），底部与汉字底对齐（无下坠区） */
 	const wideCharFs = computed(() : number => Math.round(wideUnitW.value * 0.8))
 	const widePinyinFs = computed(() : number => Math.max(10, Math.round(wideUnitW.value * 0.32)))
-	const wideCharLH = computed(() : number => Math.round(wideUnitW.value * 1.24))
-	const widePinyinLH = computed(() : number => Math.max(12, Math.round(wideUnitW.value * 0.48)))
 	const wideUnitStyle = computed(() : string => 'width:' + wideUnitW.value + 'px;margin-right:0px')
 	const widePinyinStyle = computed(() : string => 'width:100%;text-align:center;font-size:' + widePinyinFs.value + 'px;line-height:' + widePinyinLH.value + 'px;padding-top:0px;padding-bottom:0px')
 	const wideCharStyle = computed(() : string => 'font-size:' + wideCharFs.value + 'px;line-height:' + wideCharLH.value + 'px')
@@ -308,6 +287,92 @@
 		underline : string[]
 		thought : string[]
 	}
+	/** 划词选区镜像（选区真源在气泡组件，spanChanged 同步驱动行内高亮） */
+	const selSpan = ref<SelSpan | null>(null)
+
+	/** 划线/想法镜像（首页诗笔记：本地缓存即真源渲染 + 云端 book_id=0 静默跟随） */
+	const underlines = ref<UnderlineEntry[]>([])
+	const thoughts = ref<Thought[]>([])
+
+	/** 选区高亮条内联样式（渲染单元索引空间；纵向盖汉字行盒——拼音区不着色，top/height 显式绑定；
+	 *  窄屏行尾标点区右缘=行内容宽 510rpx 特判） */
+	function selBandStyleOf(ciStart : number, ciEnd : number) : string {
+		const step = poemMetrics.value.charW
+		if (isWide.value) {
+			return 'left:' + ciStart * step + 'px;top:' + widePinyinLH.value + 'px;width:' + (ciEnd - ciStart + 1) * step + 'px;height:' + wideCharLH.value + 'px'
+		}
+		const f = rpxF.value
+		const right = ciEnd >= LINE_CHAR_COUNT - 1 ? LINE_TEXT_W_RPX * f : (ciEnd + 1) * step
+		return 'left:' + ciStart * step + 'px;top:' + 27 * f + 'px;width:' + (right - ciStart * step) + 'px;height:' + 50 * f + 'px'
+	}
+
+	/** 划线/想法下划线内联样式（只含 left/width——纵向「贴行底细线」由 .poem-line-band 类固定；
+	 *  宽屏合并行单元等宽纯线性——窄屏「行尾标点区右缘=行内容宽 510rpx」特判仅适用于窄屏
+	 *  行索引空间，合并行索引≥7 不代表行尾） */
+	function decoBandStyleOf(ciStart : number, ciEnd : number) : string {
+		const step = poemMetrics.value.charW
+		if (isWide.value) {
+			return 'left:' + ciStart * step + 'px;width:' + (ciEnd - ciStart + 1) * step + 'px'
+		}
+		const f = rpxF.value
+		const right = ciEnd >= LINE_CHAR_COUNT - 1 ? LINE_TEXT_W_RPX * f : (ciEnd + 1) * step
+		return 'left:' + ciStart * step + 'px;width:' + (right - ciStart * step) + 'px'
+	}
+
+	/** 行选区覆盖区间（origin 空间：该行被覆盖的字符闭区间 [start, end]；无覆盖返回 null） */
+	function lineSelRange(origin : number) : number[] | null {
+		const s = selSpan.value
+		if (s == null) {
+			return null
+		}
+		const n = normalizeSpan(s)
+		if (origin < n.fromOrigin || origin > n.toOrigin) {
+			return null
+		}
+		return [origin == n.fromOrigin ? n.fromStart : 0, origin == n.toOrigin ? n.toEnd : LINE_CHAR_COUNT - 1]
+	}
+
+
+	/** 行内想法条带区间（origin 空间：跨行想法在该行的投影，单段闭区间） */
+	function lineThoughtBands(origin : number) : number[][] {
+		const bands : number[][] = []
+		for (const t of thoughts.value) {
+			if (t.fromOrigin <= origin && origin <= t.toOrigin) {
+				bands.push([t.fromOrigin == origin ? t.fromStart : 0, t.toOrigin == origin ? t.toEnd : LINE_CHAR_COUNT - 1])
+			}
+		}
+		return bands
+	}
+
+	/** 行内划线条带区间（origin 空间：划线记录的字符区间对剔除想法覆盖段——想法优先，
+	 *  被想法覆盖的区域只显示正蓝想法线、不残留灰色划线） */
+	function lineUnderlineBands(origin : number) : number[][] {
+		let ranges : number[][] = [] as number[][]
+		for (const e of underlines.value) {
+			if (e.cid == 0 && e.origin == origin) {
+				ranges = e.ranges
+				break
+			}
+		}
+		for (const b of lineThoughtBands(origin)) {
+			const next : number[][] = [] as number[][]
+			for (const r of ranges) {
+				if (r[1] < b[0] || r[0] > b[1]) {
+					next.push(r)
+					continue
+				}
+				if (r[0] < b[0]) {
+					next.push([r[0], b[0] - 1])
+				}
+				if (r[1] > b[1]) {
+					next.push([b[1] + 1, r[1]])
+				}
+			}
+			ranges = next
+		}
+		return ranges
+	}
+
 
 	function bandStylesForUnits(units : PoemRenderUnit[]) : PoemLineBands {
 		const origins : number[] = [] as number[]
@@ -379,23 +444,7 @@
 		return lines
 	})
 
-	/** 划词选区镜像（选区真源在气泡组件，spanChanged 同步驱动行内高亮） */
-	const selSpan = ref<SelSpan | null>(null)
 
-	/** 划线/想法镜像（首页诗笔记：本地缓存即真源渲染 + 云端 book_id=0 静默跟随） */
-	const underlines = ref<UnderlineEntry[]>([])
-	const thoughts = ref<Thought[]>([])
-
-	/** 诗行 → 段落提供者（行文本 = 7 字 + 行尾标点，长度恒 8；选区段序列与选区文本经共享 buildSpanSegs 消费） */
-	function poemParasOf(cid : number) : Paragraph[] {
-		const paras : Paragraph[] = []
-		for (let li = 0; li < poemLines.value.length; li++) {
-			paras.push({ text: lineText(li) } as Paragraph)
-		}
-		return paras
-	}
-
-	/** 行完整文本（7 字 + 行尾标点） */
 	function lineText(li : number) : string {
 		const line = poemLines.value[li]
 		if (line == null) {
@@ -407,6 +456,17 @@
 		}
 		return out + line.punct
 	}
+
+	/** 诗行 → 段落提供者（行文本 = 7 字 + 行尾标点，长度恒 8；选区段序列与选区文本经共享 buildSpanSegs 消费） */
+	function poemParasOf(cid : number) : Paragraph[] {
+		const paras : Paragraph[] = []
+		for (let li = 0; li < poemLines.value.length; li++) {
+			paras.push({ text: lineText(li) } as Paragraph)
+		}
+		return paras
+	}
+
+	/** 行完整文本（7 字 + 行尾标点） */
 
 	/** 选区文本（跨行拼接，行间换行，与阅读页跨段口径一致） */
 	function selectionText() : string {
@@ -467,83 +527,6 @@
 		return isWide.value ? Math.floor(origin / 2) : origin
 	}
 
-	/** 选区高亮条内联样式（渲染单元索引空间；纵向盖汉字行盒——拼音区不着色，top/height 显式绑定；
-	 *  窄屏行尾标点区右缘=行内容宽 510rpx 特判） */
-	function selBandStyleOf(ciStart : number, ciEnd : number) : string {
-		const step = poemMetrics.value.charW
-		if (isWide.value) {
-			return 'left:' + ciStart * step + 'px;top:' + widePinyinLH.value + 'px;width:' + (ciEnd - ciStart + 1) * step + 'px;height:' + wideCharLH.value + 'px'
-		}
-		const f = rpxF.value
-		const right = ciEnd >= LINE_CHAR_COUNT - 1 ? LINE_TEXT_W_RPX * f : (ciEnd + 1) * step
-		return 'left:' + ciStart * step + 'px;top:' + 27 * f + 'px;width:' + (right - ciStart * step) + 'px;height:' + 50 * f + 'px'
-	}
-
-	/** 划线/想法下划线内联样式（只含 left/width——纵向「贴行底细线」由 .poem-line-band 类固定；
-	 *  宽屏合并行单元等宽纯线性——窄屏「行尾标点区右缘=行内容宽 510rpx」特判仅适用于窄屏
-	 *  行索引空间，合并行索引≥7 不代表行尾） */
-	function decoBandStyleOf(ciStart : number, ciEnd : number) : string {
-		const step = poemMetrics.value.charW
-		if (isWide.value) {
-			return 'left:' + ciStart * step + 'px;width:' + (ciEnd - ciStart + 1) * step + 'px'
-		}
-		const f = rpxF.value
-		const right = ciEnd >= LINE_CHAR_COUNT - 1 ? LINE_TEXT_W_RPX * f : (ciEnd + 1) * step
-		return 'left:' + ciStart * step + 'px;width:' + (right - ciStart * step) + 'px'
-	}
-
-	/** 行选区覆盖区间（origin 空间：该行被覆盖的字符闭区间 [start, end]；无覆盖返回 null） */
-	function lineSelRange(origin : number) : number[] | null {
-		const s = selSpan.value
-		if (s == null) {
-			return null
-		}
-		const n = normalizeSpan(s)
-		if (origin < n.fromOrigin || origin > n.toOrigin) {
-			return null
-		}
-		return [origin == n.fromOrigin ? n.fromStart : 0, origin == n.toOrigin ? n.toEnd : LINE_CHAR_COUNT - 1]
-	}
-
-	/** 行内划线条带区间（origin 空间：划线记录的字符区间对剔除想法覆盖段——想法优先，
-	 *  被想法覆盖的区域只显示正蓝想法线、不残留灰色划线） */
-	function lineUnderlineBands(origin : number) : number[][] {
-		let ranges : number[][] = [] as number[][]
-		for (const e of underlines.value) {
-			if (e.cid == 0 && e.origin == origin) {
-				ranges = e.ranges
-				break
-			}
-		}
-		for (const b of lineThoughtBands(origin)) {
-			const next : number[][] = [] as number[][]
-			for (const r of ranges) {
-				if (r[1] < b[0] || r[0] > b[1]) {
-					next.push(r)
-					continue
-				}
-				if (r[0] < b[0]) {
-					next.push([r[0], b[0] - 1])
-				}
-				if (r[1] > b[1]) {
-					next.push([b[1] + 1, r[1]])
-				}
-			}
-			ranges = next
-		}
-		return ranges
-	}
-
-	/** 行内想法条带区间（origin 空间：跨行想法在该行的投影，单段闭区间） */
-	function lineThoughtBands(origin : number) : number[][] {
-		const bands : number[][] = []
-		for (const t of thoughts.value) {
-			if (t.fromOrigin <= origin && origin <= t.toOrigin) {
-				bands.push([t.fromOrigin == origin ? t.fromStart : 0, t.toOrigin == origin ? t.toEnd : LINE_CHAR_COUNT - 1])
-			}
-		}
-		return bands
-	}
 
 	/** ===== 划词协议（选区状态在气泡组件，锚点实测与拖动行矩形由本页查询回传） ===== */
 
@@ -574,13 +557,16 @@
 		const lines = renderLines.value
 		for (let ri = 0; ri < rects.length && ri < lines.length; ri++) {
 			const units = lines[ri].units
+			const rLeft = rects[ri].left ?? 0
+			const rTop = rects[ri].top ?? 0
+			const rBottom = rects[ri].bottom ?? 0
 			if (isWide.value && units.length > LINE_CHAR_COUNT) {
 				dragRects.push({
 					cid: 0,
 					origin: units[0].origin,
-					left: rects[ri].left,
-					top: rects[ri].top,
-					bottom: rects[ri].bottom,
+					left: rLeft,
+					top: rTop,
+					bottom: rBottom,
 					len: units.length,
 					from: 0,
 					firstLen: LINE_CHAR_COUNT,
@@ -590,9 +576,9 @@
 				dragRects.push({
 					cid: 0,
 					origin: ri,
-					left: rects[ri].left,
-					top: rects[ri].top,
-					bottom: rects[ri].bottom,
+					left: rLeft,
+					top: rTop,
+					bottom: rBottom,
 					len: LINE_CHAR_COUNT,
 					from: 0,
 					firstLen: -1,
@@ -608,29 +594,19 @@
 		return dragRects
 	}
 
-	/** 长按诗行：整行选中（窄屏诗行即句、宽屏合并行即一句，对齐阅读页句间吸附语义），选区在气泡组件内建立；
-	 *  同批次预查全部行矩形回传拖动映射缓存——拖动开始事件里的异步查询回来前 touchmove
-	 *  会因映射为空被丢弃（表现为主柄拖不动），长按时预查使拖动首帧即跟手 */
-	function onLineLongPress(ri : number, e : UniTouchEvent) : void {
-		if (e.touches.length == 0) {
-			return
-		}
-		onLineLongPressAt(ri, e.touches[0].clientX)
-	}
-
-	/** 长按核心（触摸与 Web 鼠标桥接共用；pressX 为按点视口横坐标，列命中按渲染单元查表换算 origin/列） */
 	function onLineLongPressAt(ri : number, pressX : number) : void {
 		const clientX = pressX
-		uni.createSelectorQuery().selectAll('.poem-line').boundingClientRect((rects : NodeInfo[]) : void => {
+		uni.createSelectorQuery().selectAll('.poem-line').boundingClientRect((res : any) : void => {
+			const rects = res == null ? null : (res as NodeInfo[])
 			if (rects == null || ri >= rects.length) {
 				return
 			}
-			popoverRef.value?.setDragRects(buildDragRects(rects))
+			popoverRef.value?.$callMethod('setDragRects', buildDragRects(rects))
 			// 长按字符单元命中想法区间时恢复该想法的完整选区（含划线区域，默认高亮想法选区，
 			// 与阅读页「句间吸附前判定想法」同语义）；否则按句选取——句号结尾的才是一句，
 			// 逗号行与句号行构成一联一起选中（与阅读页句间吸附同语义）
 			const units = renderLines.value[ri].units
-			const ci = Math.max(0, Math.min(Math.floor((clientX - rects[ri].left) / poemMetrics.value.charW), units.length - 1))
+			const ci = Math.max(0, Math.min(Math.floor((clientX - (rects[ri].left ?? 0)) / poemMetrics.value.charW), units.length - 1))
 			const unit = units[ci]
 			const range = sentenceRangeOf(unit.origin)
 			let span : SelSpan
@@ -652,9 +628,23 @@
 			// 起点段矩形按选区起点行取（跨行想法的估算基准落在起点行；锚点实测以端点动态查询为准）
 			const sn = normalizeSpan(span)
 			const fromRi = lineIndexOfOrigin(sn.fromOrigin)
-			popoverRef.value?.beginSelection(span, rects[fromRi].left, rects[fromRi].top, clientX, LINE_CHAR_COUNT, 0)
+			popoverRef.value?.$callMethod('beginSelection', span, rects[fromRi].left ?? 0, rects[fromRi].top ?? 0, clientX, LINE_CHAR_COUNT, 0)
 		}).exec()
 	}
+
+	/** 长按诗行：整行选中（窄屏诗行即句、宽屏合并行即一句，对齐阅读页句间吸附语义），选区在气泡组件内建立；
+	 *  同批次预查全部行矩形回传拖动映射缓存——拖动开始事件里的异步查询回来前 touchmove
+	 *  会因映射为空被丢弃（表现为主柄拖不动），长按时预查使拖动首帧即跟手 */
+	function onLineLongPress(ri : number, e : any) : void {
+		// vdom 模板 $event 为 Any（引擎差异见 项目规范 3.4），内部断言为触摸事件
+		const te = e as UniTouchEvent
+		if (te.touches.length == 0) {
+			return
+		}
+		onLineLongPressAt(ri, te.touches[0].clientX)
+	}
+
+	/** 长按核心（触摸与 Web 鼠标桥接共用；pressX 为按点视口横坐标，列命中按渲染单元查表换算 origin/列） */
 
 	/** 锚点实测（组件 emit queryAnchors）：同批次查询选区两端字符单元与所在行矩形回传差分定位；
 	 *  锚点按选区端点动态取字符单元（idx 0-6 字单元 / 7 行尾标点单元，id 恒按笔记行号编码）：
@@ -676,17 +666,18 @@
 				if (arr[0] == null || arr[1] == null) {
 					return
 				}
-				popoverRef.value?.setAnchors(n, arr[0]!, arr[1]!, arr[2]!, arr[3]!, 0, 0)
+				popoverRef.value?.$callMethod('setAnchors', n, arr[0]!, arr[1]!, arr[2]!, arr[3]!, 0, 0)
 			})
 	}
 
 	/** 拖动开始（组件 emit dragStarted）：幂等刷新行矩形缓存（长按已预查，此处防御布局变化） */
 	function onDragStarted() : void {
-		uni.createSelectorQuery().selectAll('.poem-line').boundingClientRect((rects : NodeInfo[]) : void => {
+		uni.createSelectorQuery().selectAll('.poem-line').boundingClientRect((res : any) : void => {
+			const rects = res == null ? null : (res as NodeInfo[])
 			if (rects == null) {
 				return
 			}
-			popoverRef.value?.setDragRects(buildDragRects(rects))
+			popoverRef.value?.$callMethod('setDragRects', buildDragRects(rects))
 		}).exec()
 	}
 
@@ -700,8 +691,28 @@
 		if (selSpan.value == null) {
 			return
 		}
-		popoverRef.value?.hideSelection()
+		popoverRef.value?.$callMethod('hideSelection')
 	}
+
+	/** 折叠屏展开/折叠、旋转、桌面拖宽：窗口尺寸变化后更新页面尺寸并重建排版度量（rpx 换算系数随窗口宽变化），
+	 *  清除进行中的选区。App 端暂无 onResize 事件，由 onShow 比对窗口尺寸兜底（回前台时尺寸已变则重标定） */
+	function syncViewport() : void {
+		const win = uni.getWindowInfo()
+		if (win.windowWidth == pageW.value && win.windowHeight == pageH.value) {
+			return
+		}
+		pageW.value = win.windowWidth
+		pageH.value = win.windowHeight
+		poemMetrics.value = buildPoemMetrics()
+		clearSelection()
+		// 微信端折叠切换自愈（其他端空实现）：布局残留错乱按新窗口重载
+		scheduleResizeReload(pageW.value, '/pages/index/index')
+	}
+	// #ifndef APP-ANDROID || APP-IOS || APP-HARMONY
+	onResize(() : void => {
+		syncViewport()
+	})
+	// #endif
 
 	// #ifdef WEB
 	/** 桌面端无 touch 事件：鼠标桥接诗行长按（按下诗行 350ms 未移动即触发，对齐 uni-app longpress 时长） */
@@ -770,7 +781,9 @@
 
 	/** 行点击：选区打开时清除（长按松手不触发 click，无冲突）；无选区时行级预筛想法后
 	 *  按点击字符单元查表换算 origin/列精判命中——弹查看卡片（锚定该行上下，与阅读页点击查看同语义） */
-	function onPoemTap(ri : number, e : UniPointerEvent) : void {
+	function onPoemTap(ri : number, e : any) : void {
+		// vdom 模板 $event 为 Any（项目规范 3.4），内部断言为指针事件
+		const pe = e as UniPointerEvent
 		// #ifdef WEB
 		// 鼠标长按命中时吞掉随后的合成 click（防止气泡出现即被行点击清除选区）
 		if (webLineTapSuppressed) {
@@ -798,16 +811,17 @@
 		if (!hasThought) {
 			return
 		}
-		uni.createSelectorQuery().select('#poem-line-' + ri).boundingClientRect((rect : NodeInfo | null) : void => {
+		uni.createSelectorQuery().select('#poem-line-' + ri).boundingClientRect((res : any) : void => {
+			const rect = res == null ? null : (res as NodeInfo | null)
 			if (rect == null) {
 				return
 			}
 			const units = renderLines.value[ri].units
-			const ci = Math.max(0, Math.min(Math.floor((e.clientX - rect.left) / poemMetrics.value.charW), units.length - 1))
+			const ci = Math.max(0, Math.min(Math.floor((pe.clientX - (rect.left ?? 0)) / poemMetrics.value.charW), units.length - 1))
 			const unit = units[ci]
 			const hit = thoughtAt(thoughts.value, 0, unit.origin, unit.col)
 			if (hit != null) {
-				popoverRef.value?.showThoughtView(hit.quote, hit.content, rect.bottom, rect.top)
+				popoverRef.value?.$callMethod('showThoughtView', hit.quote, hit.content, rect.bottom ?? 0, rect.top ?? 0)
 			}
 		}).exec()
 	}
@@ -840,8 +854,13 @@
 
 	/** 气泡动作提示（复制成功/失败、查询占位，经阅读提示卡片组件展示） */
 	function showToast(msg : string) : void {
-		toastRef.value?.show(msg)
+		toastRef.value?.$callMethod('show', msg)
 	}
+
+	onShow(() => {
+		syncViewport()
+		loadHomeNotes()
+	})
 </script>
 
 <style lang="scss">

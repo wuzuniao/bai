@@ -2,9 +2,9 @@
  * 划词子系统词典段（components/selection/*：SelectionPopover/ThoughtPanel/ShareCard）
  * 模块载入时注册进 i18n 全局词典；相关组件引入本文件即完成注册。
  */
-import { registerDict, Dict } from '../i18n'
+import { registerDict } from '../i18n'
 
-const zh: Dict = new Map<string, string>([
+const zh = new Map<string, string>([
 	['sel.copy', '复制'],
 	['sel.thought', '写想法'],
 	['sel.underline', '划线'],
@@ -18,6 +18,7 @@ const zh: Dict = new Map<string, string>([
 	['sel.savedDownloads', '已保存到下载'],
 	['sel.savedAlbum', '已保存到相册'],
 	['sel.saveFail', '保存失败，请重试'],
+	['sel.shareTodo', '分享长图暂不支持当前端'],
 	['sel.saveFailPerm', '保存失败，请检查相册权限'],
 	['sel.coverFailCanvas', '转发封面生成失败：画布不可用'],
 	['sel.coverFailExport', '转发封面生成失败：导出失败'],
@@ -26,7 +27,7 @@ const zh: Dict = new Map<string, string>([
 	['sel.copied', '已复制到剪贴板']
 ])
 
-const en: Dict = new Map<string, string>([
+const en = new Map<string, string>([
 	['sel.copy', 'Copy'],
 	['sel.thought', 'Note'],
 	['sel.underline', 'Underline'],
@@ -40,6 +41,7 @@ const en: Dict = new Map<string, string>([
 	['sel.savedDownloads', 'Saved to Downloads'],
 	['sel.savedAlbum', 'Saved to album'],
 	['sel.saveFail', 'Save failed, try again'],
+	['sel.shareTodo', 'Share image is not supported on this platform yet'],
 	['sel.saveFailPerm', 'Save failed, check album permission'],
 	['sel.coverFailCanvas', 'Share cover failed: canvas unavailable'],
 	['sel.coverFailExport', 'Share cover failed: export error'],

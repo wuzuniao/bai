@@ -384,9 +384,10 @@ function startRestoreChain(): Promise<RestoredAuthState | null> {
 	})()
 	restoreChain = chain
 	// 结束后重置共享标记（不使用 finally，兼容旧引擎）
-	chain.then((_res: RestoredAuthState | null) => {
+	chain.then((_res : RestoredAuthState | null) : void => {
 		restoreChain = null
-	}, (_e) => {
+	}, (_e : any) : void => {
+		// 拒绝原因无类型（平台边界），显式 any
 		restoreChain = null
 	})
 	return chain as Promise<RestoredAuthState | null>

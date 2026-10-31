@@ -3,9 +3,9 @@
  * （pages/user/contact.uvue、help.uvue、delete-account.uvue）
  * 模块载入时注册进 i18n 全局词典；三个页面引入本文件即完成注册。
  */
-import { registerDict, Dict } from '../../../utils/i18n'
+import { registerDict } from '../../../utils/i18n'
 
-const zh: Dict = new Map<string, string>([
+const zh = new Map<string, string>([
 	['contact.title', '联系我们'],
 	['contact.desc', '如果您在使用过程中遇到任何问题，欢迎随时联系我们。'],
 	['contact.shareTitle', '联系我们'],
@@ -49,7 +49,7 @@ const zh: Dict = new Map<string, string>([
 	['messages.markAllDone', '已全部标记为已读']
 ])
 
-const en: Dict = new Map<string, string>([
+const en = new Map<string, string>([
 	['contact.title', 'Contact Us'],
 	['contact.desc', 'If you run into any issues while using the app, feel free to contact us anytime.'],
 	['contact.shareTitle', 'Contact Us'],

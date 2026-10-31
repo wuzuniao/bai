@@ -1,5 +1,6 @@
 <script setup lang="uts">
 	import { fetchPreferences, syncQuiet } from '@/api/reading.uts'
+	import type { ApiResponse } from '@/utils/requestDefs.ts'
 	import { applyCloudPreferences } from '@/utils/books.uts'
 	import { hasAccessToken } from '@/utils/request.uts'
 	import { initLocale, t } from '@/utils/i18n.uts'
@@ -18,7 +19,8 @@
 		// 云端偏好预取：落本地缓存（reader_settings/reader_font/bookshelf_style），
 		// 各组件首帧读取本地键即可拿到云端值；未登录不发请求（走本地默认）
 		if (hasAccessToken()) {
-			syncQuiet(fetchPreferences().then((res) => {
+			// then 回调参数与返回值显式标注（vdom 下推断缺失会连锁报 syncQuiet 参数不匹配，项目规范 3.4）
+			syncQuiet(fetchPreferences().then((res : ApiResponse) : ApiResponse => {
 				if (res.code == 0) {
 					// uts2js（小程序/H5）的 UTSJSONObject 无 getUTSJSONObject 方法，嵌套对象索引访问（与 request.uts 解析约定一致）
 					applyCloudPreferences(res.data == null ? null : (res.data!['prefs'] as UTSJSONObject | null))

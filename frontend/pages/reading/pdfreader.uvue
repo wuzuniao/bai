@@ -39,6 +39,7 @@
 <script setup lang="uts">
 	import { mpCapsuleRect, CONTENT_CAP_PX, scheduleResizeReload } from '@/utils/layout.uts'
 	import { findBook, loadPdfProgress, savePdfProgress, updateBookReading, createReadingClock } from '@/utils/books.uts'
+	import type { PdfProgress } from '@/utils/booksDefs.ts'
 	import { openPdfSession } from '@/utils/pdfrender.uts'
 	import { t, tf } from '@/utils/i18n.uts'
 	// 词典注册（reader/pdfreader 页文案）
@@ -108,64 +109,80 @@
 	})
 	// #endif
 
-	onLoad((options : OnLoadOptions) : void => {
-		const win = uni.getWindowInfo()
-		winW.value = Math.min(win.windowWidth, CONTENT_CAP_PX)
-		winH = win.windowHeight
-		// 小程序端顶栏与胶囊对齐，其余端状态栏下（App/Web：statusBarHeight 恒 0 时保持默认）
-		const capsule = mpCapsuleRect()
-		if (capsule != null) {
-			navTop.value = capsule.top
-			navHeight.value = capsule.height
-		} else if (win.statusBarHeight > 0) {
-			navTop.value = win.statusBarHeight
-		}
-		const bid = options['bookId']
-		const bidNum = bid != null ? parseInt(bid) : 0
-		// 0/非法为异常入参；负数 id 为离线导入待同步书籍，正常打开
-		if (bidNum == 0 || isNaN(bidNum)) {
-			uni.showToast({ title: t('reader.bookMissing'), icon: 'none' })
-			setTimeout(() => {
-				uni.navigateBack()
-			}, 1200)
-			return
-		}
-		openPdfBook(bidNum)
-	})
-
-	onShow(() => {
-		readingClock.onShown()
-	})
-
-	/** 折叠屏展开/折叠、旋转、桌面拖宽：更新正文区实宽，页 wrapper 高随动重算。
-	 *  页图按旧宽度渲染的位图经 aspectFit 等比缩放展示（轻微清晰度差异接受）；
-	 *  App 端暂无 onResize 事件（vapor 暂不支持），重开页面自动按新尺寸初始化 */
-	// #ifndef APP-ANDROID || APP-IOS || APP-HARMONY
-	onResize(() : void => {
-		const win = uni.getWindowInfo()
-		const w = Math.min(win.windowWidth, CONTENT_CAP_PX)
-		if (w == winW.value) {
-			return
-		}
-		winW.value = w
-		// 微信端折叠切换自愈（其他端空实现）：页图布局按新窗口重载（进度持久化自动恢复）
-		scheduleResizeReload(win.windowWidth, '/pages/reading/pdfreader?bookId=' + bookId.value)
-	})
-	// #endif
-
-	/** 根节点触摸：记录操作时间；距上次操作超 10 分钟则上一会话以「最后操作+10min」入账并重新起算 */
-	function onPageTouchStart() : void {
-		readingClock.onActive(bookId.value)
+	/** 逐页渲染全部缺失页：主线程 setTimeout 分片调度（单页数十毫秒，间歇让出保持交互），中断（页面卸载）即停 */
+	function renderAll(pdfPath : string, dir : string) : Promise<boolean> {
+		return new Promise<boolean>((resolve) => {
+			try {
+				uni.getFileSystemManager().mkdirSync(dir, true)
+			} catch (e) {
+				// 目录已存在属正常
+			}
+			openPdfSession(pdfPath).then((session) => {
+				if (session.pageCount != pageCount.value) {
+					// 以实际页数为准（书架记录异常时自愈）
+					pageCount.value = session.pageCount
+				}
+				const total = session.pageCount
+				session.pageSize(0).then((dim) => {
+					if (pageRatio.value <= 0) {
+						pageRatio.value = dim.h / dim.w
+					}
+					// 渲染分辨率：屏逻辑宽 × dpr，上限 1440（清晰度与体积平衡）
+					// vdom 的窗口结果字段名为 pixelRatio（非空）
+					const dpr = uni.getWindowInfo().pixelRatio
+					const targetW = Math.min(1440, Math.max(720, Math.round(winW.value * (dpr > 0 ? dpr : 2))))
+					// 自递归闭包在 Kotlin 下无法在初始化器中自引用：先声明占位函数值再赋真实实现
+					let renderNext : (index : number) => void = (_i : number) : void => {}
+					renderNext = (index : number) : void => {
+						if (disposed) {
+							session.close()
+							resolve(false)
+							return
+						}
+						if (index >= total) {
+							session.close()
+							resolve(true)
+							return
+						}
+						renderTip.value = tf('pdfreader.rendering', [(index + 1).toString(), total.toString()])
+						session.renderPage(index, dir + '/p' + (index + 1) + '.jpg', targetW).then(() => {
+							setTimeout(() => {
+								renderNext(index + 1)
+							}, 0)
+						}, (_e : any) : void => {
+							session.close()
+							resolve(false)
+						})
+					}
+					renderNext(0)
+				}, (_e : any) : void => {
+					session.close()
+					resolve(false)
+				})
+			}, (_e : any) : void => {
+				resolve(false)
+			})
+		})
 	}
 
-	onHide(() => {
-		persistReading()
-	})
+	/** 统计已缓存的页图数（缓存齐全则跳过渲染） */
+	function countCached(dir : string) : number {
+		try {
+			const files = uni.getFileSystemManager().readdirSync(dir)
+			return files != null ? files.length : 0
+		} catch (e) {
+			return 0
+		}
+	}
 
-	onUnload(() => {
-		disposed = true
-		persistReading()
-	})
+	/** 构建逐页渲染项（src 指向沙盒页图缓存） */
+	function buildPages(dir : string) : void {
+		const items : PageEntry[] = []
+		for (let i = 1; i <= pageCount.value; i++) {
+			items.push({ num: i, src: dir + '/p' + i + '.jpg' } as PageEntry)
+		}
+		pageItems.value = items
+	}
 
 	/** 打开 PDF 书：校验 → 恢复布局参数 → 补渲染缺失页 → 构建页列表 → 定位恢复进度 */
 	async function openPdfBook(bid : number) : Promise<void> {
@@ -225,77 +242,78 @@
 		}
 	}
 
-	/** 统计已缓存的页图数（缓存齐全则跳过渲染） */
-	function countCached(dir : string) : number {
-		try {
-			const files = uni.getFileSystemManager().readdirSync(dir)
-			return files != null ? files.length : 0
-		} catch (e) {
-			return 0
+	onLoad((options : OnLoadOptions) : void => {
+		const win = uni.getWindowInfo()
+		winW.value = Math.min(win.windowWidth, CONTENT_CAP_PX)
+		winH = win.windowHeight
+		// 小程序端顶栏与胶囊对齐，其余端状态栏下（App/Web：statusBarHeight 恒 0 时保持默认）
+		const capsule = mpCapsuleRect()
+		if (capsule != null) {
+			navTop.value = capsule.top
+			navHeight.value = capsule.height
+		} else if (win.statusBarHeight > 0) {
+			navTop.value = win.statusBarHeight
 		}
+		const bid = options['bookId']
+		const bidNum = bid != null ? parseInt(bid) : 0
+		// 0/非法为异常入参；负数 id 为离线导入待同步书籍，正常打开
+		if (bidNum == 0 || isNaN(bidNum)) {
+			uni.showToast({ title: t('reader.bookMissing'), icon: 'none' })
+			setTimeout(() => {
+				uni.navigateBack()
+			}, 1200)
+			return
+		}
+		openPdfBook(bidNum)
+	})
+
+	onShow(() => {
+		readingClock.onShown()
+	})
+
+	/** 折叠屏展开/折叠、旋转、桌面拖宽：更新正文区实宽，页 wrapper 高随动重算。
+	 *  页图按旧宽度渲染的位图经 aspectFit 等比缩放展示（轻微清晰度差异接受）；
+	 *  App 端暂无 onResize 事件（vapor 暂不支持），重开页面自动按新尺寸初始化 */
+	// #ifndef APP-ANDROID || APP-IOS || APP-HARMONY
+	onResize(() : void => {
+		const win = uni.getWindowInfo()
+		const w = Math.min(win.windowWidth, CONTENT_CAP_PX)
+		if (w == winW.value) {
+			return
+		}
+		winW.value = w
+		// 微信端折叠切换自愈（其他端空实现）：页图布局按新窗口重载（进度持久化自动恢复）
+		scheduleResizeReload(win.windowWidth, '/pages/reading/pdfreader?bookId=' + bookId.value)
+	})
+	// #endif
+
+	/** 根节点触摸：记录操作时间；距上次操作超 10 分钟则上一会话以「最后操作+10min」入账并重新起算 */
+	function onPageTouchStart() : void {
+		readingClock.onActive(bookId.value)
 	}
 
-	/** 构建逐页渲染项（src 指向沙盒页图缓存） */
-	function buildPages(dir : string) : void {
-		const items : PageEntry[] = []
-		for (let i = 1; i <= pageCount.value; i++) {
-			items.push({ num: i, src: dir + '/p' + i + '.jpg' } as PageEntry)
+	/** 结算阅读：进度百分比落库（书籍记录云端跟随） + 回写最近阅读状态 + 累计今日时长（onHide 先于 onUnload，时钟结算防双计） */
+	function persistReading() : void {
+		if (bookId.value == 0) {
+			return
 		}
-		pageItems.value = items
+		savePdfProgress(bookId.value, { percent: curPercent.value, ratio: pageRatio.value } as PdfProgress)
+		updateBookReading(bookId.value, -1, Math.round(curPercent.value))
+		readingClock.settle(bookId.value, false)
 	}
 
-	/** 逐页渲染全部缺失页：主线程 setTimeout 分片调度（单页数十毫秒，间歇让出保持交互），中断（页面卸载）即停 */
-	function renderAll(pdfPath : string, dir : string) : Promise<boolean> {
-		return new Promise<boolean>((resolve) => {
-			try {
-				uni.getFileSystemManager().mkdirSync(dir, true)
-			} catch (e) {
-				// 目录已存在属正常
-			}
-			openPdfSession(pdfPath).then((session) => {
-				if (session.pageCount != pageCount.value) {
-					// 以实际页数为准（书架记录异常时自愈）
-					pageCount.value = session.pageCount
-				}
-				const total = session.pageCount
-				session.pageSize(0).then((dim) => {
-					if (pageRatio.value <= 0) {
-						pageRatio.value = dim.h / dim.w
-					}
-					// 渲染分辨率：屏逻辑宽 × dpr，上限 1440（清晰度与体积平衡）
-					const dpr = uni.getWindowInfo().devicePixelRatio
-					const targetW = Math.min(1440, Math.max(720, Math.round(winW.value * (dpr > 0 ? dpr : 2))))
-					const renderNext = (index : number) : void => {
-						if (disposed) {
-							session.close()
-							resolve(false)
-							return
-						}
-						if (index >= total) {
-							session.close()
-							resolve(true)
-							return
-						}
-						renderTip.value = tf('pdfreader.rendering', [(index + 1).toString(), total.toString()])
-						session.renderPage(index, dir + '/p' + (index + 1) + '.jpg', targetW).then(() => {
-							setTimeout(() => {
-								renderNext(index + 1)
-							}, 0)
-						}, (_e) => {
-							session.close()
-							resolve(false)
-						})
-					}
-					renderNext(0)
-				}, (_e) => {
-					session.close()
-					resolve(false)
-				})
-			}, (_e) => {
-				resolve(false)
-			})
-		})
-	}
+	onHide(() => {
+		persistReading()
+	})
+
+	onUnload(() => {
+		disposed = true
+		persistReading()
+	})
+
+
+
+
 
 	/** 滚动实时记录阅读位置（百分比 + 当前页码；滚动收起顶栏/底栏） */
 	function onScroll(e : UniScrollEvent) : void {
@@ -316,15 +334,6 @@
 		menuVisible.value = !menuVisible.value
 	}
 
-	/** 结算阅读：进度百分比落库（书籍记录云端跟随） + 回写最近阅读状态 + 累计今日时长（onHide 先于 onUnload，时钟结算防双计） */
-	function persistReading() : void {
-		if (bookId.value == 0) {
-			return
-		}
-		savePdfProgress(bookId.value, { percent: curPercent.value, ratio: pageRatio.value } as PdfProgress)
-		updateBookReading(bookId.value, -1, Math.round(curPercent.value))
-		readingClock.settle(bookId.value, false)
-	}
 
 	// #ifdef WEB
 	onReady(() => {

@@ -18,7 +18,7 @@ import { webFsGet, webFsPut } from './webfs'
 export function sanitizeTitle(value : string) : string {
 	let cleaned = ''
 	for (let i = 0; i < value.length; i++) {
-		const code = value.charCodeAt(i)
+		const code = value.charCodeAt(i) ?? 0
 		if (value.charAt(i) != '/' && value.charAt(i) != '\\' && code >= 32) {
 			cleaned += value.charAt(i)
 		}
@@ -59,7 +59,8 @@ export function readBookBytes(path : string) : Promise<ArrayBuffer> {
 	// #ifndef WEB
 	return new Promise<ArrayBuffer>((resolve, reject) => {
 		try {
-			const buf = uni.getFileSystemManager().readFileSync(path) as ArrayBuffer
+			// vdom 的 readFileSync Kotlin 签名两个参数必填：encoding 传 null 语义为无编码（返回 ArrayBuffer）
+			const buf = uni.getFileSystemManager().readFileSync(path, null) as ArrayBuffer
 			resolve(buf)
 		} catch (e) {
 			reject(e)

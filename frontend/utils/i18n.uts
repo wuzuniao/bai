@@ -63,8 +63,13 @@ export function setLocale(l: Locale): void {
 	}
 }
 
-/** 取当前语言文案（缺失回退中文，仍缺失返回 key 本身） */
-export function t(key: string): string {
+/**
+ * 取当前语言文案（缺失回退中文，仍缺失返回 key 本身）。
+ * 以 const 函数值而非顶层 function 导出——vdom（非蒸汽）模式下模板直呼顶层 function
+ * 会在生成的 Kotlin 里形成裸函数引用（unref(t)）而编译失败（Function invocation expected），
+ * 函数值则可正常 invoke。tf 同理。
+ */
+export const t = (key : string) : string => {
 	const dict = locale.value == 'en' ? enDict : zhDict
 	const v = dict.get(key)
 	if (v != null) {
@@ -79,7 +84,7 @@ export function t(key: string): string {
 }
 
 /** 带占位符文案：词典值中的 {0}{1} 依序替换为 args 各项 */
-export function tf(key: string, args: string[]): string {
+export const tf = (key : string, args : string[]) : string => {
 	let s = t(key)
 	for (let i = 0; i < args.length; i++) {
 		s = s.replace('{' + i.toString() + '}', args[i])

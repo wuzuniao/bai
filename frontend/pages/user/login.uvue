@@ -211,7 +211,7 @@
 		}
 		// 隐私协议勾选校验：未勾选时显示确认弹窗
 		if (!remember.value) {
-			confirmAgreement(t('login.agreeContent'), remember, handleLogin)
+			confirmAgreement(t('login.agreeContent'), remember, () : void => { handleLogin() })
 			return
 		}
 		submitting.value = true
@@ -257,7 +257,7 @@
 		}
 		// 隐私协议勾选校验：未勾选时弹出确认对话框，确认后自动勾选并重入
 		if (!fingerprintAgree.value) {
-			confirmAgreement(t('login.agreeContent'), fingerprintAgree, handleFingerprintLogin)
+			confirmAgreement(t('login.agreeContent'), fingerprintAgree, () : void => { handleFingerprintLogin() })
 			return
 		}
 		const token = getBiometricToken()

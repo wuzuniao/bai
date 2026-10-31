@@ -22,8 +22,8 @@ export const REWARD_TIERS: RewardTier[] = [
 ]
 
 /** 档位领取总额（基础 + 额外赠送） */
-export function tierTotalReward(t: RewardTier) : number {
-	return t.base + t.bonus
+export function tierTotalReward(base: number, bonus: number) : number {
+	return base + bonus
 }
 
 /**

@@ -145,6 +145,7 @@
 	import ThoughtPanel from '@/components/selection/ThoughtPanel.uvue'
 	import ShareCard from '@/components/selection/ShareCard.uvue'
 	import { t } from '@/utils/i18n.uts'
+	import { rpxToPx } from '@/utils/layout.uts'
 	// 词典注册（划词子系统文案）
 	import '@/utils/locales/selectioncomp.uts'
 	import '@/utils/locales/common.uts'
@@ -206,9 +207,20 @@
 
 	const emit = defineEmits(['sync', 'dismiss', 'toast', 'thoughtViewClosed', 'spanChanged', 'dragStarted', 'queryAnchors', 'shareImage'])
 
-	/** ===== 想法/分享子组件引用（浮层功能内聚子组件，本组件经 ref 接线转发） ===== */
-	const thoughtPanelRef = ref<ThoughtPanel | null>(null)
-	const shareCardRef = ref<ShareCard | null>(null)
+	/** ===== 想法/分享子组件引用（浮层功能内聚子组件，本组件经 ref 接线转发）。类型用结构化
+	 *  暴露面而非组件名——vdom 模式下 ref<组件名 | null> 的类型 lowering 会引用未生成的
+	 *  *Class 符号导致编译失败（项目规范 3.4） ===== */
+	type ThoughtPanelExpose = {
+		showThoughtView : (quote : string, content : string, selBottom : number, selTop : number) => void
+		hideThoughtView : () => void
+		openEditor : (quote : string) => void
+	}
+	type ShareCardExpose = {
+		coverImagePath : () => string
+		open : () => void
+	}
+	const thoughtPanelRef = ref<ThoughtPanelExpose | null>(null)
+	const shareCardRef = ref<ShareCardExpose | null>(null)
 
 	/** 气泡定位（px，视口坐标）：体中心跟随焦点（钳制屏幕内），垂直优先上方、空间不足转下方 */
 	const popoverLeft = ref(0)
@@ -225,11 +237,10 @@
 	const POPOVER_EST_H = 52
 	/** 气泡双行布局：五项单行所需宽超过屏宽可用宽时切换，按屏宽判定一次 */
 	const twoLine = ref(false)
-	{
-		const needW = uni.upx2px(449) + 24
-		const availW = props.pageW - uni.upx2px(48)
-		twoLine.value = needW > availW
-	}
+	// 气泡单/双行判定（UTS script setup 顶层不支持裸块语句，块内变量提升并改名）
+	const twoLineNeedW = rpxToPx(449) + 24
+	const twoLineAvailW = props.pageW - rpxToPx(48)
+	twoLine.value = twoLineNeedW > twoLineAvailW
 
 	/** ===== 划词子系统（选区状态/手柄/拖动/句间吸附内聚；正文锚点与段落矩形由宿主查询回传） ===== */
 	/** 划词选区（跨段选区：从起点段/字符到终点段/字符的闭区间） */
@@ -322,8 +333,8 @@
 		if (s.fromOrigin != s.toOrigin || s.fromCid != s.toCid) {
 			return
 		}
-		const hotH = uni.upx2px(HANDLE_HOT_RPX)
-		const visH = uni.upx2px(HANDLE_VISUAL_RPX)
+		const hotH = rpxToPx(HANDLE_HOT_RPX)
+		const visH = rpxToPx(HANDLE_VISUAL_RPX)
 		// 选区同段内才能按排版估算；段长为建立选区时宿主提供的起点段文本长度
 		const len = beginParaLen
 		if (len <= 0) {
@@ -340,13 +351,21 @@
 	}
 
 	/** 锚点矩形可用性校验：与段落矩形同一查询批次（坐标系一致），做相对包含性校验；
-	 *  异常矩形（如未渲染返回的 (0,0) 默认值）判不可用，退回行列估算 */
+	 *  异常矩形（如未渲染返回的 (0,0) 默认值）判不可用，退回行列估算。
+	 *  NodeInfo 字段在类型上可空，Kotlin 侧禁止可空值参与算术，统一 ?? 0 兜底 */
 	function anchorUsable(a : NodeInfo, para : NodeInfo, m : TextMetrics) : boolean {
-		const cy = a.top + a.height / 2
-		if (cy < para.top - m.lineH || cy > para.bottom + m.lineH) {
+		const aTop = a.top ?? 0
+		const aHeight = a.height ?? 0
+		const aLeft = a.left ?? 0
+		const pTop = para.top ?? 0
+		const pLeft = para.left ?? 0
+		const pRight = para.right ?? 0
+		const pBottom = para.bottom ?? 0
+		const cy = aTop + aHeight / 2
+		if (cy < pTop - m.lineH || cy > pBottom + m.lineH) {
 			return false
 		}
-		if (a.left < para.left - m.charW || a.left > para.right + m.charW) {
+		if (aLeft < pLeft - m.charW || aLeft > pRight + m.charW) {
 			return false
 		}
 		return true
@@ -354,13 +373,13 @@
 
 	/** 锚点中心相对段落原点的行序号（半行取整，兼容行盒高度为行高或字号的平台差异） */
 	function rowOfAnchor(a : NodeInfo, para : NodeInfo, lineH : number) : number {
-		const cy = a.top + a.height / 2
-		return Math.floor((cy - para.top - lineH / 2) / lineH + 0.5)
+		const cy = (a.top ?? 0) + (a.height ?? 0) / 2
+		return Math.floor((cy - (para.top ?? 0) - lineH / 2) / lineH + 0.5)
 	}
 
 	/** 段落实际行数（元素高度/行高反推）的最大行序号，用于钳制异常行号 */
 	function maxRowOf(para : NodeInfo, lineH : number) : number {
-		const rows = Math.round(para.height / lineH)
+		const rows = Math.round((para.height ?? 0) / lineH)
 		return Math.max(0, rows - 1)
 	}
 
@@ -383,46 +402,58 @@
 	 *  跨章或段落矩形缺失时退回锚点绝对坐标 */
 	function setAnchors(span : SelSpan, anchorStart : NodeInfo | null, anchorEnd : NodeInfo | null, fromPara : NodeInfo | null, toPara : NodeInfo | null, fromSliceFrom : number, toSliceFrom : number) : void {
 		const m = props.metrics
-		const hotH = uni.upx2px(HANDLE_HOT_RPX)
-		const visH = uni.upx2px(HANDLE_VISUAL_RPX)
+		const hotH = rpxToPx(HANDLE_HOT_RPX)
+		const visH = rpxToPx(HANDLE_VISUAL_RPX)
 		const sameChapter = span.fromCid == span.toCid
+		// UTS 无跨语句空值智能转换（Kotlin 侧不生效），可空入参先经 ! 归一为非空局部值，
+		// NodeInfo 字段读取统一 ?? 0（可空值参与算术/赋给非空字段均编译失败）
 		if (sameChapter && fromPara != null && (span.fromOrigin == span.toOrigin || toPara != null)) {
-			const endPara = span.fromOrigin == span.toOrigin ? fromPara : toPara!
+			const fp = fromPara!
+			// 终点段矩形：同段即起点段；跨段取 toPara（上方守卫已保证非空）。
+			// 不用「cond ? a : b!」三元——UTS codegen 对「三元+非空断言」的成员访问解析有缺陷
+			let ep = fp
+			if (span.fromOrigin != span.toOrigin) {
+				ep = toPara!
+			}
 			// 估算兜底：段内行列×排版常量（锚点缺失或矩形异常时使用）
 			const sc = rowColSliced(span.fromStart, fromSliceFrom, m.perLine)
 			const ec = rowColSliced(span.toEnd, toSliceFrom, m.perLine)
 			let startRow = sc[0]
 			let endRow = ec[0]
-			let startX = fromPara.left + (fromSliceFrom == 0 && startRow == 0 ? m.indentPx : 0) + sc[1] * spacingOfRow(sc[1], m.perLine)
-			let endX = endPara.left + (toSliceFrom == 0 && endRow == 0 ? m.indentPx : 0) + (ec[1] + 1) * spacingOfRow(ec[1], m.perLine)
+			let startX = (fp.left ?? 0) + (fromSliceFrom == 0 && startRow == 0 ? m.indentPx : 0) + sc[1] * spacingOfRow(sc[1], m.perLine)
+			let endX = (ep.left ?? 0) + (toSliceFrom == 0 && endRow == 0 ? m.indentPx : 0) + (ec[1] + 1) * spacingOfRow(ec[1], m.perLine)
 			// 锚点实测优先：字符边界 X 取锚点实测值，行序号由锚点中心差分反推（与真实渲染零漂移）；
 			// 起点锚点取矩形左缘、终点锚点取矩形右缘（阅读页零宽锚点两侧相等不受影响，
 			// 非零宽元素锚点——如首页诗行尾标点单元——直接传元素矩形即可表达末字符右缘）
-			if (anchorStart != null && anchorUsable(anchorStart, fromPara, m)) {
-				startRow = rowOfAnchor(anchorStart, fromPara, m.lineH)
-				startX = anchorStart.left
+			if (anchorStart != null && anchorUsable(anchorStart, fp, m)) {
+				const asN = anchorStart!
+				startRow = rowOfAnchor(asN, fp, m.lineH)
+				startX = asN.left ?? 0
 			}
-			if (anchorEnd != null && anchorUsable(anchorEnd, endPara, m)) {
-				endRow = rowOfAnchor(anchorEnd, endPara, m.lineH)
-				endX = anchorEnd.right
+			if (anchorEnd != null && anchorUsable(anchorEnd, ep, m)) {
+				const aeN = anchorEnd!
+				endRow = rowOfAnchor(aeN, ep, m.lineH)
+				endX = aeN.right ?? 0
 			}
 			// 行号钳制进段落实际行数（矩形高度反推），异常值不至飞出段落
-			startRow = Math.max(0, Math.min(startRow, maxRowOf(fromPara, m.lineH)))
-			endRow = Math.max(0, Math.min(endRow, maxRowOf(endPara, m.lineH)))
+			startRow = Math.max(0, Math.min(startRow, maxRowOf(fp, m.lineH)))
+			endRow = Math.max(0, Math.min(endRow, maxRowOf(ep, m.lineH)))
 			handleStartLeft.value = startX - hotH / 2
-			handleStartTop.value = fromPara.top + startRow * m.lineH - visH
+			handleStartTop.value = (fp.top ?? 0) + startRow * m.lineH - visH
 			handleEndLeft.value = endX - hotH / 2
-			handleEndTop.value = endPara.top + endRow * m.lineH + m.lineH - hotH + visH
-			selTopPx.value = fromPara.top + startRow * m.lineH
-			selBottomPx.value = endPara.top + (endRow + 1) * m.lineH
+			handleEndTop.value = (ep.top ?? 0) + endRow * m.lineH + m.lineH - hotH + visH
+			selTopPx.value = (fp.top ?? 0) + startRow * m.lineH
+			selBottomPx.value = (ep.top ?? 0) + (endRow + 1) * m.lineH
 		} else if (anchorStart != null && anchorEnd != null) {
+			const asN = anchorStart!
+			const aeN = anchorEnd!
 			// 跨章/段落矩形缺失：退回锚点绝对坐标
-			handleStartLeft.value = anchorStart.left - hotH / 2
-			handleStartTop.value = anchorStart.top - visH
-			handleEndLeft.value = anchorEnd.right - hotH / 2
-			handleEndTop.value = anchorEnd.bottom - hotH + visH
-			selTopPx.value = anchorStart.top
-			selBottomPx.value = anchorEnd.bottom
+			handleStartLeft.value = (asN.left ?? 0) - hotH / 2
+			handleStartTop.value = (asN.top ?? 0) - visH
+			handleEndLeft.value = (aeN.right ?? 0) - hotH / 2
+			handleEndTop.value = (aeN.bottom ?? 0) - hotH + visH
+			selTopPx.value = asN.top ?? 0
+			selBottomPx.value = aeN.bottom ?? 0
 		} else {
 			return
 		}
@@ -434,14 +465,6 @@
 		}
 		// 实测完成，手柄与气泡以精确位置首次显示
 		selectionLaidOut.value = true
-	}
-
-	/** 手柄拖动（跨段）：触点映射到段落与字符并更新被拖端点；越过另一端时端点互换（原生选择交互）；拖动中手柄视觉跟随手指，松手后由锚点实测吸附真实边界 */
-	function applyHandleDrag(e : UniTouchEvent, isEnd : boolean) : void {
-		if (e.touches.length == 0) {
-			return
-		}
-		applyHandleDragAt(e.touches[0].clientX, e.touches[0].clientY, isEnd)
 	}
 
 	/** 手柄拖动核心（触摸与 Web 鼠标桥接共用；x/y 为触点视口坐标） */
@@ -523,7 +546,7 @@
 				span.toEnd = effCharIdx
 			}
 		}
-		const hotH = uni.upx2px(HANDLE_HOT_RPX)
+		const hotH = rpxToPx(HANDLE_HOT_RPX)
 		// 箭头焦点跟随触点（跨段拖动时气泡随手指移动，避免停留在旧位置无法点击）
 		selFocusX.value = x
 		if (isEnd) {
@@ -537,6 +560,13 @@
 		emit('spanChanged', span)
 	}
 
+	/** 手柄拖动（跨段）：触点映射到段落与字符并更新被拖端点；越过另一端时端点互换（原生选择交互）；拖动中手柄视觉跟随手指，松手后由锚点实测吸附真实边界 */
+	function applyHandleDrag(e : UniTouchEvent, isEnd : boolean) : void {
+		if (e.touches.length == 0) {
+			return
+		}
+		applyHandleDragAt(e.touches[0].clientX, e.touches[0].clientY, isEnd)
+	}
 	function onStartHandleTouchStart() : void {
 		dragStartActive.value = true
 		lastDragEnd = -1
@@ -672,16 +702,16 @@
 		}
 		const selTop = selTopPx.value
 		const selBottom = selBottomPx.value
-		const w = popoverW > 0 ? popoverW : (twoLine.value ? uni.upx2px(290) : POPOVER_EST_W)
+		const w = popoverW > 0 ? popoverW : (twoLine.value ? rpxToPx(290) : POPOVER_EST_W)
 		const h = popoverH > 0 ? popoverH : (twoLine.value ? 100 : POPOVER_EST_H)
 		// 上下间距避开手柄视觉体：起点柄悬于行顶上方、终点柄圆头垂于行底下方，另留 16rpx 呼吸空隙
-		const hotH = uni.upx2px(HANDLE_HOT_RPX)
-		const visH = uni.upx2px(HANDLE_VISUAL_RPX)
-		const gapUp = visH + uni.upx2px(16)
-		const gapDown = hotH - visH + uni.upx2px(16)
-		const arrowH = uni.upx2px(13)
+		const hotH = rpxToPx(HANDLE_HOT_RPX)
+		const visH = rpxToPx(HANDLE_VISUAL_RPX)
+		const gapUp = visH + rpxToPx(16)
+		const gapDown = hotH - visH + rpxToPx(16)
+		const arrowH = rpxToPx(13)
 		// 水平：气泡体中心跟随焦点位置，两侧留边钳制不出屏
-		const margin = uni.upx2px(24)
+		const margin = rpxToPx(24)
 		popoverLeft.value = Math.max(margin, Math.min(selFocusX.value - w / 2, props.pageW - margin - w))
 		// 垂直：上方放得下置上方；否则取上下空间宽裕侧（下方时箭头朝上）
 		const topSpace = selTop - gapUp - arrowH - h
@@ -691,12 +721,31 @@
 			popoverTop.value = Math.max(props.navTop, selTop - gapUp - arrowH - h)
 		} else {
 			below.value = true
-			popoverTop.value = Math.min(selBottom + gapDown + arrowH, props.pageH - h - uni.upx2px(60))
+			popoverTop.value = Math.min(selBottom + gapDown + arrowH, props.pageH - h - rpxToPx(60))
 		}
 		// 箭头（20rpx 方块）指向焦点：焦点在气泡体内时对准其位置、出体时钳到边缘，左缘再扣半宽
-		const arrowMargin = uni.upx2px(30)
+		const arrowMargin = rpxToPx(30)
 		const arrowCenter = Math.max(arrowMargin, Math.min(selFocusX.value - popoverLeft.value, w - arrowMargin))
-		arrowLeft.value = arrowCenter - uni.upx2px(10)
+		arrowLeft.value = arrowCenter - rpxToPx(10)
+	}
+
+	/** 查询气泡体实际尺寸并校正定位（内容固定仅查一次，查询失败允许重试；组件内查询必须 .in 实例） */
+	function measure() : void {
+		const proxy = self == null ? null : self.proxy
+		if (proxy == null) {
+			return
+		}
+		// .in(proxy) 变体的回调入参为 any（与不带 in 的重载签名不同），内部再 as NodeInfo 收窄；
+		// NodeInfo 字段可空，Kotlin 侧禁可空比较/赋值给非空变量，统一 ?? 0 兜底
+		uni.createSelectorQuery().in(proxy).select('.popover-body').boundingClientRect((res : any) : void => {
+			const rect = res as NodeInfo
+			if (rect != null && (rect.width ?? 0) > 0 && (rect.height ?? 0) > 0) {
+				popoverW = rect.width ?? 0
+				popoverH = rect.height ?? 0
+				popoverMeasured = true
+				relocate()
+			}
+		}).exec()
 	}
 
 	/** 气泡重定位回调（任一几何源变化均触发；气泡可见且未实测时延迟实测校正） */
@@ -709,51 +758,19 @@
 		}
 	}
 
-	// 单 getter 源逐个 watch（UTS 强类型下混合类型数组源推断不稳，与项目其余 watch 写法对齐）
-	watch(() => bubbleVisible.value, onRelocateSourceChange)
-	watch(() => selTopPx.value, onRelocateSourceChange)
-	watch(() => selBottomPx.value, onRelocateSourceChange)
-	watch(() => selFocusX.value, onRelocateSourceChange)
+	// 单 getter 源逐个 watch（UTS 强类型下混合类型数组源推断不稳，与项目其余 watch 写法对齐；
+	// getter 需显式标注返回类型，推断缺失会在 Kotlin 侧报 Return type mismatch）
+	watch(() : boolean => bubbleVisible.value, onRelocateSourceChange)
+	watch(() : number => selTopPx.value, onRelocateSourceChange)
+	watch(() : number => selBottomPx.value, onRelocateSourceChange)
+	watch(() : number => selFocusX.value, onRelocateSourceChange)
 
-	/** 查询气泡体实际尺寸并校正定位（内容固定仅查一次，查询失败允许重试；组件内查询必须 .in 实例） */
-	function measure() : void {
-		const proxy = self == null ? null : self.proxy
-		if (proxy == null) {
-			return
-		}
-		uni.createSelectorQuery().in(proxy).select('.popover-body').boundingClientRect((rect : NodeInfo | null) : void => {
-			if (rect != null && rect.width > 0 && rect.height > 0) {
-				popoverW = rect.width
-				popoverH = rect.height
-				popoverMeasured = true
-				relocate()
-			}
-		}).exec()
-	}
 
 	/** 延迟清选区（复制/查询操作后留出感知时间） */
 	function delayDismiss() : void {
 		setTimeout(() => {
 			emit('dismiss')
 		}, 500)
-	}
-
-	/** 气泡操作分发（阻止冒泡避免触发容器点击清选区） */
-	function onAction(e : UniPointerEvent, action : string) : void {
-		e.stopPropagation()
-		if (action === 'copy') {
-			doCopy()
-		} else if (action === 'idea') {
-			// 打开想法编辑器（子组件内聚：输入/保存/同步划线），编辑期间保留选区
-			thoughtPanelRef.value?.openEditor(props.text)
-		} else if (action === 'underline') {
-			doUnderline()
-		} else if (action === 'query') {
-			emit('toast', t('sel.queryTodo'))
-			delayDismiss()
-		} else if (action === 'share') {
-			shareCardRef.value?.open()
-		}
 	}
 
 	/** 复制：选区文本写入剪贴板（微信端系统强制「内容已复制」提示，只保留系统提示） */
@@ -793,6 +810,26 @@
 		applySpanUnderlineToStorage(props.segs, false)
 		emit('sync')
 		emit('dismiss')
+	}
+
+	/** 气泡操作分发（阻止冒泡避免触发容器点击清选区）。vdom 模式模板 $event 为 Any
+	 *  （引擎差异见 项目规范 3.4），入参收 any、内部断言为指针事件 */
+	function onAction(e : any, action : string) : void {
+		const pe = e as UniPointerEvent
+		pe.stopPropagation()
+		if (action === 'copy') {
+			doCopy()
+		} else if (action === 'idea') {
+			// 打开想法编辑器（子组件内聚：输入/保存/同步划线），编辑期间保留选区
+			thoughtPanelRef.value?.openEditor(props.text)
+		} else if (action === 'underline') {
+			doUnderline()
+		} else if (action === 'query') {
+			emit('toast', t('sel.queryTodo'))
+			delayDismiss()
+		} else if (action === 'share') {
+			shareCardRef.value?.open()
+		}
 	}
 
 	/** ===== 宿主调用入口（划词协议 + 想法查看卡片开关转发子组件） ===== */

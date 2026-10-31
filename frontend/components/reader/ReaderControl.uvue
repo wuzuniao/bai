@@ -135,9 +135,18 @@
 
 	const emit = defineEmits(['back', 'toggleDrawer', 'toggleSettings', 'listen', 'selectChapter', 'goBookmark', 'goNote', 'toast', 'change', 'bookmarksChanged'])
 
-	/** ===== 子组件引用（真源在子组件，本组件只做转发与镜像派生） ===== */
-	const drawerPanelRef = ref<DrawerPanel | null>(null)
-	const settingsPanelRef = ref<SettingsPanel | null>(null)
+	/** ===== 子组件引用（真源在子组件，本组件只做转发与镜像派生）。类型用结构化暴露面而非
+	 *  组件名——vdom 模式下 ref<组件名 | null> 的类型 lowering 会引用未生成的 *Class 符号
+	 *  导致编译失败（项目规范 3.4） ===== */
+	type DrawerPanelExpose = {
+		addBookmark : (chapterId : number, pageIndex : number) => void
+		removeBookmark : (chapterId : number, pageIndex : number) => void
+	}
+	type SettingsPanelExpose = {
+		setTheme : (key : string) => void
+	}
+	const drawerPanelRef = ref<DrawerPanelExpose | null>(null)
+	const settingsPanelRef = ref<SettingsPanelExpose | null>(null)
 
 	/** ===== 设置镜像（真源在 SettingsPanel：面板 change 上行同步，用于主题派生渲染） ===== */
 	const settingsMirror = ref<ReaderSettings>(loadSettings())
@@ -158,15 +167,13 @@
 	/** 顶部导航内容行（px）：与小程序胶囊同行对齐（状态栏高度起、行高 40px） */
 	const navTop = ref(44)
 	const navHeight = ref(40)
-	/** 目录抽屉高度（px）：固定为页面高度的三分之二 */
+	/** 目录抽屉高度（px）：固定为页面高度的三分之二（UTS script setup 顶层不支持裸块语句） */
 	const drawerPanelHeight = ref(500)
-	{
-		const win = uni.getWindowInfo()
-		if (win.statusBarHeight > 0) {
-			navTop.value = win.statusBarHeight
-		}
-		drawerPanelHeight.value = Math.floor(win.windowHeight * 2 / 3)
+	const winInfo = uni.getWindowInfo()
+	if (winInfo.statusBarHeight > 0) {
+		navTop.value = winInfo.statusBarHeight
 	}
+	drawerPanelHeight.value = Math.floor(winInfo.windowHeight * 2 / 3)
 
 	/** ===== 交互事件上行（导航类耦合宿主正文） ===== */
 	function onBack() : void {

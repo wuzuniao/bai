@@ -201,19 +201,7 @@
 		dark: boolean
 	}
 
-	/** 阅读最久书籍行 */
-	type BookRow = {
-		title: string
-		coverChar: string
-		totalText: string
-	}
 
-	/** 排行榜行（username 为空串时显示占位文案） */
-	type RankRow = {
-		userId: number
-		username: string
-		totalText: string
-	}
 
 	const PERIOD_TABS: PeriodTab[] = [
 		{ key: 'week', label: 'stats.tabWeek' } as PeriodTab,
@@ -234,7 +222,6 @@
 
 	/** 当前周期与锚点日期（锚点为周期内任一日期，周/月/年切换周期用） */
 	const period = ref('month')
-	const anchor = ref(todayStr())
 
 	// ── 报表数据 ──
 	const startDate = ref('')
@@ -269,14 +256,15 @@
 		return n < 10 ? '0' + n : '' + n
 	}
 
-	function todayStr() : string {
-		const d = new Date()
-		return fmtDate(d.getFullYear(), d.getMonth() + 1, d.getDate())
-	}
 
 	function fmtDate(y : number, m : number, d : number) : string {
 		return '' + y + '-' + pad2(m) + '-' + pad2(d)
 	}
+	function todayStr() : string {
+		const d = new Date()
+		return fmtDate(d.getFullYear(), d.getMonth() + 1, d.getDate())
+	}
+	const anchor = ref(todayStr())
 
 	/** 分钟数 → 「X小时Y分钟 / X小时 / Y分钟」（i18n） */
 	function fmtMinutes(mins : number) : string {
@@ -332,6 +320,18 @@
 
 	/** 周期总时长文案 */
 	const totalText = computed((): string => fmtMinutes(totalMinutes.value))
+	/** 阅读最久书籍行 */
+	type BookRow = {
+		title: string
+		coverChar: string
+		totalText: string
+	}
+	/** 排行榜行（username 为空串时显示占位文案） */
+	type RankRow = {
+		userId: number
+		username: string
+		totalText: string
+	}
 
 	/** 统计视图空数据：报表已加载且周期内无阅读时长 */
 	const statsEmpty = computed((): boolean => reportReady.value && totalMinutes.value == 0)
@@ -363,64 +363,9 @@
 
 	// ── 交互 ──
 
-	function switchPeriod(key : string) : void {
-		if (period.value == key) {
-			return
-		}
-		period.value = key
-		anchor.value = todayStr()
-		loadReport()
-		if (viewMode.value == 'rank') {
-			reloadRanking()
-		}
-	}
 
-	function shiftPeriod(dir : number) : void {
-		if (dir > 0 && atLatest.value) {
-			return
-		}
-		const p = anchor.value.split('-')
-		const y = parseInt(p[0])
-		const m = parseInt(p[1])
-		const d = parseInt(p[2])
-		if (period.value == 'week') {
-			const dt = new Date(y, m - 1, d + dir * 7)
-			anchor.value = fmtDate(dt.getFullYear(), dt.getMonth() + 1, dt.getDate())
-		} else if (period.value == 'month') {
-			let nm = m + dir
-			let ny = y
-			if (nm > 12) {
-				nm = 1
-				ny++
-			}
-			if (nm < 1) {
-				nm = 12
-				ny--
-			}
-			anchor.value = fmtDate(ny, nm, 1)
-		} else {
-			anchor.value = fmtDate(y + dir, 1, 1)
-		}
-		loadReport()
-		if (viewMode.value == 'rank') {
-			reloadRanking()
-		}
-	}
 
-	/** 排行/统计视图切换（进入排行按当前所选周期重新加载） */
-	function toggleRank() : void {
-		viewMode.value = viewMode.value == 'rank' ? 'stats' : 'rank'
-		if (viewMode.value == 'rank') {
-			reloadRanking()
-		}
-	}
 
-	function reloadRanking() : void {
-		rankList.value = []
-		rankPage.value = 1
-		rankMore.value = true
-		loadRankingPage()
-	}
 
 	async function loadRankingPage() : Promise<void> {
 		if (!loggedIn.value || !rankMore.value || rankLoadingMore.value) {
@@ -434,21 +379,23 @@
 				if (res.code != 0 || res.data == null) {
 					break
 				}
+				const data = res.data as UTSJSONObject
 				const rows: RankRow[] = []
-				const arr = res.data.getArray('list')
+				const arr = data.getArray('list')
 				if (arr != null) {
 					for (let i = 0; i < arr.length; i++) {
-						const mins = arr[i].getNumber('total_minutes') ?? 0
+						const item = arr[i] as UTSJSONObject
+						const mins = item.getNumber('total_minutes') ?? 0
 						rows.push({
-							userId: arr[i].getNumber('user_id') ?? 0,
-							username: arr[i].getString('username') ?? '',
+							userId: item.getNumber('user_id') ?? 0,
+							username: item.getString('username') ?? '',
 							totalText: fmtMinutes(mins)
 						} as RankRow)
 					}
 				}
 				rankList.value = rankList.value.concat(rows)
 				rankPage.value++
-				rankMore.value = res.data.getBoolean('has_more') ?? false
+				rankMore.value = data.getBoolean('has_more') ?? false
 				if (rows.length > 0) {
 					break
 				}
@@ -457,6 +404,19 @@
 			// 静默：保留已加载内容，下次触底再试
 		} finally {
 			rankLoadingMore.value = false
+		}
+	}
+	function reloadRanking() : void {
+		rankList.value = []
+		rankPage.value = 1
+		rankMore.value = true
+		loadRankingPage()
+	}
+	/** 排行/统计视图切换（进入排行按当前所选周期重新加载） */
+	function toggleRank() : void {
+		viewMode.value = viewMode.value == 'rank' ? 'stats' : 'rank'
+		if (viewMode.value == 'rank') {
+			reloadRanking()
 		}
 	}
 
@@ -847,73 +807,7 @@
 		hourTicks.value = buildYTicks(max)
 	}
 
-	async function loadReport() : Promise<void> {
-		if (!hasAccessToken()) {
-			// 未登录：本地数据兜底渲染（暂存会话流水 + 书架缓存 + 笔记缓存，与云端报表同构）
-			renderReport(buildLocalReport(period.value, anchor.value))
-			return
-		}
-		try {
-			const res = await fetchReadingReport(period.value, anchor.value)
-			if (res.code == 0 && res.data != null) {
-				renderReport(res.data)
-			}
-		} catch (e) {
-			// 静默：保留当前展示，下次进入再试
-		}
-	}
 
-	/** 报表渲染（云端与本地兜底共用的同构解析管线） */
-	function renderReport(d : UTSJSONObject | null) : void {
-		if (d == null) {
-			return
-		}
-		startDate.value = d.getString('start_date') ?? ''
-		endDate.value = d.getString('end_date') ?? ''
-		totalMinutes.value = d.getNumber('total_minutes') ?? 0
-		avgMinutes.value = d.getNumber('avg_minutes') ?? 0
-		activeDays.value = d.getNumber('active_days') ?? 0
-		notesCount.value = d.getNumber('notes_count') ?? 0
-		// 趋势：月粒度渲染实际月历，其余粒度渲染条形图
-		const tarr = d.getArray('trend')
-		if (period.value == 'month') {
-			buildCalendar(tarr)
-			trendBars.value = []
-		} else {
-			buildTrendBars(tarr)
-			calendarCells.value = []
-		}
-		buildHourBars(d.getArray('hours'))
-		// 时段偏好标题（按实际高峰分段生成：凌晨/清晨/上午/中午/下午/傍晚/晚上）
-		const tag = d.getString('peak_tag') ?? ''
-		hoursTitle.value = tag.length > 0 ? tf('stats.hoursPref', [segTagLabel(tag)]) : tr('stats.hoursTitle')
-		// 峰值提示条（本期无阅读时长则隐藏）
-		const peak = d['peak'] as UTSJSONObject | null
-		if (peak != null) {
-			const pm = peak.getNumber('minutes') ?? 0
-			const pl = peak.getString('label') ?? ''
-			peakText.value = pm > 0 && pl.length > 0 ? tf('stats.peak', [pl, fmtMinutes(pm)]) : ''
-		} else {
-			peakText.value = ''
-		}
-		// 阅读最久书籍榜 top3
-		const list: BookRow[] = []
-		const barr = d.getArray('books')
-		if (barr != null) {
-			for (let i = 0; i < barr.length; i++) {
-				const o = barr[i]
-				const title = o.getString('book_title') ?? ''
-				const tm = o.getNumber('total_minutes') ?? 0
-				list.push({
-					title: title,
-					coverChar: title.length > 0 ? title.substring(0, 1) : tr('stats.coverChar'),
-					totalText: fmtMinutes(tm)
-				} as BookRow)
-			}
-		}
-		bookList.value = list
-		reportReady.value = true
-	}
 
 	/** 时段偏好标签 → 文案（后端/本地报表 peak_tag 为中文枚举，按值映射 i18n 词条；未知值兜底凌晨段） */
 	function segTagLabel(tag: string) : string {
@@ -936,6 +830,114 @@
 			return tr('stats.segNight')
 		}
 		return tr('stats.segEarly')
+	}
+	/** 报表渲染（云端与本地兜底共用的同构解析管线） */
+	function renderReport(d : UTSJSONObject | null) : void {
+		if (d == null) {
+			return
+		}
+		startDate.value = d.getString('start_date') ?? ''
+		endDate.value = d.getString('end_date') ?? ''
+		totalMinutes.value = d.getNumber('total_minutes') ?? 0
+		avgMinutes.value = d.getNumber('avg_minutes') ?? 0
+		activeDays.value = d.getNumber('active_days') ?? 0
+		notesCount.value = d.getNumber('notes_count') ?? 0
+		// 趋势：月粒度渲染实际月历，其余粒度渲染条形图
+		const tarr = d.getArray('trend') as UTSJSONObject[] | null
+		if (period.value == 'month') {
+			buildCalendar(tarr)
+			trendBars.value = []
+		} else {
+			buildTrendBars(tarr)
+			calendarCells.value = []
+		}
+		buildHourBars(d.getArray('hours') as UTSJSONObject[] | null)
+		// 时段偏好标题（按实际高峰分段生成：凌晨/清晨/上午/中午/下午/傍晚/晚上）
+		const tag = d.getString('peak_tag') ?? ''
+		hoursTitle.value = tag.length > 0 ? tf('stats.hoursPref', [segTagLabel(tag)]) : tr('stats.hoursTitle')
+		// 峰值提示条（本期无阅读时长则隐藏）
+		const peak = d['peak'] as UTSJSONObject | null
+		if (peak != null) {
+			const pm = peak.getNumber('minutes') ?? 0
+			const pl = peak.getString('label') ?? ''
+			peakText.value = pm > 0 && pl.length > 0 ? tf('stats.peak', [pl, fmtMinutes(pm)]) : ''
+		} else {
+			peakText.value = ''
+		}
+		// 阅读最久书籍榜 top3
+		const list: BookRow[] = []
+		const barr = d.getArray('books')
+		if (barr != null) {
+			for (let i = 0; i < barr.length; i++) {
+				const o = barr[i] as UTSJSONObject
+				const title = o.getString('book_title') ?? ''
+				const tm = o.getNumber('total_minutes') ?? 0
+				list.push({
+					title: title,
+					coverChar: title.length > 0 ? title.substring(0, 1) : tr('stats.coverChar'),
+					totalText: fmtMinutes(tm)
+				} as BookRow)
+			}
+		}
+		bookList.value = list
+		reportReady.value = true
+	}
+	async function loadReport() : Promise<void> {
+		if (!hasAccessToken()) {
+			// 未登录：本地数据兜底渲染（暂存会话流水 + 书架缓存 + 笔记缓存，与云端报表同构）
+			renderReport(buildLocalReport(period.value, anchor.value))
+			return
+		}
+		try {
+			const res = await fetchReadingReport(period.value, anchor.value)
+			if (res.code == 0 && res.data != null) {
+				renderReport(res.data)
+			}
+		} catch (e) {
+			// 静默：保留当前展示，下次进入再试
+		}
+	}
+	function switchPeriod(key : string) : void {
+		if (period.value == key) {
+			return
+		}
+		period.value = key
+		anchor.value = todayStr()
+		loadReport()
+		if (viewMode.value == 'rank') {
+			reloadRanking()
+		}
+	}
+	function shiftPeriod(dir : number) : void {
+		if (dir > 0 && atLatest.value) {
+			return
+		}
+		const p = anchor.value.split('-')
+		const y = parseInt(p[0])
+		const m = parseInt(p[1])
+		const d = parseInt(p[2])
+		if (period.value == 'week') {
+			const dt = new Date(y, m - 1, d + dir * 7)
+			anchor.value = fmtDate(dt.getFullYear(), dt.getMonth() + 1, dt.getDate())
+		} else if (period.value == 'month') {
+			let nm = m + dir
+			let ny = y
+			if (nm > 12) {
+				nm = 1
+				ny++
+			}
+			if (nm < 1) {
+				nm = 12
+				ny--
+			}
+			anchor.value = fmtDate(ny, nm, 1)
+		} else {
+			anchor.value = fmtDate(y + dir, 1, 1)
+		}
+		loadReport()
+		if (viewMode.value == 'rank') {
+			reloadRanking()
+		}
 	}
 
 	// 微信小程序分享：转发好友与朋友圈（封面统一 /static/share-cover.png，复制自 yao 项目）

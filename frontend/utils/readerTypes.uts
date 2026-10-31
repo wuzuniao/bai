@@ -45,7 +45,7 @@ export function fontOptionOf(key : string) : FontOption {
 
 /** 恢复本地存储的字体 key（未存/校验失败回落默认；reader 页与设置面板共用同一恢复口径） */
 export function loadStoredFontKey() : string {
-	const stored : any = uni.getStorageSync('reader_font')
+	const stored  = uni.getStorageSync('reader_font')
 	if (typeof stored == 'string') {
 		const key = stored as string
 		for (let i = 0; i < FONT_OPTIONS.length; i++) {
@@ -271,7 +271,7 @@ function bookmarksFromStored(raw : string) : Bookmark[] {
 /** 读取本地阅读设置（损坏/缺项容错返回默认值） */
 export function loadSettings() : ReaderSettings {
 	let s = { fontSize: 18, pageTurn: '滚动', theme: 'light', fontKey: 'sourcehan' } as ReaderSettings
-	const stored : any = uni.getStorageSync(SETTINGS_STORAGE_KEY)
+	const stored  = uni.getStorageSync(SETTINGS_STORAGE_KEY)
 	if (typeof stored == 'string' && (stored as string).length > 0) {
 		const parsed = JSON.parse<ReaderSettings>(stored as string)
 		if (parsed != null) {
@@ -308,7 +308,7 @@ function pushPreferencesQuiet() : void {
 	prefs['pageTurn'] = s.pageTurn
 	prefs['theme'] = s.theme
 	prefs['fontKey'] = s.fontKey
-	const style : any = uni.getStorageSync('bookshelf_style')
+	const style  = uni.getStorageSync('bookshelf_style')
 	prefs['bookshelfStyle'] = typeof style == 'string' ? style as string : 'plain'
 	syncQuiet(savePreferences(prefs))
 }
@@ -319,7 +319,7 @@ export function loadBookmarks() : Bookmark[] {
 	if (key == null) {
 		return [] as Bookmark[]
 	}
-	const stored : any = uni.getStorageSync(key)
+	const stored  = uni.getStorageSync(key)
 	if (typeof stored == 'string' && (stored as string).length > 0) {
 		const list = bookmarksFromStored(stored as string)
 		if (list != null) {
@@ -500,7 +500,7 @@ export async function fetchBookmarksToCache(bookId : number) : Promise<void> {
 
 /** 读取本地书架卡片样式（缺省/非法回退 plain；云端偏好由 App 启动/书架刷新落缓存） */
 export function loadBookshelfStyle() : string {
-	const stored : any = uni.getStorageSync('bookshelf_style')
+	const stored  = uni.getStorageSync('bookshelf_style')
 	if (typeof stored == 'string' && ((stored as string) == 'plain' || (stored as string) == 'photo')) {
 		return stored as string
 	}
@@ -513,7 +513,7 @@ export function loadUnderlines() : UnderlineEntry[] {
 	if (key == null) {
 		return [] as UnderlineEntry[]
 	}
-	const stored : any = uni.getStorageSync(key)
+	const stored  = uni.getStorageSync(key)
 	if (typeof stored == 'string' && (stored as string).length > 0) {
 		const list = underlinesFromStored(stored as string)
 		if (list != null) {
@@ -529,7 +529,7 @@ export function loadThoughts() : Thought[] {
 	if (key == null) {
 		return []
 	}
-	const stored : any = uni.getStorageSync(key)
+	const stored  = uni.getStorageSync(key)
 	if (typeof stored == 'string' && (stored as string).length > 0) {
 		const list = thoughtsFromStored(stored as string)
 		if (list != null) {
@@ -544,7 +544,7 @@ export function countCachedNotes(bookId : number) : number {
 	let n = 0
 	const keys : string[] = [UNDERLINE_STORAGE_KEY + bookId, THOUGHT_STORAGE_KEY + bookId]
 	for (let i = 0; i < keys.length; i++) {
-		const stored : any = uni.getStorageSync(keys[i])
+		const stored  = uni.getStorageSync(keys[i])
 		if (typeof stored == 'string' && (stored as string).length > 0) {
 			const arr = JSON.parse<UTSJSONObject[]>(stored as string)
 			if (arr != null) {
@@ -685,7 +685,7 @@ export function saveThought(t : Thought) : void {
 
 /** 读取指定书籍 id 的笔记缓存原文（迁移用，绕过 activeBookId 锁定；非字符串返回空串） */
 function readNoteStorageRaw(key : string) : string {
-	const stored : any = uni.getStorageSync(key)
+	const stored  = uni.getStorageSync(key)
 	return typeof stored == 'string' ? stored as string : ''
 }
 
@@ -793,7 +793,7 @@ export async function repushBookNotes(bookId : number, cloudThoughts : Thought[]
  */
 export function buildNoteRecords(underlines : UnderlineEntry[], thoughts : Thought[], chapterParas : Paragraph[][]) : NoteRecord[] {
 	const records : NoteRecord[] = []
-	const usedThoughts : boolean[] = thoughts.map(() : boolean => false)
+	const usedThoughts : boolean[] = thoughts.map((_t : Thought, _i : number) : boolean => false)
 	for (const e of underlines) {
 		// 划线文本按记录所在章取：跨章划线的卡片引用不能用当前章段落数组
 		const paras = e.cid >= 0 && e.cid < chapterParas.length ? chapterParas[e.cid] : ([] as Paragraph[])

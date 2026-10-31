@@ -2,9 +2,9 @@
  * 会员支付页词典段（pages/user/member-pay.uvue）
  * 模块载入时注册进 i18n 全局词典；member-pay.uvue 引入本文件即完成注册。
  */
-import { registerDict, Dict } from '../../../utils/i18n'
+import { registerDict } from '../../../utils/i18n'
 
-const zh: Dict = new Map<string, string>([
+const zh = new Map<string, string>([
 	['memberpay.title', '会员支付'],
 	['memberpay.coin', '金币'],
 	['memberpay.planName', '黑铁会员'],
@@ -42,7 +42,7 @@ const zh: Dict = new Map<string, string>([
 	['memberpay.insufficientToast', '金币不足，先去活动页赚金币吧']
 ])
 
-const en: Dict = new Map<string, string>([
+const en = new Map<string, string>([
 	['memberpay.title', 'Membership'],
 	['memberpay.coin', 'coin'],
 	['memberpay.planName', 'Iron Membership'],

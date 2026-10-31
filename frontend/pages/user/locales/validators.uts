@@ -2,9 +2,9 @@
  * 表单校验文案词典段（pages/user/utils/validators.uts）
  * 模块载入时注册进 i18n 全局词典；validators.uts 引入本文件即完成注册。
  */
-import { registerDict, Dict } from '../../../utils/i18n'
+import { registerDict } from '../../../utils/i18n'
 
-const zh: Dict = new Map<string, string>([
+const zh = new Map<string, string>([
 	['validator.usernameEmpty', '请输入用户名'],
 	['validator.usernameLength', '用户名长度需为 2-15 个字符'],
 	['validator.usernameCharset', '用户名仅允许中文、英文及数字字符'],
@@ -19,7 +19,7 @@ const zh: Dict = new Map<string, string>([
 	['validator.codeFormat', '验证码为 6 位数字']
 ])
 
-const en: Dict = new Map<string, string>([
+const en = new Map<string, string>([
 	['validator.usernameEmpty', 'Please enter a username'],
 	['validator.usernameLength', 'Username must be 2-15 characters'],
 	['validator.usernameCharset', 'Username allows Chinese characters, letters and digits only'],

@@ -24,6 +24,7 @@ Thumbs.db
 !.codebuddy/rules/
 .codebuddy/rules/*
 !.codebuddy/rules/git-commit-message/
+.workbuddy/
 *.swp
 *.swo
 *~

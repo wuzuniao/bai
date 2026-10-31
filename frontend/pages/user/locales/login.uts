@@ -2,9 +2,9 @@
  * 登录页词典段（pages/user/login.uvue）
  * 模块载入时注册进 i18n 全局词典；login.uvue 引入本文件即完成注册。
  */
-import { registerDict, Dict } from '../../../utils/i18n'
+import { registerDict } from '../../../utils/i18n'
 
-const zh: Dict = new Map<string, string>([
+const zh = new Map<string, string>([
 	['login.title', '一键登录'],
 	['login.welcome', '欢迎回来'],
 	['login.switchPassword', '账号密码登录'],
@@ -30,7 +30,7 @@ const zh: Dict = new Map<string, string>([
 	['login.wechatCancelled', '已取消微信登录']
 ])
 
-const en: Dict = new Map<string, string>([
+const en = new Map<string, string>([
 	['login.title', 'Quick Sign In'],
 	['login.welcome', 'Welcome back'],
 	['login.switchPassword', 'Sign in with Password'],

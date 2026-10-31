@@ -1,13 +1,28 @@
 import App from './App.uvue'
-import * as Pinia from 'pinia'
 import { createSSRApp } from 'vue'
+// #ifdef APP-ANDROID
+// Android 走原生 Kotlin 编译（项目规范 3.4），原版 pinia（JS 实现）不可用，
+// 改用三方插件 x-pinia-s（Pinia by uts）。pinia 实例必须定义在模块顶层——
+// app-android 平台约束：globalProperties 赋值不接受局部变量。
+import { createPinia } from '@/uni_modules/x-pinia-s'
+const pinia = createPinia()
+// #endif
+// #ifndef APP-ANDROID
+import * as Pinia from 'pinia'
+// #endif
 
 export function createApp() {
 	const app = createSSRApp(App)
 	// 状态管理：Pinia（stores/ 下按业务域拆分）
+	// #ifdef APP-ANDROID
+	app.use(pinia)
+	return { app }
+	// #endif
+	// #ifndef APP-ANDROID
 	app.use(Pinia.createPinia())
 	return {
 		app,
 		Pinia
 	}
+	// #endif
 }

@@ -2,9 +2,9 @@
  * Web 端书籍正文存储层词典段（utils/webfs.uts）
  * 模块载入时注册进 i18n 全局词典；webfs.uts 引入本文件即完成注册。
  */
-import { registerDict, Dict } from '../i18n'
+import { registerDict } from '../i18n'
 
-const zh: Dict = new Map<string, string>([
+const zh = new Map<string, string>([
 	['webfs.openFail', '本地存储打开失败'],
 	['webfs.rwFail', '本地存储读写失败'],
 	['webfs.readFail', '本地存储读取失败'],
@@ -12,7 +12,7 @@ const zh: Dict = new Map<string, string>([
 	['webfs.readRetry', '文件读取失败，请重试']
 ])
 
-const en: Dict = new Map<string, string>([
+const en = new Map<string, string>([
 	['webfs.openFail', 'Failed to open local storage'],
 	['webfs.rwFail', 'Local storage read/write failed'],
 	['webfs.readFail', 'Failed to read local storage'],

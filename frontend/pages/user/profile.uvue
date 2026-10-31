@@ -209,65 +209,11 @@
 	const expandPassword = ref(false)
 	const expandEmail = ref(false)
 
-	function collapseAll() : void {
-		expandUsername.value = false
-		expandAvatar.value = false
-		expandSignature.value = false
-		expandPassword.value = false
-		expandEmail.value = false
-		resetUsernameForm()
-		resetSignatureForm()
-		resetPasswordForm()
-		resetEmailForm()
-	}
 
-	function toggleUsername() : void {
-		if (isDeletionScheduled.value) {
-			return
-		}
-		const next = !expandUsername.value
-		collapseAll()
-		expandUsername.value = next
-	}
 
-	function toggleAvatar() : void {
-		if (isDeletionScheduled.value) {
-			return
-		}
-		const next = !expandAvatar.value
-		collapseAll()
-		if (next) {
-			selectedAvatar.value = currentAvatarKey()
-		}
-		expandAvatar.value = next
-	}
 
-	function toggleSignature() : void {
-		if (isDeletionScheduled.value) {
-			return
-		}
-		const next = !expandSignature.value
-		collapseAll()
-		expandSignature.value = next
-	}
 
-	function togglePassword() : void {
-		if (isDeletionScheduled.value) {
-			return
-		}
-		const next = !expandPassword.value
-		collapseAll()
-		expandPassword.value = next
-	}
 
-	function toggleEmail() : void {
-		if (isDeletionScheduled.value) {
-			return
-		}
-		const next = !expandEmail.value
-		collapseAll()
-		expandEmail.value = next
-	}
 
 	// ===== 修改用户名 =====
 	const usernameValue = ref('')
@@ -284,23 +230,6 @@
 		usernameError.value = usernameValue.value.length == 0 ? '' : validateUsername(usernameValue.value)
 	}
 
-	function handleUpdateUsername() : void {
-		const v = usernameValue.value.trim()
-		const err = validateUsername(v)
-		if (err.length > 0) {
-			usernameError.value = err
-			uni.showToast({ title: err, icon: 'none' })
-			return
-		}
-		updateUsername(v).then((_res: ApiResponse) => {
-			userStore.patchUser('username', v)
-			uni.showToast({ title: t('profile.usernameOk'), icon: 'success' })
-			collapseAll()
-		}).catch((e) => {
-			const err = e as Error
-			uni.showToast({ title: err.message, icon: 'none' })
-		})
-	}
 
 	// ===== 修改头像 =====
 	type AvatarOption = {
@@ -328,16 +257,6 @@
 		selectedAvatar.value = key
 	}
 
-	function handleUpdateAvatar() : void {
-		updateAvatar(selectedAvatar.value).then((_res: ApiResponse) => {
-			userStore.patchUser('avatar_url', selectedAvatar.value)
-			uni.showToast({ title: t('profile.avatarOk'), icon: 'success' })
-			collapseAll()
-		}).catch((e) => {
-			const err = e as Error
-			uni.showToast({ title: err.message, icon: 'none' })
-		})
-	}
 
 	// ===== 修改签名 =====
 	const signatureValue = ref('')
@@ -348,21 +267,6 @@
 		signatureError.value = ''
 	}
 
-	function handleUpdateSignature() : void {
-		const v = signatureValue.value.trim()
-		if (v.length == 0) {
-			signatureError.value = t('profile.signatureEmpty')
-			return
-		}
-		updateSignature(v).then((_res: ApiResponse) => {
-			userStore.patchUser('signature', v)
-			uni.showToast({ title: t('profile.signatureOk'), icon: 'success' })
-			collapseAll()
-		}).catch((e) => {
-			const err = e as Error
-			uni.showToast({ title: err.message, icon: 'none' })
-		})
-	}
 
 	// ===== 修改 / 设置密码 =====
 	const oldPasswordValue = ref('')
@@ -399,6 +303,130 @@
 		confirmPasswordError.value = validateConfirmPassword(confirmPasswordValue.value, newPasswordValue.value)
 	}
 
+
+	// ===== 修改 / 绑定邮箱 =====
+	const emailStep = ref(1)
+	const oldCodeValue = ref('')
+	const newEmailValue = ref('')
+	const newCodeValue = ref('')
+	const oldCodeError = ref('')
+	const newEmailError = ref('')
+	const newCodeError = ref('')
+	const oldCodeSending = ref(false)
+	const newCodeSending = ref(false)
+
+	/** 验证码组件引用（倒计时与按钮复位内聚于组件）。类型用结构化暴露面而非组件名——
+	 *  vdom 模式（规范 3.4）下组件实例需以 ComponentPublicInstance + $callMethod 调用（页面自定义 Expose 类型运行时 cast 失败）；方法名为字符串，组件内方法改名需同步 */
+	const oldCodeRef = ref<ComponentPublicInstance | null>(null)
+	const newCodeRef = ref<ComponentPublicInstance | null>(null)
+
+	function resetEmailForm() : void {
+		emailStep.value = 1
+		oldCodeValue.value = ''
+		newEmailValue.value = ''
+		newCodeValue.value = ''
+		oldCodeError.value = ''
+		newEmailError.value = ''
+		newCodeError.value = ''
+		oldCodeRef.value?.$callMethod('reset')
+		newCodeRef.value?.$callMethod('reset')
+	}
+	function collapseAll() : void {
+		expandUsername.value = false
+		expandAvatar.value = false
+		expandSignature.value = false
+		expandPassword.value = false
+		expandEmail.value = false
+		resetUsernameForm()
+		resetSignatureForm()
+		resetPasswordForm()
+		resetEmailForm()
+	}
+	function toggleUsername() : void {
+		if (isDeletionScheduled.value) {
+			return
+		}
+		const next = !expandUsername.value
+		collapseAll()
+		expandUsername.value = next
+	}
+	function toggleAvatar() : void {
+		if (isDeletionScheduled.value) {
+			return
+		}
+		const next = !expandAvatar.value
+		collapseAll()
+		if (next) {
+			selectedAvatar.value = currentAvatarKey()
+		}
+		expandAvatar.value = next
+	}
+	function toggleSignature() : void {
+		if (isDeletionScheduled.value) {
+			return
+		}
+		const next = !expandSignature.value
+		collapseAll()
+		expandSignature.value = next
+	}
+	function togglePassword() : void {
+		if (isDeletionScheduled.value) {
+			return
+		}
+		const next = !expandPassword.value
+		collapseAll()
+		expandPassword.value = next
+	}
+	function toggleEmail() : void {
+		if (isDeletionScheduled.value) {
+			return
+		}
+		const next = !expandEmail.value
+		collapseAll()
+		expandEmail.value = next
+	}
+	function handleUpdateUsername() : void {
+		const v = usernameValue.value.trim()
+		const err = validateUsername(v)
+		if (err.length > 0) {
+			usernameError.value = err
+			uni.showToast({ title: err, icon: 'none' })
+			return
+		}
+		updateUsername(v).then((_res: ApiResponse) => {
+			userStore.patchUser('username', v)
+			uni.showToast({ title: t('profile.usernameOk'), icon: 'success' })
+			collapseAll()
+		}).catch((e) => {
+			const err = e as Error
+			uni.showToast({ title: err.message, icon: 'none' })
+		})
+	}
+	function handleUpdateAvatar() : void {
+		updateAvatar(selectedAvatar.value).then((_res: ApiResponse) => {
+			userStore.patchUser('avatar_url', selectedAvatar.value)
+			uni.showToast({ title: t('profile.avatarOk'), icon: 'success' })
+			collapseAll()
+		}).catch((e) => {
+			const err = e as Error
+			uni.showToast({ title: err.message, icon: 'none' })
+		})
+	}
+	function handleUpdateSignature() : void {
+		const v = signatureValue.value.trim()
+		if (v.length == 0) {
+			signatureError.value = t('profile.signatureEmpty')
+			return
+		}
+		updateSignature(v).then((_res: ApiResponse) => {
+			userStore.patchUser('signature', v)
+			uni.showToast({ title: t('profile.signatureOk'), icon: 'success' })
+			collapseAll()
+		}).catch((e) => {
+			const err = e as Error
+			uni.showToast({ title: err.message, icon: 'none' })
+		})
+	}
 	function handleChangePassword() : void {
 		newPasswordError.value = validatePassword(newPasswordValue.value)
 		if (newPasswordValue.value.length > 0 && confirmPasswordValue.value.length > 0) {
@@ -447,33 +475,6 @@
 		}
 	}
 
-	// ===== 修改 / 绑定邮箱 =====
-	const emailStep = ref(1)
-	const oldCodeValue = ref('')
-	const newEmailValue = ref('')
-	const newCodeValue = ref('')
-	const oldCodeError = ref('')
-	const newEmailError = ref('')
-	const newCodeError = ref('')
-	const oldCodeSending = ref(false)
-	const newCodeSending = ref(false)
-
-	/** 验证码组件引用（倒计时与按钮复位内聚于组件） */
-	const oldCodeRef = ref<CodeInput | null>(null)
-	const newCodeRef = ref<CodeInput | null>(null)
-
-	function resetEmailForm() : void {
-		emailStep.value = 1
-		oldCodeValue.value = ''
-		newEmailValue.value = ''
-		newCodeValue.value = ''
-		oldCodeError.value = ''
-		newEmailError.value = ''
-		newCodeError.value = ''
-		oldCodeRef.value?.reset()
-		newCodeRef.value?.reset()
-	}
-
 	// 邮箱与验证码校验规则见 utils/validators.uts
 
 	function onNewEmailBlur() : void {
@@ -487,10 +488,10 @@
 		oldCodeSending.value = true
 		sendChangeEmailOldCode().then((_res: ApiResponse) => {
 			uni.showToast({ title: t('profile.codeSent'), icon: 'none' })
-			oldCodeRef.value?.startCountdown()
+			oldCodeRef.value?.$callMethod('startCountdown')
 		}).catch((e) => {
 			const err = e as Error
-			oldCodeRef.value?.reset()
+			oldCodeRef.value?.$callMethod('reset')
 			uni.showToast({ title: err.message, icon: 'none' })
 		}).finally(() => {
 			oldCodeSending.value = false
@@ -514,7 +515,7 @@
 			newCodeValue.value = ''
 			newEmailError.value = ''
 			newCodeError.value = ''
-			newCodeRef.value?.reset()
+			newCodeRef.value?.$callMethod('reset')
 		} else {
 			collapseAll()
 		}
@@ -534,10 +535,10 @@
 		// 绑定邮箱场景（无邮箱用户）允许邮箱已存在以触发账号合并提示；修改邮箱场景禁止已存在
 		sendChangeEmailNewCode(newEmailValue.value, !hasEmail.value).then((_res: ApiResponse) => {
 			uni.showToast({ title: t('profile.codeSent'), icon: 'none' })
-			newCodeRef.value?.startCountdown()
+			newCodeRef.value?.$callMethod('startCountdown')
 		}).catch((e) => {
 			const err = e as Error
-			newCodeRef.value?.reset()
+			newCodeRef.value?.$callMethod('reset')
 			uni.showToast({ title: err.message, icon: 'none' })
 		}).finally(() => {
 			newCodeSending.value = false

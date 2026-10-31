@@ -1,6 +1,6 @@
 // #ifdef APP-ANDROID
 import type { ParaLineLayout } from '@/utils/paginationDefs.ts'
-import StaticBuilder from 'android.text.StaticLayout$Builder'
+import StaticLayout from 'android.text.StaticLayout'
 import TextPaint from 'android.text.TextPaint'
 import Typeface from 'android.graphics.Typeface'
 
@@ -45,11 +45,11 @@ function resolveTypeface(family : string) : Typeface {
  */
 export function buildParaLayout(texts : string[], fontSize : number, fontFamily : string, letterSpacingPx : number, widthPx : number) : ParaLineLayout {
 	const paint = new TextPaint()
-	paint.setTextSize(fontSize)
+	paint.setTextSize(fontSize.toFloat())
 	paint.setAntiAlias(true)
 	paint.setTypeface(resolveTypeface(fontFamily))
 	if (letterSpacingPx != 0 && fontSize > 0) {
-		paint.setLetterSpacing(letterSpacingPx / fontSize)
+		paint.setLetterSpacing((letterSpacingPx / fontSize).toFloat())
 	}
 	const w = Math.max(1, Math.round(widthPx))
 	// 行距对齐正文 line-height 1.7（仅影响高度校验口径，不影响断行位置）
@@ -59,8 +59,8 @@ export function buildParaLayout(texts : string[], fontSize : number, fontFamily 
 	const lineEnds : number[][] = []
 	for (let i = 0; i < texts.length; i++) {
 		const full = '　　' + texts[i]
-		const builder = StaticBuilder.obtain(full, 0, full.length, paint, w)
-		builder.setLineSpacing(lineAdd, 1.0)
+		const builder = StaticLayout.Builder.obtain(full, 0, full.length.toInt(), paint, w.toInt())
+		builder.setLineSpacing(lineAdd.toFloat(), 1.0.toFloat())
 		builder.setIncludePad(false)
 		const layout = builder.build()
 		const lc = layout.getLineCount()
@@ -68,7 +68,9 @@ export function buildParaLayout(texts : string[], fontSize : number, fontFamily 
 		const ends : number[] = []
 		for (let k = 0; k < lc; k++) {
 			// StaticLayout 偏移含 2 字缩进前缀：独占端点 - 前缀 2 字 - 1 = 段内末字符下标
-			ends.push(layout.getLineEnd(k) - 3)
+			// getLineEnd 返回 Int：先收窄为 number 再与字面量运算（Int - number 无重载）
+			const endPos : number = layout.getLineEnd(k.toInt())
+			ends.push(endPos - 3)
 		}
 		lineEnds.push(ends)
 	}

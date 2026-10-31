@@ -32,8 +32,9 @@ function parseItems(data: UTSJSONObject | null) : AnnouncementItem[] {
 	if (raw == null) {
 		return items
 	}
-	raw.forEach((el) => {
-		const o = el as UTSJSONObject
+	// UTS 下 forEach 回调参数需可空标注（any 与 any? 不匹配），改索引 for + as 收窄
+	for (let i = 0; i < raw.length; i++) {
+		const o = raw[i] as UTSJSONObject
 		items.push({
 			id: o.getNumber('id') ?? 0,
 			title: o.getString('title') ?? '',
@@ -42,7 +43,7 @@ function parseItems(data: UTSJSONObject | null) : AnnouncementItem[] {
 			updated_at: o.getString('updated_at') ?? '',
 			is_read: o.getBoolean('is_read') ?? false
 		} as AnnouncementItem)
-	})
+	}
 	return items
 }
 

@@ -88,14 +88,17 @@
 	import PageHeader from '@/components/common/PageHeader.uvue'
 	import type { AnnouncementItem, AnnouncementsPage } from '@/api/announcementDefs.ts'
 	import { getAnnouncements, markAnnouncementRead, markAllAnnouncementsRead } from '@/api/announcement.uts'
-	import { mainTopPx } from '@/utils/layout.uts'
 	import { t } from '@/utils/i18n.uts'
 	// 词典注册（messages 页文案 + 公共段）
 	import '@/pages/user/locales/userinfo-pages.uts'
 	import '@/utils/locales/common.uts'
 
-	/** 顶部留白：返回按钮（状态栏高度 + 40px）之下再留 12px（计算逻辑见 utils/layout.uts） */
-	const mainTop = ref(mainTopPx())
+	// 顶部留白：非 Web 端返回按钮已实高占位（状态栏 + 40px），画布只留按钮下 12px
+	const mainTop = ref(12)
+	// Web 端不渲染返回键，页头距顶 32px
+	// #ifdef WEB
+	mainTop.value = 32
+	// #endif
 
 	const announcements = ref<AnnouncementItem[]>([])
 	const loading = ref(false)

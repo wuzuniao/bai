@@ -3,9 +3,9 @@
  * 注意：pageTurn 默认值「滚动」为持久化内部值，不翻译。
  * 模块载入时注册进 i18n 全局词典；books.uts 引入本文件即完成注册。
  */
-import { registerDict, Dict } from '../i18n'
+import { registerDict } from '../i18n'
 
-const zh: Dict = new Map<string, string>([
+const zh = new Map<string, string>([
 	['books.contentMoveFail', '正文文件迁移失败'],
 	['books.fileMoveFail', '文件迁移失败'],
 	['books.cloudIdInvalid', '云端书籍 id 无效'],
@@ -14,7 +14,7 @@ const zh: Dict = new Map<string, string>([
 	['books.rewardAutoCheckinN', '阅读奖励自动领取 +{0}、签到 +{1} 铜币']
 ])
 
-const en: Dict = new Map<string, string>([
+const en = new Map<string, string>([
 	['books.contentMoveFail', 'Failed to move book content file'],
 	['books.fileMoveFail', 'Failed to move file'],
 	['books.cloudIdInvalid', 'Invalid cloud book id'],

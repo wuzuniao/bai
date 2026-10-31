@@ -3,9 +3,9 @@
  * 翻页模式内部值为中文（持久化兼容），仅展示/toast 层取词。
  * 模块载入时注册进 i18n 全局词典；reader.uvue 引入本文件即完成注册。
  */
-import { registerDict, Dict } from '../i18n'
+import { registerDict } from '../i18n'
 
-const zh: Dict = new Map<string, string>([
+const zh = new Map<string, string>([
 	['reader.shareTitle', '无足鸟古诗词学习助手'],
 	['reader.lastChapter', '已经是最后一章'],
 	['reader.firstChapter', '已经是第一章'],
@@ -26,7 +26,7 @@ const zh: Dict = new Map<string, string>([
 	['pdfreader.rendering', '正在渲染 {0} / {1}']
 ])
 
-const en: Dict = new Map<string, string>([
+const en = new Map<string, string>([
 	['reader.shareTitle', 'Wuzuniao Poetry Learning Assistant'],
 	['reader.lastChapter', 'Already the last chapter'],
 	['reader.firstChapter', 'Already the first chapter'],

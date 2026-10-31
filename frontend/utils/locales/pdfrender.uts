@@ -2,16 +2,16 @@
  * PDF 渲染层词典段（utils/pdfrender.uts）
  * 模块载入时注册进 i18n 全局词典；pdfrender.uts 引入本文件即完成注册。
  */
-import { registerDict, Dict } from '../i18n'
+import { registerDict } from '../i18n'
 
-const zh: Dict = new Map<string, string>([
+const zh = new Map<string, string>([
 	['pdfrender.pageRenderFail', '页面渲染失败'],
 	['pdfrender.pageInfoFail', '页面信息读取失败'],
 	['pdfrender.openFail', 'PDF 打开失败，文件可能已损坏'],
 	['pdfrender.platformUnsupported', '当前端暂不支持 PDF 阅读']
 ])
 
-const en: Dict = new Map<string, string>([
+const en = new Map<string, string>([
 	['pdfrender.pageRenderFail', 'Page render failed'],
 	['pdfrender.pageInfoFail', 'Failed to read page info'],
 	['pdfrender.openFail', 'Failed to open PDF; the file may be corrupted'],

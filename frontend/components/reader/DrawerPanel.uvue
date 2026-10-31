@@ -6,7 +6,7 @@
 		<view class="drawer-header">
 			<view :class="drawerTab === 'catalog' ? 'drawer-tab-active' : 'drawer-tab-plain'" @click="switchDrawerTab('catalog')">
 				<text :class="drawerTab === 'catalog' ? 'drawer-tab-title' : 'drawer-tab-plain'">{{ t('readercomp.tabCatalog') }}</text>
-				<text v-if="drawerTab === 'catalog'" class="drawer-tab-sort" @click="onSortTap($event)">{{ orderDesc ? '↓↑' : '⇅' }}</text>
+				<text v-if="drawerTab === 'catalog'" class="drawer-tab-sort" @click="onSortTap">{{ orderDesc ? '↓↑' : '⇅' }}</text>
 			</view>
 			<view :class="drawerTab === 'note' ? 'drawer-tab-active' : 'drawer-tab-plain'" @click="switchDrawerTab('note')">
 				<text :class="drawerTab === 'note' ? 'drawer-tab-title' : 'drawer-tab-plain'">{{ t('readercomp.tabNotes') }}</text>
@@ -100,8 +100,13 @@
 	}>()
 	const emit = defineEmits(['selectChapter', 'goNote', 'goBookmark', 'toast', 'changed'])
 
-	/** 书签子组件引用（书签增删 ref 转发） */
-	const bookmarkPanelRef = ref<BookmarkPanel | null>(null)
+	/** 书签子组件引用（书签增删 ref 转发）。类型用结构化暴露面而非组件名——vdom 模式下
+	 *  ref<组件名 | null> 的类型 lowering 会引用未生成的 *Class 符号导致编译失败（项目规范 3.4） */
+	type BookmarkPanelExpose = {
+		addBookmark : (chapterId : number, pageIndex : number) => void
+		removeBookmark : (chapterId : number, pageIndex : number) => void
+	}
+	const bookmarkPanelRef = ref<BookmarkPanelExpose | null>(null)
 
 	/** ===== 目录抽屉（页签/排序为面板内 UI 状态，组件自管理） ===== */
 	const drawerTab = ref('catalog')

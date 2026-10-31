@@ -83,8 +83,9 @@
 	const isSending = ref(false)
 	const submitting = ref(false)
 
-	/** 验证码组件引用（倒计时与按钮复位内聚于组件） */
-	const codeRef = ref<CodeInput | null>(null)
+	/** 验证码组件引用（倒计时与按钮复位内聚于组件）。类型用结构化暴露面而非组件名——
+	 *  vdom 模式（规范 3.4）下组件实例需以 ComponentPublicInstance + $callMethod 调用（页面自定义 Expose 类型运行时 cast 失败）；方法名为字符串，组件内方法改名需同步 */
+	const codeRef = ref<ComponentPublicInstance | null>(null)
 
 	// ===== 前端输入校验（规则统一收口 utils/validators.uts，与 auth 服务后端保持一致） =====
 
@@ -122,14 +123,30 @@
 		isSending.value = true
 		sendRegisterCode(emailValue.value).then((_res) => {
 			uni.showToast({ title: t('register.codeSent'), icon: 'none' })
-			codeRef.value?.startCountdown()
+			codeRef.value?.$callMethod('startCountdown')
 		}).catch((e) => {
 			const err = e as Error
 			// 发送失败恢复按钮，允许用户立即重试
-			codeRef.value?.reset()
+			codeRef.value?.$callMethod('reset')
 			uni.showToast({ title: err.message, icon: 'none' })
 		}).finally(() => {
 			isSending.value = false
+		})
+	}
+
+	function submitForm() : void {
+		submitting.value = true
+		registerUser(usernameValue.value, passwordValue.value, emailValue.value, codeValue.value).then((_res) => {
+			// 注册成功后跳转登录页（带 mode=normal 直接展示账号密码登录卡片）
+			toastGo(t('register.success'), '/pages/user/login?mode=normal')
+		}).catch((e) => {
+			const err = e as Error
+			// auth 服务无业务错误码，按错误文案含「验证码」识别验证码类错误并映射本地化文案
+			// （依赖 auth 侧措辞，auth 调整验证码错误提示时此处需联动）
+			const msg = err.message.includes('验证码') ? t('register.codeWrong') : err.message
+			uni.showToast({ title: msg, icon: 'none' })
+		}).finally(() => {
+			submitting.value = false
 		})
 	}
 
@@ -164,26 +181,10 @@
 			return
 		}
 		if (!agreed.value) {
-			confirmAgreement(t('register.agreeContent'), agreed, submitForm)
+			confirmAgreement(t('register.agreeContent'), agreed, () : void => { submitForm() })
 			return
 		}
 		submitForm()
-	}
-
-	function submitForm() : void {
-		submitting.value = true
-		registerUser(usernameValue.value, passwordValue.value, emailValue.value, codeValue.value).then((_res) => {
-			// 注册成功后跳转登录页（带 mode=normal 直接展示账号密码登录卡片）
-			toastGo(t('register.success'), '/pages/user/login?mode=normal')
-		}).catch((e) => {
-			const err = e as Error
-			// auth 服务无业务错误码，按错误文案含「验证码」识别验证码类错误并映射本地化文案
-			// （依赖 auth 侧措辞，auth 调整验证码错误提示时此处需联动）
-			const msg = err.message.includes('验证码') ? t('register.codeWrong') : err.message
-			uni.showToast({ title: msg, icon: 'none' })
-		}).finally(() => {
-			submitting.value = false
-		})
 	}
 
 	function goLogin() : void {

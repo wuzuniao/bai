@@ -71,7 +71,7 @@ function bookFromObject(obj : UTSJSONObject) : LocalBook | null {
 
 /** 读取本地缓存书架列表（顺序即云端手动排序结果） */
 export function loadBooks() : LocalBook[] {
-	const stored : any = uni.getStorageSync(STORAGE_BOOKS)
+	const stored  = uni.getStorageSync(STORAGE_BOOKS)
 	if (typeof stored != 'string' || (stored as string).length == 0) {
 		return []
 	}
@@ -215,7 +215,7 @@ export async function fetchBooksFromCloud() : Promise<LocalBook[]> {
 			const cloud : LocalBook[] = []
 			if (arr != null) {
 				for (let i = 0; i < arr.length; i++) {
-					const b = bookFromCloud(arr[i])
+					const b = bookFromCloud(arr[i] as UTSJSONObject)
 					if (b != null) {
 						cloud.push(b)
 					}
@@ -298,12 +298,13 @@ async function reconcileDirtyBook(book : LocalBook, localBook : LocalBook) : Pro
 		if (notesRes.code == 0 && notesRes.data != null) {
 			const rawT = notesRes.data!.getArray('thoughts')
 			if (rawT != null) {
-				rawT.forEach((el) => {
-					const t = thoughtFromCloud(el as UTSJSONObject)
+				// UTS 下 forEach 回调参数需可空标注（any 与 any? 不匹配），改索引 for + as 收窄
+				for (let i = 0; i < rawT.length; i++) {
+					const t = thoughtFromCloud(rawT[i] as UTSJSONObject)
 					if (t != null) {
 						cloudThoughts.push(t)
 					}
-				})
+				}
 			}
 		}
 		await repushBookNotes(book.id, cloudThoughts)
@@ -710,7 +711,7 @@ function statsTodayKey() : string {
 
 /** 读取统计缓存（today/total 分钟数；损坏容错归零；date 非当日则 today 归零仅保留 total） */
 function loadStats() : ReadingStatsCache {
-	const stored : any = uni.getStorageSync(STORAGE_STATS)
+	const stored  = uni.getStorageSync(STORAGE_STATS)
 	if (typeof stored == 'string' && (stored as string).length > 0) {
 		const obj = JSON.parse<UTSJSONObject>(stored as string)
 		if (obj != null) {
@@ -760,8 +761,9 @@ function addTodayMinutes(mins : number) : void {
 			// 云端时长确认后自动发放已达成的阅读档位奖励（清单由后端返回），全局提示到账
 			notifyAutoClaimed(res.data!)
 		}
-	}, (e) => {
-		console.warn('阅读时长上报失败', e)
+	}, (_e : any) : void => {
+		// 拒绝原因无类型（平台边界），显式 any
+		console.warn('阅读时长上报失败', _e)
 	})
 }
 
@@ -781,7 +783,7 @@ function notifyAutoClaimed(data : UTSJSONObject) : void {
 	let sum = 0
 	if (arr != null) {
 		for (let i = 0; i < arr.length; i++) {
-			sum += arr[i].getNumber('reward') ?? 0
+			sum += (arr[i] as UTSJSONObject).getNumber('reward') ?? 0
 		}
 	}
 	if (checkinReward > 0) {
@@ -815,25 +817,26 @@ function cnFormatMs(ms: number) : string {
 }
 
 function loadPendingSessions() : PendingSession[] {
-	const stored : any = uni.getStorageSync(STORAGE_SESSIONS)
+	const stored  = uni.getStorageSync(STORAGE_SESSIONS)
 	if (typeof stored == 'string' && (stored as string).length > 0) {
 		const obj = JSON.parse<UTSJSONObject>(stored as string)
 		const arr = obj == null ? null : obj.getArray('list')
 		const list : PendingSession[] = []
 		if (arr != null) {
+			// getArray 元素为 any，统一 as UTSJSONObject 收窄；空判断后 UTS 不做智能转换，经 ! 断言
 			for (let i = 0; i < arr.length; i++) {
-				const o = arr[i]
+				const o = arr[i] as UTSJSONObject
 				const bookId = o.getNumber('book_id')
 				const minutes = o.getNumber('minutes')
 				if (bookId == null || minutes == null) {
 					continue
 				}
 				list.push({
-					book_id: bookId,
+					book_id: bookId!,
 					source: o.getString('source') ?? 'txt',
 					started_at: o.getString('started_at') ?? '',
 					ended_at: o.getString('ended_at') ?? '',
-					minutes: minutes,
+					minutes: minutes!,
 					// 旧版条目无该字段：均产生于未登录期（登录态条目即时直传），默认按离线补聚合
 					offline: o.getBoolean('offline') ?? true
 				} as PendingSession)
@@ -1055,7 +1058,7 @@ function loadCachedReaderSettings() : UTSJSONObject {
  * 幂等：旧 key 不存在即空操作；旧时长按日 key 无法枚举，属无害残留
  */
 export function cleanupLegacyBooks() : void {
-	const stored : any = uni.getStorageSync(LEGACY_BOOKS)
+	const stored  = uni.getStorageSync(LEGACY_BOOKS)
 	if (typeof stored != 'string' || (stored as string).length == 0) {
 		return
 	}

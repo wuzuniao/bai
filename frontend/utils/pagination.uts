@@ -7,6 +7,7 @@
 // 共享类型抽离到 pagination.ts：UTS 编译器对 type-only 导入会改写为 *.ts 路径（HBuilderX 5.33），
 // 类型留在 .uts 会报“未导出”。本文件导入供内部使用并再导出给调用方。
 import type { PageSlice, ParaLineLayout } from './paginationDefs.ts'
+import { rpxToPx } from './layout'
 
 /** 分页结果：每页的段落切片数组 */
 export function computePageBreaks(paraTexts : string[], perLine : number, pageH : number, fontSize : number, topPx : number, bottomPx : number, headerH : number) : PageSlice[][] {
@@ -20,7 +21,7 @@ export function computePageBreaks(paraTexts : string[], perLine : number, pageH 
 		})
 	}
 	const lineH = fontSize * 1.7
-	const paraGap = uni.upx2px(40)
+	const paraGap = rpxToPx(40)
 	// 页面高度预算 = 可用高度（屏高-顶部起点-底部留白）；行数 ceil 取整已天然偏保守
 	const budget = Math.max(lineH, pageH - topPx - bottomPx)
 	// 章节头（标签行+大标题+分隔条+下边距，高度由调用方实测传入）仅占用章首页
@@ -100,7 +101,7 @@ export function computePageBreaksMeasured(paraTexts : string[], paraLines : numb
 		})
 	}
 	const lineH = fontSize * 1.7
-	const paraGap = uni.upx2px(40)
+	const paraGap = rpxToPx(40)
 	const budget = Math.max(lineH, pageH - topPx - bottomPx)
 	let curBudget = Math.max(lineH, budget - headerH)
 	for (let i = 0; i < paraTexts.length; i++) {
@@ -182,7 +183,7 @@ export function computePageBreaksExact(paraTexts : string[], layout : ParaLineLa
 		})
 	}
 	const lineH = lineHeight > 0 ? lineHeight : fontSize * 1.7
-	const paraGap = uni.upx2px(40)
+	const paraGap = rpxToPx(40)
 	const budget = Math.max(lineH, pageH - topPx - bottomPx)
 	let curBudget = Math.max(lineH, budget - headerH)
 	for (let i = 0; i < paraTexts.length; i++) {

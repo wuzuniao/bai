@@ -1,7 +1,8 @@
 // 书籍导入管线：文件编码识别 → 章节解析 → 沙盒落盘入库
 // 端差异收口：文件选择由调用方（书架页）按端条件编译完成，本文件只处理已选中的本地文件
 
-import { applyRegisteredBook, nextPendingBookId, applyPendingImport, loadBooks, setBookFileLocal, discardSandboxFile, discardCrossFormatFile, LocalBook } from './books'
+import { applyRegisteredBook, nextPendingBookId, applyPendingImport, loadBooks, setBookFileLocal, discardSandboxFile, discardCrossFormatFile } from './books'
+import type { LocalBook } from './booksDefs.ts'
 import { registerBook } from '../api/reading.uts'
 import { fetchDownloadUrl, fetchUploadUrl, fetchCloudObjects } from '../api/cos.uts'
 import { sanitizeTitle, readBookBytes, writeBookBytes, cosPut, cosGetBytesOrNull, isCloudMissingError, CLOUD_MISSING_ERR, downloadBook, booksDir } from './cloudsync.uts'
@@ -9,7 +10,7 @@ import { hasAccessToken } from './request.uts'
 import { t } from './i18n'
 // 词典注册（导入管线文案）
 import './locales/bookparse.uts'
-// #ifdef MP-WEIXIN
+// #ifdef MP-WEIXIN || APP-ANDROID
 import { decodeGbkBytes } from './gbk'
 // #endif
 // #ifdef APP
@@ -46,7 +47,7 @@ function looksMisencoded(text : string) : boolean {
 	const sampleLen = text.length < 20000 ? text.length : 20000
 	let bad = 0
 	for (let i = 0; i < sampleLen; i++) {
-		if (text.charCodeAt(i) == 0xFFFD) {
+		if ((text.charCodeAt(i) ?? 0) == 0xFFFD) {
 			bad++
 			if (bad > 5) {
 				return true
@@ -64,7 +65,7 @@ function looksMisencoded(text : string) : boolean {
  */
 function incompleteTailBytes(tail : string) : number {
 	for (let i = tail.length - 1; i >= 0; i--) {
-		const b = tail.charCodeAt(i)
+		const b = tail.charCodeAt(i) ?? 0
 		if ((b & 0xC0) != 0x80) {
 			const charLen = b >= 0xF0 ? 4 : (b >= 0xE0 ? 3 : (b >= 0xC0 ? 2 : 1))
 			const used = tail.length - i
@@ -97,7 +98,7 @@ function readGbkChunkedMp(path : string) : Promise<string> {
 			if (pos + len < size) {
 				try {
 					const tail = fs.readFileSync(path, 'latin1', pos + len - 1, 1) as string
-					const b = tail.charCodeAt(0)
+					const b = tail.charCodeAt(0) ?? 0
 					if (b >= 0x81 && b <= 0xFE) {
 						len -= 1
 					}
@@ -177,102 +178,6 @@ function readTextFileChunkedMp(path : string) : Promise<string> {
 }
 // #endif
 
-// #ifdef APP-ANDROID
-/**
- * 块尾对齐：返回本块可安全解码的字节数（GBK 双字节跨块截 1；utf-8 截去被切断字符的前缀字节）
- * 仅在非末块调用，u8 为本块实际读取内容的字节视图
- */
-function alignedTailLen(u8 : Uint8Array, len : number, isGbk : boolean) : number {
-	if (isGbk) {
-		const b = u8[len - 1]
-		return b >= 0x81 && b <= 0xFE ? len - 1 : len
-	}
-	for (let i = len - 1; i >= 0 && i >= len - 4; i--) {
-		const b = u8[i]
-		if ((b & 0xC0) != 0x80) {
-			const charLen = b >= 0xF0 ? 4 : (b >= 0xE0 ? 3 : (b >= 0xC0 ? 2 : 1))
-			const used = len - i
-			return charLen > used ? len - used : len
-		}
-	}
-	return len
-}
-
-/**
- * Android 端分块读取文本：fd（openSync/readSync/closeSync）分块读 ArrayBuffer，
- * 逐块用 java.nio Charset 解码（UTF-8 与 GBK 同一函数不同字符集名；块边界字符对齐后无切断）
- */
-function readChunkedApp(path : string, charsetName : string) : Promise<string> {
-	return new Promise<string>((resolve, reject) => {
-		const fs = uni.getFileSystemManager()
-		let fd = 0
-		let size = 0
-		try {
-			fd = fs.openSync(path, 'r')
-			size = fs.statSync(path).size
-		} catch (e) {
-			if (fd > 0) {
-				try {
-					fs.closeSync(fd)
-				} catch (e2) {
-					// 忽略
-				}
-			}
-			reject(new Error(t('bookparse.readFail')))
-			return
-		}
-		const closeQuiet = () : void => {
-			try {
-				fs.closeSync(fd)
-			} catch (e) {
-				// 忽略
-			}
-		}
-		if (size == 0) {
-			closeQuiet()
-			resolve('')
-			return
-		}
-		const charset = Charset.forName(charsetName)
-		const isGbk = charsetName == 'GBK'
-		let pos = 0
-		const sb = new StringBuilder()
-		while (pos < size) {
-			let len = Math.min(READ_CHUNK_BYTES, size - pos)
-			const ab = new ArrayBuffer(len)
-			let readLen = 0
-			try {
-				readLen = fs.readSync(ab, fd, pos, 0, len)
-			} catch (e) {
-				closeQuiet()
-				reject(new Error(t('bookparse.readFail')))
-				return
-			}
-			if (readLen <= 0) {
-				break
-			}
-			// 非末块：块边界字符对齐，被切断字符整字节留给下一块
-			let adjusted = readLen
-			if (pos + readLen < size) {
-				adjusted = alignedTailLen(new Uint8Array(ab), readLen, isGbk)
-			}
-			try {
-				const bb = ab.toByteBuffer()
-				bb.rewind()
-				bb.limit(adjusted)
-				sb.append(charset.decode(bb).toString())
-			} catch (e) {
-				closeQuiet()
-				reject(new Error(t('bookparse.readFail')))
-				return
-			}
-			pos += adjusted
-		}
-		closeQuiet()
-		resolve(sb.toString())
-	})
-}
-// #endif
 
 /** 读取文本文件并自动识别编码（utf-8 优先，含替换符时按 GBK 重读；微信/Android 分块读规避大文件整读内存峰值，iOS 端整读无分块） */
 export function readTextFile(path : string) : Promise<string> {
@@ -296,20 +201,31 @@ export function readTextFile(path : string) : Promise<string> {
 	// #endif
 	// #ifdef APP-ANDROID
 	return new Promise<string>((resolve, reject) => {
-		readChunkedApp(path, 'UTF-8').then((text : string) => {
-			if (!looksMisencoded(text)) {
-				resolve(text)
+		try {
+			const fsm = uni.getFileSystemManager()
+			// vdom 引擎的 FS 同步 API 为 options-object 风格且 readSync/statSync 不可用（项目规范 3.4），
+			// 改整读：UTF-8 优先，乱码判定后按 binary 字节串经纯 JS 码表解 GBK（与微信端同一解码函数）；
+			// readFileSync 返回可空 string，空即读取失败
+			const text = fsm.readFileSync(path, 'utf-8')
+			if (text == null) {
+				reject(new Error(t('bookparse.readFail')))
 				return
 			}
-			// 非 UTF-8（大概率 GBK）：java.nio GBK 分块解码
-			readChunkedApp(path, 'GBK').then((gbkText : string) => {
-				resolve(gbkText)
-			}, (_e : Error | null) => {
+			// readFileSync 返回 any：空判断后 as string 收窄
+			const textStr = text as string
+			if (!looksMisencoded(textStr)) {
+				resolve(textStr)
+				return
+			}
+			const raw = fsm.readFileSync(path, 'binary')
+			if (raw == null) {
 				reject(new Error(t('bookparse.readFail')))
-			})
-		}, (e : Error | null) => {
-			reject(e != null ? e : new Error(t('bookparse.readFail')))
-		})
+				return
+			}
+			resolve(decodeGbkBytes(raw as string))
+		} catch (e) {
+			reject(new Error(t('bookparse.readFail')))
+		}
 	})
 	// #endif
 	// #ifdef APP-IOS
@@ -363,13 +279,14 @@ function isChapterLine(t : string) : boolean {
 function splitChapterTitle(t : string) : ParsedTitleParts {
 	const m = RE_NUMBERED.exec(t)
 	if (m != null) {
-		const label = m[0]
+		// exec 结果元素可空，?? '' 兜底（正则命中时 m[0] 恒非空）
+		const label = m[0] ?? ''
 		const rest = t.substring(label.length).trim().replace(/^[\s．.、:：\-—～~]+/, '').trim()
 		return { raw: t, label: label, contentTitle: rest.length > 0 ? rest : label } as ParsedTitleParts
 	}
 	const mc = RE_CHAPTER_EN.exec(t)
 	if (mc != null) {
-		const label2 = mc[0]
+		const label2 = mc[0] ?? ''
 		const rest2 = t.substring(label2.length).trim().replace(/^[\s．.、:：\-—～~]+/, '').trim()
 		return { raw: t, label: label2, contentTitle: rest2.length > 0 ? rest2 : label2 } as ParsedTitleParts
 	}

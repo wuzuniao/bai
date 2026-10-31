@@ -67,6 +67,7 @@
 	import type { SpanSeg, Thought } from '@/utils/readerTypesDefs.ts'
 	import { applySpanUnderlineToStorage, saveThought } from '@/utils/readerTypes.uts'
 	import { t } from '@/utils/i18n.uts'
+	import { rpxToPx } from '@/utils/layout.uts'
 	// 词典注册（划词子系统文案 + 公共段）
 	import '@/utils/locales/selectioncomp.uts'
 	import '@/utils/locales/common.uts'
@@ -125,7 +126,7 @@
 
 	/** 按划线段视口几何定位：下方放得下置下方；否则取上下空间宽裕侧并钳制不出屏 */
 	function positionCard(selBottom : number, selTop : number) : void {
-		const margin = uni.upx2px(24)
+		const margin = rpxToPx(24)
 		let w = props.pageW - margin * 2
 		// 宿主正文限宽：卡片钳制到正文宽并随页面水平居中（正文在页面内居中，中心与页面中心重合）；0=不限保持页面满宽
 		if (props.cardMaxW > 0 && props.cardMaxW < w) {
@@ -133,12 +134,12 @@
 		}
 		cardW.value = w
 		cardLeft.value = (props.pageW - w) / 2
-		const gap = uni.upx2px(16)
+		const gap = rpxToPx(16)
 		const h = cardH > 0 ? cardH : CARD_EST_H
 		const bottomSpace = props.pageH - selBottom - gap - h
 		const topSpace = selTop - gap - h
-		if (bottomSpace >= uni.upx2px(60) || bottomSpace >= topSpace) {
-			cardTop.value = Math.min(selBottom + gap, props.pageH - h - uni.upx2px(40))
+		if (bottomSpace >= rpxToPx(60) || bottomSpace >= topSpace) {
+			cardTop.value = Math.min(selBottom + gap, props.pageH - h - rpxToPx(40))
 		} else {
 			cardTop.value = Math.max(props.navTop, selTop - gap - h)
 		}
@@ -150,9 +151,12 @@
 		if (proxy == null) {
 			return
 		}
-		uni.createSelectorQuery().in(proxy).select('.thought-view-panel').boundingClientRect((rect : NodeInfo | null) : void => {
-			if (rect != null && rect.height > 0) {
-				cardH = rect.height
+		// .in(proxy) 变体的回调入参为 any（与不带 in 的重载签名不同），内部再 as NodeInfo 收窄；
+		// NodeInfo 字段可空，Kotlin 侧禁可空比较，?? 0 兜底
+		uni.createSelectorQuery().in(proxy).select('.thought-view-panel').boundingClientRect((res : any) : void => {
+			const rect = res as NodeInfo
+			if (rect != null && (rect.height ?? 0) > 0) {
+				cardH = rect.height ?? 0
 				positionCard(cardSelBottom, cardSelTop)
 			}
 		}).exec()
@@ -196,6 +200,12 @@
 	})
 	/** 想法输入框最大高度（px）：屏高的 40%，auto-height 随内容增长到此封顶（内部滚动） */
 	const editorMaxH = computed(() : number => props.pageH * 0.4)
+
+	function closeEditor() : void {
+		editorOpen.value = false
+		editorFocus.value = false
+		editorInput.value = ''
+	}
 
 	/** 打开写想法编辑器（宿主气泡「写想法」按钮调用，quote 为选区文本快照） */
 	function openEditor(quote : string) : void {
@@ -244,12 +254,6 @@
 	function cancelEditor() : void {
 		closeEditor()
 		emit('dismiss')
-	}
-
-	function closeEditor() : void {
-		editorOpen.value = false
-		editorFocus.value = false
-		editorInput.value = ''
 	}
 
 	defineExpose({

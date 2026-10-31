@@ -2,9 +2,9 @@
  * 个人信息页词典段（pages/user/profile.uvue）
  * 模块载入时注册进 i18n 全局词典；profile.uvue 引入本文件即完成注册。
  */
-import { registerDict, Dict } from '../../../utils/i18n'
+import { registerDict } from '../../../utils/i18n'
 
-const zh: Dict = new Map<string, string>([
+const zh = new Map<string, string>([
 	['profile.title', '个人信息'],
 	['profile.desc', '管理您的账户资料与安全设置，随时修改个人信息。'],
 	['profile.editUsername', '修改用户名'],
@@ -55,7 +55,7 @@ const zh: Dict = new Map<string, string>([
 	['profile.loggedOut', '已退出登录']
 ])
 
-const en: Dict = new Map<string, string>([
+const en = new Map<string, string>([
 	['profile.title', 'Profile'],
 	['profile.desc', 'Manage your account details and security settings, and update your personal information anytime.'],
 	['profile.editUsername', 'Change Username'],

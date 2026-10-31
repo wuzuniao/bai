@@ -2,9 +2,9 @@
  * 活动页词典段（pages/reading/reward.uvue）
  * 模块载入时注册进 i18n 全局词典；reward.uvue 引入本文件即完成注册。
  */
-import { registerDict, Dict } from '../i18n'
+import { registerDict } from '../i18n'
 
-const zh: Dict = new Map<string, string>([
+const zh = new Map<string, string>([
 	['reward.title', '活动'],
 	['reward.desc', '每 100 铜币自动兑换 1 银币，每 100 银币自动兑换 1 金币'],
 	['reward.shareTitle', '活动福利'],
@@ -55,7 +55,7 @@ const zh: Dict = new Map<string, string>([
 	['toast.claimOkN', '领取成功，+{0} 铜币']
 ])
 
-const en: Dict = new Map<string, string>([
+const en = new Map<string, string>([
 	['reward.title', 'Activity'],
 	['reward.desc', 'Every 100 copper coins auto-exchange for 1 silver coin, and every 100 silver coins for 1 gold coin'],
 	['reward.shareTitle', 'Rewards'],

@@ -47,9 +47,8 @@
 
 	/** ===== 书签（真源：组件内增删/持久化，列表直接展示；缓存按书籍隔离） ===== */
 	const bookmarks = ref<Bookmark[]>([])
-	{
-		bookmarks.value = loadBookmarks()
-	}
+	// 初始化书签缓存（UTS script setup 顶层不支持裸块语句）
+	bookmarks.value = loadBookmarks()
 
 	/** 书籍切换（云端 id 0→实 id）后重载当前书籍缓存 */
 	watch(() : number => props.bookId, (v : number) : void => {

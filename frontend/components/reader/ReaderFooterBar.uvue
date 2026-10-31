@@ -108,7 +108,7 @@
 	}
 
 	/** 模式切换重置：进滚动立即隐藏（清计时防悬挂），退出滚动恢复常显 */
-	watch(() => props.scrollMode, (mode : boolean) => {
+	watch(() : boolean => props.scrollMode, (mode : boolean) : void => {
 		if (mode) {
 			if (hideTimer >= 0) {
 				clearTimeout(hideTimer)

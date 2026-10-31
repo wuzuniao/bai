@@ -1,11 +1,13 @@
 <template>
-	<!-- 零高限宽锚定层：宽度与各页主内容列同口径（Web 480 / 其余 750，条件编译），
-		 宽屏时返回键对齐内容列左缘而非视口缘；层本身不占布局高度，按钮 absolute 锚定本层。
+	<!-- 实高占位层：宽度与各页主内容列同口径（Web 480 / 其余 750，条件编译），
+		 宽屏时返回键对齐内容列左缘而非视口缘；按钮以 margin-top 撑开状态栏高度、随层占位。
+		 原为「零高锚定层 + absolute 越界」：vdom 原生渲染下越界子元素被裁剪（绘制与触摸同时失效，
+		 真机返回键点击无效的根因），改实高占位后无越界即无裁剪。
 		 Web 端不渲染返回键（2026-10-22：浏览器自带返回，站内返回图标冗余；阅读页不受影响——
 		 reader/pdfreader 返回键在各自页面内实现，不经本组件） -->
 	<view class="back-button">
 		<!-- #ifndef WEB -->
-		<view class="back-button__inner" :style="'top:' + topPx + 'px'" @click="handleClick">
+		<view class="back-button__inner" :style="'margin-top:' + topPx + 'px'" @click="handleClick">
 			<image class="back-button__icon" src="/static/icons/arrow-back.svg" mode="aspectFit" />
 		</view>
 		<!-- #endif -->
@@ -15,8 +17,9 @@
 <script setup lang="uts">
 	/**
 	 * BackButton —— 次级页面返回按钮组件
-	 * 全项目唯一返回图标 arrow-back.svg（墨色），定位规则：状态栏高度驱动，
-	 * 左上角绝对定位（锚定限宽内容列）。页面栈为空（如分享直达）时回退首页。
+	 * 全项目唯一返回图标 arrow-back.svg（墨色），定位规则：状态栏高度驱动（margin-top 撑位），
+	 * 左上角（锚定限宽内容列）。页面栈为空（如分享直达）时回退首页。
+	 * vdom 实测（规范 3.4）：absolute 越界子元素在原生渲染下被裁剪，按钮必须实高占位。
 	 */
 
 	// 距顶部偏移（px）：取系统状态栏高度，Web 端无状态栏回退 44
@@ -47,15 +50,11 @@
 		/* #endif */
 		margin-left: auto;
 		margin-right: auto;
-		position: relative;
-		/* 零高层显式放开裁剪（uni-h5 view 基础样式默认 hidden），否则 absolute 按钮不可见 */
-		overflow: visible;
 	}
 
 	.back-button__inner {
-		position: absolute;
-		left: 48rpx;
-		z-index: 10;
+		/* App 端 80rpx 恒等于 40px（rpx 钳 750），按钮区总高 = 状态栏 + 40px，与原悬浮设计等距 */
+		margin-left: 48rpx;
 		width: 80rpx;
 		height: 80rpx;
 		display: flex;

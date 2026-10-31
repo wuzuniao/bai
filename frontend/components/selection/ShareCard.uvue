@@ -472,7 +472,7 @@
 	}
 
 	/** 绘制头像（白环包裹，圆心/半径由调用方传入；withLogo=false 时以浅色圆替代）——分享卡与转发封面共用 */
-	function drawAvatar(ctx : CanvasRenderingContext2D, cx : number, cy : number, ringR : number, logoR : number, logo : CanvasImage, withLogo : boolean) : void {
+	function drawAvatar(ctx : CanvasRenderingContext2D, cx : number, cy : number, ringR : number, logoR : number, logo : any, withLogo : boolean) : void {
 		ctx.fillStyle = SHARE_CANVAS_BG
 		ctx.beginPath()
 		ctx.arc(cx, cy, ringR, 0, Math.PI * 2)
@@ -482,7 +482,7 @@
 			ctx.beginPath()
 			ctx.arc(cx, cy, logoR, 0, Math.PI * 2)
 			ctx.clip()
-			ctx.drawImage(logo, cx - logoR, cy - logoR, logoR * 2, logoR * 2)
+			ctx.drawImage(logo as UniImageElementImpl, cx - logoR, cy - logoR, logoR * 2, logoR * 2)
 			ctx.restore()
 		} else {
 			ctx.fillStyle = '#d9d9d5'
@@ -515,7 +515,7 @@
 		}
 		return
 		// #endif
-		// #ifndef WEB
+		// #ifndef WEB || APP-ANDROID
 		uni.canvasToTempFilePath({
 			canvas: canvas,
 			success: (res2) => {
@@ -556,110 +556,6 @@
 		})
 		// #endif
 	}
-
-	/** 绘制分享卡片到隐藏 canvas 并保存为长图（排版与预览 CSS 换算一致；头像半出卡片顶部白环包裹；想法全量渲染不截断） */
-	function saveShareImage() : void {
-		// #ifdef WEB
-		// Web 端跳过选择器查询（fields node 语义不可靠）：直接取 uni-canvas 内的原生画布绘制
-		let canvas : any = document.querySelector('#share-canvas canvas')
-		if (canvas == null) {
-			canvas = document.querySelector('#share-canvas')
-		}
-		if (canvas == null) {
-			emit('toast', t('sel.saveFail'))
-			return
-		}
-		drawAndExport(canvas, false)
-		return
-		// #endif
-		// #ifndef WEB
-		const proxy = self == null ? null : self.proxy
-		if (proxy == null) {
-			emit('toast', t('sel.saveFail'))
-			return
-		}
-		uni.createSelectorQuery().in(proxy).select('#share-canvas').fields({ node: true, size: true }, (res : any) : void => {
-			if (res == null || res.node == null) {
-				emit('toast', t('sel.saveFail'))
-				return
-			}
-			drawAndExport(res.node, false)
-		}).exec()
-		// #endif
-	}
-
-	/** 封面最终路径定格（服务端 URL 优先，上传失败回落本地）：就绪上行事件供宿主消费 */
-	function settleCover(p : string) : void {
-		coverUrl.value = p
-		emit('shareImage', p)
-	}
-
-	/**
-	 * 上传封面到后端换取服务端 URL（微信真机不接受本地临时文件路径作转发封面，
-	 * 网络图片路径两端通用）；成功→URL 定格，未登录/失败→回落本地路径定格
-	 * （开发者工具可用本地路径，真机回落静态兜底图）
-	 */
-	function uploadCover(localPath : string) : void {
-		const token = getAccessToken()
-		if (token.length == 0) {
-			settleCover(localPath)
-			return
-		}
-		const header = {} as UTSJSONObject
-		header['Authorization'] = 'Bearer ' + token
-		uni.uploadFile({
-			url: API_BASE_URL + '/api/v1/share-covers',
-			filePath: localPath,
-			name: 'file',
-			header: header,
-			timeout: 8000,
-			success: (res) => {
-				if (res.statusCode >= 200 && res.statusCode < 300) {
-					try {
-						const obj = JSON.parse<UTSJSONObject>(res.data)
-						if (obj != null && (obj.getNumber('code') ?? 1) == 0) {
-							// uts2js（小程序 JS 运行时）UTSJSONObject 无 getObject 方法，嵌套取值用索引访问
-							const data = obj['data']
-							const dataObj = data == null ? null : data as UTSJSONObject
-							const p = dataObj == null ? '' : (dataObj.getString('path') ?? '')
-							if (p.length > 0) {
-								settleCover(API_BASE_URL + p)
-								return
-							}
-						}
-					} catch (e) {
-						console.warn('转发封面上传响应解析失败', e)
-					}
-				} else {
-					console.warn('转发封面上传失败', res.statusCode, res.data)
-				}
-				settleCover(localPath)
-			},
-			fail: (err) => {
-				console.warn('转发封面上传请求失败', err.errMsg)
-				settleCover(localPath)
-			}
-		})
-	}
-
-	// #ifdef MP-WEIXIN
-	function preGenerateShareImage() : void {
-		const proxy = self == null ? null : self.proxy
-		if (proxy == null) {
-			console.warn('转发封面预生成失败：组件实例不可用')
-			emit('toast', t('sel.coverFailCanvas'))
-			return
-		}
-		uni.createSelectorQuery().in(proxy).select('#share-canvas').fields({ node: true, size: true }, (res : any) : void => {
-			if (res == null || res.node == null) {
-				console.warn('转发封面预生成失败：画布节点查询为空', JSON.stringify(res))
-				emit('toast', t('sel.coverFailCanvas'))
-				return
-			}
-			drawAndExport(res.node, true)
-		}).exec()
-	}
-	// #endif
 
 	/** 转发封面构图常量（官方要求转发封面显示长宽比 5:4）：专用构图替代全量长图——
 	 *  长图作封面会被微信按 5:4 裁剪，展示区域不可控 */
@@ -703,12 +599,23 @@
 	}
 
 	/** 绘制转发封面头像（白环包裹跨顶带底边；withLogo=false 时以浅色圆替代） */
-	function drawCoverLogo(ctx : CanvasRenderingContext2D, logo : CanvasImage, withLogo : boolean) : void {
+
+	/** 绘制转发封面头像（白环包裹跨顶带底边；withLogo=false 时以浅色圆替代） */
+	function drawCoverLogo(ctx : CanvasRenderingContext2D, logo : any, withLogo : boolean) : void {
 		drawAvatar(ctx, COVER_W / 2, COVER_BAND_H, COVER_RING_R, COVER_LOGO_R, logo, withLogo)
 	}
 
 	/** 绘制并导出（canvas 为画布节点：小程序/App 为 node 模式画布，Web 为原生 HTMLCanvasElement） */
 	function drawAndExport(canvas : any, forShare : boolean) : void {
+		// #ifdef APP-ANDROID
+		// vdom 引擎暂无 canvasToTempFilePath / CanvasImage（平台能力缺口，项目规范 3.4）：
+		// 分享长图导出 Android 端降级提示；分享封面链路 emit 空路径回落服务端默认封面
+		emit('toast', t('sel.shareTodo'))
+		if (forShare) {
+			emit('shareImage', '')
+		}
+		return
+		// #endif
 		const dpr = uni.getWindowInfo().pixelRatio
 		const ctx = canvas.getContext('2d')
 		if (ctx == null) {
@@ -807,6 +714,119 @@
 			exportCanvas()
 		}, 1500)
 	}
+
+	/** 绘制分享卡片到隐藏 canvas 并保存为长图（排版与预览 CSS 换算一致；头像半出卡片顶部白环包裹；想法全量渲染不截断） */
+	function saveShareImage() : void {
+		// #ifdef WEB
+		// Web 端跳过选择器查询（fields node 语义不可靠）：直接取 uni-canvas 内的原生画布绘制
+		let canvas : any = document.querySelector('#share-canvas canvas')
+		if (canvas == null) {
+			canvas = document.querySelector('#share-canvas')
+		}
+		if (canvas == null) {
+			emit('toast', t('sel.saveFail'))
+			return
+		}
+		drawAndExport(canvas, false)
+		return
+		// #endif
+		// #ifndef WEB
+		const proxy = self == null ? null : self.proxy
+		if (proxy == null) {
+			emit('toast', t('sel.saveFail'))
+			return
+		}
+		// fields 回调的 res 为 any（平台边界），node 经 UTSJSONObject 索引访问取出
+		uni.createSelectorQuery().in(proxy).select('#share-canvas').fields({ node: true, size: true }, (res : any) : void => {
+			if (res == null) {
+				emit('toast', t('sel.saveFail'))
+				return
+			}
+			const r = res as UTSJSONObject
+			const node = r['node']
+			if (node == null) {
+				emit('toast', t('sel.saveFail'))
+				return
+			}
+			drawAndExport(node, false)
+		}).exec()
+		// #endif
+	}
+
+	/** 封面最终路径定格（服务端 URL 优先，上传失败回落本地）：就绪上行事件供宿主消费 */
+	function settleCover(p : string) : void {
+		coverUrl.value = p
+		emit('shareImage', p)
+	}
+
+	/**
+	 * 上传封面到后端换取服务端 URL（微信真机不接受本地临时文件路径作转发封面，
+	 * 网络图片路径两端通用）；成功→URL 定格，未登录/失败→回落本地路径定格
+	 * （开发者工具可用本地路径，真机回落静态兜底图）
+	 */
+	function uploadCover(localPath : string) : void {
+		const token = getAccessToken()
+		if (token.length == 0) {
+			settleCover(localPath)
+			return
+		}
+		const header = {} as UTSJSONObject
+		header['Authorization'] = 'Bearer ' + token
+		uni.uploadFile({
+			url: API_BASE_URL + '/api/v1/share-covers',
+			filePath: localPath,
+			name: 'file',
+			header: header,
+			timeout: 8000,
+			success: (res) => {
+				if (res.statusCode >= 200 && res.statusCode < 300) {
+					try {
+						const obj = JSON.parse<UTSJSONObject>(res.data)
+						if (obj != null && (obj.getNumber('code') ?? 1) == 0) {
+							// uts2js（小程序 JS 运行时）UTSJSONObject 无 getObject 方法，嵌套取值用索引访问
+							const data = obj['data']
+							const dataObj = data == null ? null : data as UTSJSONObject
+							const p = dataObj == null ? '' : (dataObj.getString('path') ?? '')
+							if (p.length > 0) {
+								settleCover(API_BASE_URL + p)
+								return
+							}
+						}
+					} catch (e) {
+						console.warn('转发封面上传响应解析失败', e)
+					}
+				} else {
+					console.warn('转发封面上传失败', res.statusCode, res.data)
+				}
+				settleCover(localPath)
+			},
+			fail: (err) => {
+				console.warn('转发封面上传请求失败', err.errMsg)
+				settleCover(localPath)
+			}
+		})
+	}
+
+	// #ifdef MP-WEIXIN
+	function preGenerateShareImage() : void {
+		const proxy = self == null ? null : self.proxy
+		if (proxy == null) {
+			console.warn('转发封面预生成失败：组件实例不可用')
+			emit('toast', t('sel.coverFailCanvas'))
+			return
+		}
+		uni.createSelectorQuery().in(proxy).select('#share-canvas').fields({ node: true, size: true }, (res : any) : void => {
+			if (res == null || res.node == null) {
+				console.warn('转发封面预生成失败：画布节点查询为空', JSON.stringify(res))
+				emit('toast', t('sel.coverFailCanvas'))
+				return
+			}
+			drawAndExport(res.node, true)
+		}).exec()
+	}
+	// #endif
+
+
 
 	defineExpose({
 		open,

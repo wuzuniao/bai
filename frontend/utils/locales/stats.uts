@@ -2,9 +2,9 @@
  * 阅读统计页词典段（pages/reading/stats.uvue）
  * 模块载入时注册进 i18n 全局词典；stats.uvue 引入本文件即完成注册。
  */
-import { registerDict, Dict } from '../i18n'
+import { registerDict } from '../i18n'
 
-const zh: Dict = new Map<string, string>([
+const zh = new Map<string, string>([
 	['stats.title', '阅读时间统计'],
 	['stats.desc', '按周/月/年查看阅读时长、书籍榜、排行与时段分布'],
 	['stats.shareTitle', '阅读统计'],
@@ -65,7 +65,7 @@ const zh: Dict = new Map<string, string>([
 	['stats.mLabel12', '12 月']
 ])
 
-const en: Dict = new Map<string, string>([
+const en = new Map<string, string>([
 	['stats.title', 'Reading Stats'],
 	['stats.desc', 'View reading time, top books, ranking and time-of-day distribution by week/month/year'],
 	['stats.shareTitle', 'Reading Stats'],

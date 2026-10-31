@@ -4,9 +4,9 @@
  * 仅展示层经 modeLabel 取词。
  * 模块载入时注册进 i18n 全局词典；相关组件引入本文件即完成注册。
  */
-import { registerDict, Dict } from '../i18n'
+import { registerDict } from '../i18n'
 
-const zh: Dict = new Map<string, string>([
+const zh = new Map<string, string>([
 	['readercomp.fontSize', '字号'],
 	['readercomp.fontPick', '请选择'],
 	['readercomp.background', '背景'],
@@ -36,7 +36,7 @@ const zh: Dict = new Map<string, string>([
 	['readercomp.themeNight', '夜晚']
 ])
 
-const en: Dict = new Map<string, string>([
+const en = new Map<string, string>([
 	['readercomp.fontSize', 'Size'],
 	['readercomp.fontPick', 'Select'],
 	['readercomp.background', 'Theme'],

@@ -14,17 +14,22 @@ export const CONTENT_CAP_PX = 480
 export const CONTENT_CAP_PX = 750
 // #endif
 
-/** 次级页面内容区顶部留白（px）：返回按钮（状态栏高度 + 40px）之下再留 12px；
- *  Web 端不渲染返回键（浏览器自带返回），页头距顶收紧 */
-export function mainTopPx() : number {
+/**
+ * rpx→px 换算（与 CSS rpx 口径一致）。
+ * vdom 引擎（项目规范 3.4）下 uni.upx2px 不存在（App-Android 编译报 API 不支持），故自行换算；
+ * 基准钳制与 pages.json globalStyle 的 rpxCalcMaxDeviceWidth 同口径：Web 端 480、App 端 750、
+ * 小程序端不钳制（原生 rpx 即按屏宽换算）。
+ */
+export function rpxToPx(rpx : number) : number {
 	const win = uni.getWindowInfo()
-	if (win.statusBarHeight > 0) {
-		return win.statusBarHeight + 52
-	}
 	// #ifdef WEB
-	return 32
+	return rpx * Math.min(win.windowWidth, 480) / 480
 	// #endif
-	return 96
+	// #ifdef MP-WEIXIN
+	return rpx * win.windowWidth / 750
+	// #endif
+	// App（Android/iOS）与其他端：基准钳制 750，与 globalStyle 非 WEB 分支同口径
+	return rpx * Math.min(win.windowWidth, 750) / 750
 }
 
 // 共享类型抽离到 layout.ts：UTS 编译器对 type-only 导入会改写为 *.ts 路径（HBuilderX 5.33），

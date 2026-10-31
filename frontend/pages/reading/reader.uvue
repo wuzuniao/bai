@@ -309,7 +309,7 @@
 	import { buildParaLayout } from '@/utils/textlayout.uts'
 	// #endif
 	import { flipCurrentLayerStyle, flipPrevLayerStyle, flipNextLayerStyle, flipCoverNextOpacity, flipCoverCurrentOpacity } from '@/utils/flipstyle.uts'
-	import { mpCapsuleRect, scheduleResizeReload } from '@/utils/layout.uts'
+	import { mpCapsuleRect, scheduleResizeReload, rpxToPx } from '@/utils/layout.uts'
 	// #ifdef MP-WEIXIN
 	import { buildShareAppContent } from '@/utils/shareCover.uts'
 	// #endif
@@ -323,22 +323,13 @@
 	import '@/utils/locales/readercomp.uts'
 	import '@/utils/locales/common.uts'
 
-	/** 组件引用：气泡（划词建立/清除与锚点、拖动矩形回传）、控制框（书签增删）、信息栏（滚动信号）、提示卡片 */
-	const popoverRef = ref<SelectionPopover | null>(null)
-	const controlRef = ref<ReaderControl | null>(null)
-	const footerRef = ref<ReaderFooterBar | null>(null)
-	const toastRef = ref<ReaderToast | null>(null)
+	/** 组件引用：气泡（划词建立/清除与锚点、拖动矩形回传）、控制框（书签增删）、信息栏（滚动信号）、提示卡片。
+	 *  vdom 模式（规范 3.4）下 ref 标注为页面自定义 Expose 类型会在运行时 cast 失败
+	 *  （组件实例类不实现页面接口），官方方式为 ComponentPublicInstance + $callMethod；
+	 *  方法名为字符串，组件内方法改名时需同步各调用点。 */
 
-	/** 气泡分享卡片预生成的封面图（引文长图临时文件路径；''=无，转发回落默认封面图） */
-	const cardShareImage = ref('')
-	function onCardShareImage(path : string) : void {
-		cardShareImage.value = path
-	}
 
-	/** 想法查看卡片关闭通知：复位划线段点击协调标志（卡片遮罩期间标志残留会吞掉关闭后首次点击） */
-	function onThoughtViewClosed() : void {
-		paragraphTapHandled = false
-	}
+
 
 	/** 当前页渲染项（origin 为段落在章内的索引，划词状态按其定位；翻页模式下段落可跨页，from/to 为本页切片的整段字符闭区间） */
 	type PageItem = {
@@ -350,630 +341,466 @@
 		text: string
 	}
 
-	/** 目录章节（默认空；真实书籍数据统一经 loadBookContent 注入，id 即章序号） */
-	const chapters = ref<Chapter[]>([])
 
-	/** 全书各章段落（章 id → 段落列表；切章/跨章预渲染按 id 取用） */
-	const chapterParas = ref<Paragraph[][]>([])
 
-	/** 指定章的段落列表（越界返回空数组） */
-	function paragraphsOf(cid : number) : Paragraph[] {
-		if (cid >= 0 && cid < chapterParas.value.length) {
-			return chapterParas.value[cid]
-		}
-		return []
-	}
 
-	/** 当前阅读章节 id（滚动/翻页/进度均以此为准） */
-	const currentChapterId = ref(0)
 
-	/** 章节安全读取：越界或数据未注入时返回空壳章（页眉/页脚/预渲染层/分享出处统一兜底） */
-	function chapterAt(id : number) : Chapter {
-		const c = chapters.value[id]
-		if (c != null) {
-			return c
-		}
-		return { id: id, title: '', label: '', contentTitle: '', active: false } as Chapter
-	}
 
-	/** 全书触底态（末章到底提示弹出后置真，底栏百分比按整本计 100%；经章跳复位回落实时章序） */
-	const bookFinished = ref(false)
 
-	/** 当前章节信息（标签/标题/底部进度均由此派生） */
-	const currentChapter = computed(() : Chapter => {
-		return chapterAt(currentChapterId.value)
-	})
 
-	/** 底栏章数/章序换算：序章不计入总数与章序（有序书总数减一、正文章序=cid-1；序章 cid=0 计 0） */
-	const footerChapterCount = computed(() : number => {
-		return chapters.value.length - (bookHasPreface.value ? 1 : 0)
-	})
 
-	const footerChapterIndex = computed(() : number => {
-		// 触底态（末章到底提示已弹）按整本章数计 → 百分比 100%；离开末章由 goToChapter 复位回落
-		if (bookFinished.value && currentChapterId.value == chapters.value.length - 1) {
-			return footerChapterCount.value
-		}
-		return Math.max(0, currentChapterId.value - (bookHasPreface.value ? 1 : 0))
-	})
 
-	const chapterLabel = computed(() : string => {
-		return currentChapter.value.label
-	})
 
-	const contentTitle = computed(() : string => {
-		return currentChapter.value.contentTitle
-	})
 
-	/** 当前页码（章内 0-based，左右滑动翻页切换） */
-	const pageIndex = ref(0)
 
-	/** 正文区底部留白（px）：贴底信息栏文字行（ReaderFooterBar 同式：贴底内边距 max(4, 安全区-10) + 文字行高约 19px）
-	 *  之上保留约 12px 净空，使无控制框时正文尽量接近信息栏且不重叠；控制框呼出时为浮层覆盖正文、不占排版空间 */
-	const contentBottomPx = computed(() : number => Math.max(safeAreaBottomPx.value - 10, 4) + 31)
 
-	/** ===== 每行字数标定（渲染实测）：纯计算折行与真实渲染存在字距/标点禁则偏差，页尾空白据此累积；
-	 *  屏幕外标定节点（约 20 行字数）实测高度反推实际每行字数，标定前回退纯字宽估算 ===== */
-	const perLineExact = ref(0)
-	/** 正文排版宽度（px）：阅读页不限宽（2026-10-22 用户拍板），恒等于窗口宽，
-	 *  每行字数标定/分页/划词换算全部以它为准（与 content-inner/scroll-mode-inner 铺满布局同源） */
-	const bodyW = computed(() : number => pageW.value)
 
-	const perLineEstimate = computed(() : number => {
-		return Math.max(1, Math.floor((bodyW.value - uni.upx2px(124)) / fontSize.value))
-	})
-	const perLineEffective = computed(() : number => {
-		return perLineExact.value > 0 ? perLineExact.value : perLineEstimate.value
-	})
-	/** 标定文本（约 20 行字数：行数累计放大偏差，ceil 反推可检出 ±1 字/行的差异） */
-	const calibText = computed(() : string => {
-		let s = ''
-		const n = perLineEstimate.value * 20
-		for (let i = 0; i < n; i++) {
-			s += '测'
-		}
-		return s
-	})
-	const calibWidth = computed(() : number => bodyW.value - uni.upx2px(124))
 
-	/** ===== 离屏排版实测（分页数据源）：整章段落行数 + 被切断段落的末行字符数。
-	 *  测量全程在屏外进行，且于页面展示前完成（开书在 loading 遮罩内、切章先测后切、相邻章后台预取），阅读翻页无可见重排；
-	 *  实测未就绪时分页回退字数估算（computePageBreaks）。字号/字体变化使实测数据整体失效并自动重测 ===== */
-	const paraLinesCache = ref<Map<number, number[]>>(new Map())
-	const paraTailCache = ref<Map<number, number[]>>(new Map())
-	/** APP 端引擎级精确排版缓存（章 id → 行数+逐行末字符下标；StaticLayout 条件编译，其余端恒空） */
-	const paraLayoutCache = ref<Map<number, ParaLineLayout>>(new Map())
-	/** StaticLayout 与真实渲染一致性：0=未校验 1=可信（免 DOM 校验）2=禁用（回退 DOM 探测管线） */
-	let staticLayoutMode = 0
-	/** 校准得到的真实行高倍率（×字号；自适应端上行高实现差异） */
-	let staticLayoutAlpha = 1.7
-	/** 待实测整章渲染的章 id（驱动离屏测量节点，测完即卸载） */
-	const measureParas = ref<number[]>([])
-	/** 待实测章头渲染的章 id（驱动离屏章头探针，测完即卸载） */
-	const measureHeaders = ref<number[]>([])
-	/** 章头占位高缓存（章 id → px：实测块高+固定下边距；标题样式固定不随读者字号/字体变化，全会话有效） */
-	const chapterHeadHCache = ref<Map<number, number>>(new Map())
+
+
 	/** 末行字符探测项：渲染段落前缀 [0, chars)（含全角缩进，与正文首切片同参），按实测行数反推末行 */
 	type LayoutProbe = {
 		cid : number
 		pi : number
 		chars : number
 	}
-	const layoutProbes = ref<LayoutProbe[]>([])
 	/** 末行二分搜索状态（rc ∈ [lo, hi]，rc 为末行字符数候选） */
 	type TailSearch = {
 		lo : number
 		hi : number
 	}
-	/** 排版版本号：排版参数变化即递增，使在途测量结果作废 */
-	let layoutEpoch = 0
-	/** 测量串行链：多章/多次请求排队执行，避免离屏节点交叉渲染 */
-	let measureChain : Promise<void> = Promise.resolve()
-	/** 在测章 id（含末行探测）：门控调用需等待在测章完成，避免提前放行造成可见换算 */
-	let measuringCids : number[] = []
-	let relayoutTimer = -1
 
-	/** 指定章实测行数（长度与段落对齐才有效，未测/失效返回 null） */
-	function measuredLinesOf(cid : number) : number[] | null {
-		const lines = paraLinesCache.value.get(cid)
-		if (lines != null && lines.length == paragraphsOf(cid).length) {
-			return lines
+	/** 序章存在性（导入时固化）：底栏章数/章序换算依据（序章不计入总数与章序） */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+	/** 序章存在性（导入时固化）：底栏章数/章序换算依据（序章不计入总数与章序） */
+
+
+
+	/** ===== 阅读进度（章节/页码/滚动位置，按 bookId 隔离持久化） ===== */
+
+
+
+
+	const footerRef = ref<ComponentPublicInstance | null>(null)
+	let anchorTimer = -1
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+	/** 顶部导航内容行（px）：与小程序胶囊同行对齐（同子页 BackButton 口径：状态栏高度起、行高 40px） */
+	const navTop = ref(44)
+	const navHeight = ref(40)
+	// 初始化窗口与安全区（UTS script setup 顶层不支持裸块语句，原块内变量提升并改名避免遮蔽）
+	const initWin = uni.getWindowInfo()
+	if (initWin.statusBarHeight > 0) {
+		navTop.value = initWin.statusBarHeight
+	}
+	// 安全区：safeArea 为可空字段，空安全读取（手势条高度=窗口高-安全区底界）
+	const initSafeArea = initWin.safeArea
+	// 小程序正文区从胶囊下方起（mpCapsuleRect 内聚条件编译，非微信端为 null 不覆盖）
+	const initCapsule = mpCapsuleRect()
+
+
+
+	/** ===== 划线与想法（本地存储真源在 utils/readerTypes.uts：气泡组件写入；页面维护内存副本供渲染与查看，组件 sync 事件时重读） ===== */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+	/** 段落渲染分段（按划线/想法区间与当前选区切分，相邻同属性段合并；选区两端插入零宽锚点段供实测边界坐标） */
+	type TextSeg = {
+		start: number
+		text: string
+		selected: boolean
+		underlined: boolean
+		/** 有想法的区间（下划线样式与纯划线区分，点击可查看想法） */
+		thought: boolean
+		/** 锚点标记：0=普通段 / 1=选区起点锚点段 / 2=选区终点锚点段 */
+		anchor: number
+	}
+
+	/** 选区两端锚点（零宽字符，排入选中文本流）：其渲染位置即字符边界的真实位置，手柄/气泡吸附实测值 */
+	const ANCHOR_CHAR = '\u200B'
+
+	/** 分段样式类：选区高亮与下划线叠加；想法段实线下划线优先于划线波浪线 */
+	function segClass(seg : TextSeg) : string {
+		let cls = ''
+		if (seg.selected) {
+			cls = cls + 'para-highlight '
 		}
-		return null
-	}
-
-	/** 指定章末行字符数组（与段落对齐；未探测段落为 0，分页内回退均值估算） */
-	function tailCharsOf(cid : number, paras : Paragraph[]) : number[] {
-		const tails = paraTailCache.value.get(cid)
-		const arr : number[] = []
-		for (let i = 0; i < paras.length; i++) {
-			arr.push(tails != null && tails[i] > 0 ? tails[i] : 0)
+		if (seg.thought) {
+			cls = cls + 'para-thought'
+		} else if (seg.underlined) {
+			cls = cls + 'para-underlined'
 		}
-		return arr
+		return cls
 	}
 
-	/** 探测前缀文本：段落 [0, chars) + 两个全角空格缩进（与正文段首渲染同参） */
-	function probePrefixText(probe : LayoutProbe) : string {
-		const paras = paragraphsOf(probe.cid)
-		if (probe.pi < 0 || probe.pi >= paras.length) {
-			return ''
-		}
-		const full = paras[probe.pi].text
-		return full.substring(0, Math.min(probe.chars, full.length))
-	}
+	/** 划线段点击协调标志：段落 click 先于父级 content click（微信端无有效 stopPropagation，用标志让父级跳过本次） */
 
-	/** 排版失效（字号/字体变化）：实测缓存即时清除（分页先按估算渲染），随后重标定并重测当前章邻域、钳制页码 */
-	function invalidateLayoutMeasure() : void {
-		layoutEpoch++
-		paraLinesCache.value = new Map()
-		paraTailCache.value = new Map()
-		paraLayoutCache.value = new Map()
-		// 排版参数变化后 StaticLayout 同参一致性需重新校验（字体族映射可能随字体变化）
-		staticLayoutMode = 0
-		if (relayoutTimer >= 0) {
-			clearTimeout(relayoutTimer)
-		}
-		relayoutTimer = setTimeout(() => {
-			relayoutTimer = -1
-			calibratePerLine()
-			const cid = currentChapterId.value
-			ensureChaptersMeasured([cid - 1, cid, cid + 1]).then(() => {
-				clampPageIndex()
-			})
-		}, 150)
-	}
 
-	/** 确保章节实测完成（APP 端引擎断行直读 / 其余端行数+末行探测）；已实测立即返回，在测等待串行链，未测排队执行离屏测量 */
-	function ensureChaptersMeasured(cids : number[]) : Promise<void> {
-		const ids : number[] = []
-		let waitChain = false
-		for (let i = 0; i < cids.length; i++) {
-			const cid = cids[i]
-			if (cid < 0 || cid >= chapters.value.length || paraLinesCache.value.get(cid) != null || paraLayoutCache.value.get(cid) != null) {
-				continue
-			}
-			if (measuringCids.indexOf(cid) >= 0) {
-				// 该章测量在途：等待串行链跑完（含末行探测）
-				waitChain = true
-				continue
-			}
-			if (ids.indexOf(cid) < 0) {
-				ids.push(cid)
-			}
-		}
-		if (ids.length > 0) {
-			const epoch = layoutEpoch
-			measureChain = measureChain.then(() : Promise<void> => {
-				return runMeasureChapters(ids, epoch)
-			})
-		}
-		if (ids.length == 0 && !waitChain) {
-			return Promise.resolve()
-		}
-		return measureChain
-	}
 
-	/** 依序测量多章（运行时再次校验缓存与版本号，避免重复/过期测量；APP-ANDROID 走引擎直读，其余端走 DOM 探测。
-	 *  章头占位测量在各路径内部并行：DOM 路径并入整章挂载批次（见 measureChapterLines），APP 引擎路径直读后 resolve 前补测（见 measureChapterAuto） */
-	function runMeasureChapters(ids : number[], epoch : number) : Promise<void> {
-		let p : Promise<void> = Promise.resolve()
-		for (let i = 0; i < ids.length; i++) {
-			const cid = ids[i]
-			p = p.then(() : Promise<void> => {
-				if (epoch != layoutEpoch || paraLinesCache.value.get(cid) != null || paraLayoutCache.value.get(cid) != null || paragraphsOf(cid).length == 0) {
-					removeMeasuring(cid)
-					return Promise.resolve()
-				}
-				// #ifdef APP-ANDROID
-				return measureChapterAuto(cid, epoch).then(() : void => {
-					removeMeasuring(cid)
-				})
-				// #endif
-				// #ifndef APP-ANDROID
-				return measureChapterLines(cid, epoch).then(() : void => {
-					removeMeasuring(cid)
-				})
-				// #endif
-			})
-		}
-		return p
-	}
 
-	/** Map 写时复制更新（返回新 Map 触发响应式重算，测量缓存统一经由本工具落库） */
-	function mapWithEntry<K, V>(src : Map<K, V>, key : K, value : V) : Map<K, V> {
-		const next : Map<K, V> = new Map()
-		src.forEach((v : V, k : K) => {
-			next.set(k, v)
-		})
-		next.set(key, value)
-		return next
-	}
+	const popoverRef = ref<ComponentPublicInstance | null>(null)
 
-	/** 在测标记清理 */
-	function removeMeasuring(cid : number) : void {
-		const idx = measuringCids.indexOf(cid)
-		if (idx >= 0) {
-			measuringCids.splice(idx, 1)
-		}
-	}
 
-	/** 章头占位高实测：离屏渲染与页内同参章头（label 行+大标题+分隔条，同 class 同宽），实测块高+固定下边距（108rpx）。
-	 *  长章节名折行使章头高度随标题行数增长，固定 294rpx 估算会致章首页预算超支、正文末行溢出内容区；
-	 *  标题样式固定（不随读者字号/字体变化），实测值全会话有效。测量失败保持无数据，回退常量估算 */
-	function measureChapterHeader(cid : number, epoch : number) : Promise<void> {
-		return new Promise<void>((resolve) => {
-			if (epoch != layoutEpoch || chapterHeadHCache.value.get(cid) != null) {
-				resolve()
-				return
-			}
-			measureHeaders.value = [cid]
-			measureHeaderAttempt(cid, epoch, 0, resolve)
-		})
-	}
 
-	/** 章头测量尝试：离屏渲染就绪时机不定（setData 异步），节点缺失时 30ms 轮询重查至多 9 次（总预算约 270ms，快设备首次即中） */
-	function measureHeaderAttempt(cid : number, epoch : number, attempt : number, resolve : () => void) : void {
-		setTimeout(() => {
-			if (epoch != layoutEpoch) {
-				measureHeaders.value = [] as number[]
-				resolve()
-				return
-			}
-			uni.createSelectorQuery().selectAll('.measure-header-' + cid).boundingClientRect((rects : NodeInfo[]) : void => {
-				if (epoch != layoutEpoch) {
-					measureHeaders.value = [] as number[]
-					resolve()
-					return
-				}
-				if (rects != null && rects.length == 1 && rects[0].height > 0) {
-					// 写时复制落缓存（触发分页重算），卸载探针节点
-					chapterHeadHCache.value = mapWithEntry(chapterHeadHCache.value, cid, rects[0].height + uni.upx2px(108))
-					measureHeaders.value = [] as number[]
-					resolve()
-					return
-				}
-				if (attempt < 8) {
-					measureHeaderAttempt(cid, epoch, attempt + 1, resolve)
-					return
-				}
-				// 测量失败：卸载节点并保持无数据，该章章头回退常量估算
-				measureHeaders.value = [] as number[]
-				resolve()
-			}).exec()
-		}, 30)
-	}
-
-	// #ifdef APP-ANDROID
-	/** APP 端测量：StaticLayout 引擎直读断行（引擎级精确，无 DOM 探测）。会话首章做一次同参一致性校验
-	 *  （离屏 DOM 块高 vs 预测行数的行高比例 α 一致性），通过后本会话后续章免 DOM 校验；校验失败回退 DOM 探测管线 */
-	function measureChapterAuto(cid : number, epoch : number) : Promise<void> {
-		return new Promise<void>((resolve) => {
-			const paras = paragraphsOf(cid)
-			if (epoch != layoutEpoch || paras.length == 0) {
-				resolve()
-				return
-			}
-			const texts : string[] = []
-			for (let i = 0; i < paras.length; i++) {
-				texts.push(paras[i].text)
-			}
-			const layout = buildParaLayout(texts, fontSize.value, fontFamily.value, uni.upx2px(0.4), calibWidth.value)
-			if (layout.lines.length != paras.length) {
-				resolve()
-				return
-			}
-			if (staticLayoutMode == 1) {
-				// 已验证可信：免 DOM 校验，直接采用引擎断行；章头占位独立实测（resolve 前落定，保证切换前章首页预算就绪）
-				storeLayout(cid, layout)
-				measureChapterHeader(cid, epoch).then(() : void => {
-					resolve()
-				})
-				return
-			}
-			// 未校验：挂整章离屏节点做一次同参校验
-			measureParas.value = [cid]
-			setTimeout(() => {
-				if (epoch != layoutEpoch) {
-					measureParas.value = [] as number[]
-					resolve()
-					return
-				}
-				uni.createSelectorQuery().selectAll('.measure-para-' + cid).boundingClientRect((rects : NodeInfo[]) : void => {
-					measureParas.value = [] as number[]
-					if (epoch != layoutEpoch || rects == null || rects.length != paras.length) {
-						// DOM 校验不可用：保守禁用引擎路径，回退 DOM 探测管线
-						staticLayoutMode = 2
-						measureChapterLines(cid, epoch).then(() => {
-							resolve()
-						})
-						return
-					}
-					// 行高比例 α = 真实块高 /（预测行数 × 字号）。断行不同源时 L 失真致 α 离散，
-					// 仅行高实现差异时 α 一致——按离散度判定断行可信性，并自校准真实行高
-					let sum = 0
-					let count = 0
-					for (let i = 0; i < rects.length; i++) {
-						if (layout.lines[i] > 0 && fontSize.value > 0) {
-							sum += rects[i].height / (layout.lines[i] * fontSize.value)
-							count++
-						}
-					}
-					const mean = count > 0 ? sum / count : 0
-					let keep = 0
-					let sum2 = 0
-					for (let i = 0; i < rects.length; i++) {
-						if (layout.lines[i] > 0 && fontSize.value > 0) {
-							const a = rects[i].height / (layout.lines[i] * fontSize.value)
-							if (Math.abs(a - mean) <= 0.2) {
-								keep++
-								sum2 += a
-							}
-						}
-					}
-					const alpha = keep > 0 ? sum2 / keep : 1.7
-					if (count > 0 && keep >= count * 0.8 && alpha > 0.5 && alpha < 4) {
-						staticLayoutMode = 1
-						staticLayoutAlpha = alpha
-						storeLayout(cid, layout)
-						// 章头占位独立实测（resolve 前落定）
-						measureChapterHeader(cid, epoch).then(() : void => {
-							resolve()
-						})
-					} else {
-						staticLayoutMode = 2
-						measureChapterLines(cid, epoch).then(() => {
-							resolve()
-						})
-					}
-				}).exec()
-			}, 120)
-		})
-	}
-
-	/** 精确排版数据落缓存（写时复制触发分页重算） */
-	function storeLayout(cid : number, layout : ParaLineLayout) : void {
-		paraLayoutCache.value = mapWithEntry(paraLayoutCache.value, cid, layout)
-	}
+	// 存储值不在当前端可选列表内（如非 APP 端的历史"仿真"设置）时回退默认，避免选中无按钮模式
+	const restoredModes = ['滚动', '覆盖', '平移']
+	// #ifdef APP
+	restoredModes.splice(1, 0, '仿真')
 	// #endif
+	/** 启动恢复本地设置镜像（真源同一存储，与 ReaderControl 组件各自恢复保持一致；字号/翻页模式/主题）。
+	 *  UTS script setup 顶层不支持裸块语句，原块内变量提升并改名避免遮蔽 */
+	const restoredSettings = loadSettings()
 
-	/** 单章行数实测：挂载整章离屏渲染（章头探针同批挂载、并行实测——共享一次 setData 与挂载等待，
-	 *  章头 30ms 轮询查询先于段落完成，末行探测打包前已落缓存）→ 批量查询段落块高度反推行数 → 卸载后转入末行探测；
-	 *  resolve 前等待章头落定（成功或放弃），保证切换前章首页预算就绪、无二次重排 */
-	function measureChapterLines(cid : number, epoch : number) : Promise<void> {
-		return new Promise<void>((resolve) => {
-			measuringCids.push(cid)
-			measureParas.value = [cid]
-			let headerP : Promise<void> = Promise.resolve()
-			if (chapterHeadHCache.value.get(cid) == null) {
-				measureHeaders.value = [cid]
-				headerP = new Promise<void>((hr) => {
-					measureHeaderAttempt(cid, epoch, 0, hr)
-				})
-			}
-			measureLinesAttempt(cid, epoch, 0, () : void => {
-				headerP.then(() : void => {
-					resolve()
-				})
-			})
+
+
+
+	/** 序章标志：有序书含序章页（cid=0），底栏章数/章序换算时剔除 */
+	const bookHasPreface = ref(false)
+	/** 段落文本数组 → 段落对象数组（本地 txt 解析结果注入前的统一转换） */
+	function toParagraphs(texts : string[]) : Paragraph[] {
+		return texts.map((t : string) : Paragraph => {
+			return { text: t } as Paragraph
 		})
 	}
-
-	/** 行数测量尝试：离屏渲染就绪时机不定（setData 异步），节点数不符时 40ms 轮询重查至多 9 次
-	 *  （总预算 360ms 与原 3×120ms 一致；快设备就绪即查询，不再空等整段固定延时） */
-	function measureLinesAttempt(cid : number, epoch : number, attempt : number, resolve : () => void) : void {
-		setTimeout(() => {
-			const paras = paragraphsOf(cid)
-			if (epoch != layoutEpoch || paras.length == 0) {
-				measureParas.value = [] as number[]
-				resolve()
-				return
-			}
-			uni.createSelectorQuery().selectAll('.measure-para-' + cid).boundingClientRect((rects : NodeInfo[]) : void => {
-				if (epoch != layoutEpoch) {
-					measureParas.value = [] as number[]
-					resolve()
-					return
-				}
-				if (rects == null || rects.length != paras.length || rects.length == 0) {
-					if (attempt < 8) {
-						measureLinesAttempt(cid, epoch, attempt + 1, resolve)
-					} else {
-						// 测量失败：卸载节点并保持无数据，该章分页回退字数估算
-						measureParas.value = [] as number[]
-						resolve()
-					}
-					return
-				}
-				const lineH = fontSize.value * 1.7
-				const lines : number[] = []
-				for (let i = 0; i < paras.length; i++) {
-					const len = paras[i].text.length
-					lines.push(len > 0 ? Math.max(1, Math.round(rects[i].height / lineH)) : 0)
-				}
-				paraLinesCache.value = mapWithEntry(paraLinesCache.value, cid, lines)
-				// 卸载整章节点，转入末行探测（探测节点更轻量）
-				measureParas.value = [] as number[]
-				probeTailChars(cid, epoch, new Map<number, TailSearch>(), new Map<number, number>(), 0, resolve)
-			}).exec()
-		}, 40)
+	const underlineStore = ref<UnderlineEntry[]>([])
+	/** 读取章+段落的划线区间（无则空列表） */
+	function rangesAt(cid : number, origin : number) : number[][] {
+		const e = findUnderlineEntry(underlineStore.value, cid, origin)
+		return e != null ? e.ranges : [] as number[][]
 	}
-
-	/** 末行字符探测驱动：按当前数据打包，收集被切断且末行未知的段落；无则完成，否则生成前缀探针进入本轮实测 */
-	function probeTailChars(cid : number, epoch : number, search : Map<number, TailSearch>, found : Map<number, number>, round : number, resolve : () => void) : void {
-		const paras = paragraphsOf(cid)
-		const lines = measuredLinesOf(cid)
-		if (epoch != layoutEpoch || lines == null || round >= 5) {
-			resolve()
+	/**
+	 * 云端笔记拉取并落当前书籍缓存（划线/想法/书签；云端为准覆盖本地，容错收口 readerTypes）。
+	 * 镜像刷新由调用方在落缓存后统一执行
+	 */
+	async function syncNotesFromCloud(bid : number) : Promise<void> {
+		// 复用云端行的离线书（dirty）：本地笔记尚未回补云端，先拉取会覆盖掉离线新增，跳过待书架回补完成后恢复
+		if (isBookDirty(bid)) {
 			return
 		}
-		const texts : string[] = []
-		for (let i = 0; i < paras.length; i++) {
-			texts.push(paras[i].text)
-		}
-		const tailArr = tailCharsOf(cid, paras)
-		const breaks = computePageBreaksMeasured(texts, lines, tailArr, pageH.value, fontSize.value, contentTopPx.value, contentBottomPx.value, headerHeightOf(cid))
-		// 收集被切断且末行未知的段落（去重）；区间已收敛的直接落定
-		const probes : LayoutProbe[] = []
-		for (let pg = 0; pg < breaks.length; pg++) {
-			const slices = breaks[pg]
-			for (let si = 0; si < slices.length; si++) {
-				const origin = slices[si].origin
-				if (slices[si].to >= paras[origin].text.length - 1 || tailArr[origin] > 0) {
-					continue
-				}
-				const len = paras[origin].text.length
-				const st = search.get(origin)
-				const lo = st != null ? st.lo : 1
-				const hi = st != null ? st.hi : Math.min(len, 48)
-				if (lo >= hi) {
-					found.set(origin, lo)
-					continue
-				}
-				const step = Math.max(1, Math.floor((hi - lo) / 3))
-				const candidates = [lo + step, Math.min(hi, lo + step * 2)]
-				for (let j = 0; j < candidates.length; j++) {
-					const rc = candidates[j]
-					let dup = false
-					for (let k = 0; k < probes.length; k++) {
-						if (probes[k].pi == origin && probes[k].chars == len - rc) {
-							dup = true
-							break
-						}
-					}
-					if (!dup) {
-						probes.push({ cid: cid, pi: origin, chars: len - rc } as LayoutProbe)
-					}
-				}
-			}
-		}
-		if (probes.length == 0) {
-			storeTails(cid, paras, found)
-			resolve()
-			return
-		}
-		layoutProbes.value = probes
-		probeTailQuery(cid, probes, lines, search, found, epoch, round, resolve, 0)
+		await fetchNotesToCache(bid)
+		await fetchBookmarksToCache(bid)
 	}
 
-	/** 末行探测查询尝试：探针渲染就绪时机不定（setData 异步），节点数不符时 30ms 轮询重查至多 8 次。
-	 *  原固定 80ms 单查——慢渲染即整章放弃末行探测（全部回退均值估算）；
-	 *  轮询后快设备就绪即中（轮询间隔成本即查询耗时）、慢设备 240ms 预算耗尽才静默降级 */
-	function probeTailQuery(cid : number, probes : LayoutProbe[], lines : number[], search : Map<number, TailSearch>, found : Map<number, number>, epoch : number, round : number, resolve : () => void, attempt : number) : void {
-		setTimeout(() => {
-			if (epoch != layoutEpoch) {
-				layoutProbes.value = [] as LayoutProbe[]
-				resolve()
-				return
-			}
-			uni.createSelectorQuery().selectAll('.measure-probe').boundingClientRect((rects : NodeInfo[]) : void => {
-				if (epoch != layoutEpoch) {
-					layoutProbes.value = [] as LayoutProbe[]
-					resolve()
-					return
-				}
-				if (rects == null || rects.length != probes.length) {
-					if (attempt < 7) {
-						// 探针未就绪：保持挂载轮询重查
-						probeTailQuery(cid, probes, lines, search, found, epoch, round, resolve, attempt + 1)
-						return
-					}
-					// 查询耗尽：卸载探针放弃本轮（未收敛段落末行保持 0，分页内回退均值估算）
-					layoutProbes.value = [] as LayoutProbe[]
-					resolve()
-					return
-				}
-				layoutProbes.value = [] as LayoutProbe[]
-				applyProbeResults(cid, probes, rects, lines, search, found, epoch, round, resolve)
-			}).exec()
-		}, 30)
-	}
 
-	/** 探针结果判定：前缀行数 ≤ 行数-1 ⟺ 候选 rc ≥ 末行字符数，据此收缩各段区间；收敛即落定并进入下一轮 */
-	function applyProbeResults(cid : number, probes : LayoutProbe[], rects : NodeInfo[], lines : number[], search : Map<number, TailSearch>, found : Map<number, number>, epoch : number, round : number, resolve : () => void) : void {
-		const lineH = fontSize.value * 1.7
-		for (let i = 0; i < probes.length; i++) {
-			const probe = probes[i]
-			const paras = paragraphsOf(probe.cid)
-			if (probe.pi < 0 || probe.pi >= paras.length || probe.pi >= lines.length) {
-				continue
-			}
-			const len = paras[probe.pi].text.length
-			const rc = len - probe.chars
-			const m = Math.round(rects[i].height / lineH)
-			const totalLines = Math.max(1, lines[probe.pi])
-			let st = search.get(probe.pi)
-			if (st == null) {
-				st = { lo: 1, hi: Math.min(len, 48) } as TailSearch
-			}
-			if (m <= totalLines - 1) {
-				st.hi = Math.min(st.hi, rc)
-			} else {
-				st.lo = Math.max(st.lo, rc + 1)
-			}
-			search.set(probe.pi, st)
-			if (st.lo >= st.hi) {
-				found.set(probe.pi, st.hi)
-			}
-		}
-		storeTails(cid, paragraphsOf(cid), found)
-		probeTailChars(cid, epoch, search, found, round + 1, resolve)
-	}
 
-	/** 末行实测结果落缓存（未收敛段落保持 0，分页内回退均值估算） */
-	function storeTails(cid : number, paras : Paragraph[], found : Map<number, number>) : void {
-		if (found.size == 0) {
-			return
-		}
-		const prev = paraTailCache.value.get(cid)
-		const arr : number[] = []
-		for (let i = 0; i < paras.length; i++) {
-			const f = found.get(i)
-			const p = prev != null && prev[i] > 0 ? prev[i] : 0
-			arr.push(f != null ? f : p)
-		}
-		paraTailCache.value = mapWithEntry(paraTailCache.value, cid, arr)
-	}
 
-	/** 分页结果：每页的段落切片数组（流式分页，段落可跨页）。实测就绪走实测分页（与真实渲染零漂移），
-	 *  未就绪回退字数估算；随字号/字体/窗口/实测进度变化重算（实测在展示前完成，阅读中不发生换算重排） */
-	const pageBreaks = computed(() : PageSlice[][] => {
-		return chapterBreaks(currentChapterId.value)
+
+
+
+
+
+
+
+
+
+
+
+
+
+	/** ===== 书签（真源在 ReaderControl 组件：增删/持久化内聚；页面维护内存镜像供当前页旗帜渲染） ===== */
+	const bookmarks = ref<Bookmark[]>([])
+	/** 控制框组件书签变更通知（打开书籍云端落缓存后经 reloadNotesMirror 复用）：重读本地存储刷新当前页书签旗帜 */
+	function onBookmarksChanged() : void {
+		bookmarks.value = loadBookmarks()
+	}
+	const controlRef = ref<ComponentPublicInstance | null>(null)
+	/** ===== 翻页动画（仿真/覆盖/平移/上下：跟手位移 + 松手落定/回弹） ===== */
+	const flipActive = ref(false)
+	/** 跟手位移（px，0 至页宽/页高） */
+	const flipOffset = ref(0)
+	const flipSettling = ref(false)
+	/** 翻页方向：1 下一页 / -1 上一页 */
+	const flipDir = ref(0)
+	/** 左右滑动翻页手势（Stitch 设置面板"翻页"模式：左滑下一章、右滑上一章，水平位移阈值避免与纵向滚动冲突） */
+	let touchStartX = 0
+	let touchStartY = 0
+	/** ===== 阅读时长结算（onShow 起算，onHide/onUnload 落库；书架统计卡展示；时钟收口 utils/books.uts） ===== */
+	const readingClock = createReadingClock('txt')
+	onShow(() => {
+		readingClock.onShown()
 	})
 
-	/** 指定章章头占位高（px）：实测优先（探针块高+108rpx 下边距），未实测回退单行标题常量估算（294rpx） */
-	function headerHeightOf(cid : number) : number {
-		const h = chapterHeadHCache.value.get(cid)
-		return h != null && h > 0 ? h : uni.upx2px(294)
+	/** 下拉添加进行中：正文纵向下拉超阈值时顶部出现「下拉添加书签」遮罩，松手落定 */
+	const pullState = ref('none')
+	/** 遮罩提示文案（随添加/移除态切换） */
+	const maskText = computed(() : string => {
+		if (pullState.value == 'removing') {
+			return t('reader.pullRemove')
+		}
+		return t('reader.pullAdd')
+	})
+	/** 下拉位移量（px，阻尼映射）：正文内容跟手下移，顶部遮罩同步增高填补空白 */
+	const pullOffset = ref(0)
+	/** 遮罩总高（px）：等于内容位移量（遮罩从 0 随下拉长出，内容顶贴遮罩底缘） */
+	const maskHeight = computed(() : number => {
+		return pullOffset.value
+	})
+	/** 松手回弹中：位移与遮罩高度以过渡动画归零（添加落定或取消取消均回弹归位） */
+	const pullSettling = ref(false)
+	function handleGestureStart(x : number, y : number) : void {
+		pullSettling.value = false
+		flipSettling.value = false
+		touchStartX = x
+		touchStartY = y
+	}
+	function onContentTouchStart(e: UniTouchEvent) : void {
+		handleGestureStart(e.touches[0].clientX, e.touches[0].clientY)
+	}
+	/** 回弹归位：内容位移与遮罩高度以过渡动画归零（松手后触发，触摸重新按下时立即恢复跟手） */
+	function settlePull() : void {
+		if (pullOffset.value == 0 && pullState.value == 'none') {
+			return
+		}
+		pullSettling.value = true
+		pullOffset.value = 0
+		pullState.value = 'none'
+		setTimeout(() => {
+			pullSettling.value = false
+		}, 350)
 	}
 
-	/** 指定章的分页结果（跨章预渲染取相邻章末页/首页用）：APP 端引擎断行就绪走逐行断点精确分页，
-	 *  其余实测行数就绪走实测分页（切断段末行未探测时回退段均估算）；均未就绪回退字数估算（perLine 标定口径） */
-	function chapterBreaks(cid : number) : PageSlice[][] {
-		const paras = paragraphsOf(cid)
-		const texts : string[] = []
-		for (let i = 0; i < paras.length; i++) {
-			texts.push(paras[i].text)
+
+
+
+
+	let paragraphTapHandled = false
+	/** 想法查看卡片关闭通知：复位划线段点击协调标志（卡片遮罩期间标志残留会吞掉关闭后首次点击） */
+	function onThoughtViewClosed() : void {
+		paragraphTapHandled = false
+	}
+	/** 手势位移已消费时抑制随后的合成 click（防止拖拽翻页/下拉后误触菜单显隐） */
+	let webClickSuppressed = false
+
+
+
+
+
+
+
+	/** 选区代次（锚点 id 组成部分）：选区每次变化递增 */
+	const selEpoch = ref(0)
+	/** 选区两端锚点节点 id（携带代次）：渲染未落地时按新 id 查询落空触发重试，旧代次节点不会被误读为当前锚点 */
+	const anchorStartId = computed(() : string => 'sel-anchor-start-' + selEpoch.value)
+	const anchorEndId = computed(() : string => 'sel-anchor-end-' + selEpoch.value)
+
+
+	/** 拖动中的段落视口矩形收集容器（触点→段落映射在气泡组件内换算，正文段落元素查询必须在宿主） */
+	let dragParaRects : ParaRect[] = []
+
+	/** 手柄拖动（跨段）与触摸事件处理已内聚气泡组件（正文段落矩形由宿主查询回传 setDragRects） */
+
+
+	/** 句末标点与闭合引号（句界扫描：句末标点后紧跟闭合引号视为引用嵌入、非句子边界；句末集常量收口 readerTypes） */
+	const SENTENCE_CLOSERS = '”』」）)】》"'
+	/** 所在句范围（[起点, 终点] 闭区间）：触点向前/向后扫句末标点定句界，标点后的闭合引号随句并入 */
+	function sentenceRange(text : string, idx : number) : number[] {
+		let start = 0
+		for (let i = idx - 1; i >= 0; i--) {
+			if (SENTENCE_END_CHARS.indexOf(text.charAt(i)) >= 0) {
+				if (i + 1 < text.length && SENTENCE_CLOSERS.indexOf(text.charAt(i + 1)) >= 0) {
+					continue
+				}
+				start = i + 1
+				break
+			}
 		}
-		const layout = paraLayoutCache.value.get(cid)
-		if (layout != null && layout.lines.length == paras.length) {
-			// APP 端引擎级断行（StaticLayout 条件编译）：切断位置即真实行边界
-			return computePageBreaksExact(texts, layout, pageH.value, fontSize.value, staticLayoutAlpha * fontSize.value, contentTopPx.value, contentBottomPx.value, headerHeightOf(cid))
+		let end = text.length - 1
+		for (let i = idx; i < text.length; i++) {
+			if (SENTENCE_END_CHARS.indexOf(text.charAt(i)) >= 0) {
+				if (i + 1 < text.length && SENTENCE_CLOSERS.indexOf(text.charAt(i + 1)) >= 0) {
+					continue
+				}
+				end = i.toInt()
+				break
+			}
 		}
-		const lines = measuredLinesOf(cid)
-		if (lines != null) {
-			return computePageBreaksMeasured(texts, lines, tailCharsOf(cid, paras), pageH.value, fontSize.value, contentTopPx.value, contentBottomPx.value, headerHeightOf(cid))
+		while (end + 1 < text.length && SENTENCE_CLOSERS.indexOf(text.charAt(end + 1)) >= 0) {
+			end++
 		}
-		return computePageBreaks(texts, perLineEffective.value, pageH.value, fontSize.value, contentTopPx.value, contentBottomPx.value, headerHeightOf(cid))
+		return [start, end]
+	}
+	/** 选中段落元素查询 id（滚动模式按段落所在章 id 前缀防多章同索引冲突，cid<0 为分页模式；滚动模式 id 同时用作 scroll-into-view 锚点） */
+	function selectionParaId(pi : number, cid : number) : string {
+		if (cid >= 0) {
+			return '#scroll-para-' + cid + '-' + pi
+		}
+		return '#ppara-' + pi
 	}
 
-	/** 切片 → 渲染项（在指定章的段落上取文本切片；text 为切片文本） */
-	function slicesToItems(cid : number, slices : PageSlice[]) : PageItem[] {
-		const paras = paragraphsOf(cid)
-		return slices.map((s) : PageItem => {
-			const full = s.origin >= 0 && s.origin < paras.length ? paras[s.origin].text : ''
-			return { origin: s.origin, from: s.from, to: s.to, text: full.substring(s.from, s.to + 1) } as PageItem
-		})
+
+
+
+	const bookTitle = ref('')
+	const thoughts = ref<Thought[]>([])
+	/** 恢复划线与想法镜像（打开书籍云端落缓存后经 reloadNotesMirror 刷新；气泡组件写入后经 onPopoverSync 重读刷新） */
+	function reloadUnderlineThoughtMirror() : void {
+		underlineStore.value = loadUnderlines()
+		thoughts.value = loadThoughts()
 	}
+	/** 气泡组件划线/想法写入通知：重读本地存储刷新正文划线渲染与目录抽屉卡片 */
+	function onPopoverSync() : void {
+		reloadUnderlineThoughtMirror()
+	}
+	/** 云端笔记落缓存后的统一镜像刷新（划线/想法/书签；书签面板经 bookId prop 变化自行重载） */
+	function reloadNotesMirror() : void {
+		reloadUnderlineThoughtMirror()
+		onBookmarksChanged()
+	}
+	/** 划词高亮镜像（选区真源在气泡组件：spanChanged 事件同步，驱动正文高亮渲染与派生上下文） */
+	const selSpan = ref<SelSpan | null>(null)
+	function onSpanChanged(s : SelSpan | null) : void {
+		selSpan.value = s
+		if (s != null) {
+			selEpoch.value++
+		}
+	}
+
+	/** ===== 用户信息（分享卡片头像下行气泡组件） ===== */
+	const userStore = useUserStore()
+	/** 分享卡片头像：登录用户取其头像 key 映射的静态图，未登录/无头像用默认 hei */
+	const shareLogoSrc = computed(() : string => avatarSrcOf(userStore.userInfo))
+
+
+
+
+	let relayoutTimer = -1
+	/** 覆盖遮罩面色（主题适配，随 applyReaderTheme 成组切换） */
+	const coverMaskBg = ref(READER_THEME_LIGHT.coverMaskBg)
+	/** 主题状态（色值唯一定义于 utils/theme.uts：日间=画布令牌，夜间/纸张为阅读专用主题；控制框组件经 themeKey 自行解析） */
+	const nightMode = ref(false)
+	/** 主题图标路径：夜间使用 -light 白色变体 */
+	function themeIcon(name: string) : string {
+		return readerThemeIcon(name, nightMode.value)
+	}
+	/** 遮罩内书签图标：夜间浅白遮罩上用墨色描边的日间版图标保证对比，其余用主题变体 */
+	const maskIconSrc = computed(() : string => {
+		const name = pullState.value == 'removing' ? 'reader-bookmark-active' : 'reader-bookmark'
+		return nightMode.value ? '/static/icons/' + name + '.svg' : themeIcon(name)
+	})
+	const readerBg = ref(READER_THEME_LIGHT.readerBg)
+	const bodyColor = ref(READER_THEME_LIGHT.bodyColor)
+	const titleColor = ref(READER_THEME_LIGHT.titleColor)
+	/** 章节标签色：原型内联样式为墨色（覆盖灰色类），日间墨色、夜间浅灰 */
+	const labelColor = ref(READER_THEME_LIGHT.labelColor)
+	/** 弱化文字色（想法引用等） */
+	const mutedColor = ref(READER_THEME_LIGHT.mutedColor)
+	/** 想法查看面板底色取底部面板毛玻璃色 */
+	const menuBottomBg = ref(READER_THEME_LIGHT.menuBottomBg)
+	/** 书签遮罩背景与文字色（夜间浅白遮罩 + 深色文字，与暗底视觉区分） */
+	const maskBg = ref(READER_THEME_LIGHT.maskBg)
+	const maskTextColor = ref(READER_THEME_LIGHT.maskTextColor)
+	/** 划词气泡背景（夜间提亮与暗底区分） */
+	const popoverBg = ref(READER_THEME_LIGHT.popoverBg)
+	/** 底部控制栏投影（夜间切换白色微光，想法查看面板沿用） */
+	const panelShadow = ref(READER_THEME_LIGHT.panelShadow)
+	const selectedBg = ref(READER_THEME_LIGHT.readerBg)
+	/** 当前主题 key：light / night / paper */
+	const themeKey = ref('light')
+	/** 想法查看面板底色：夜晚用深色浮层，白天用纯白与页面背景区分（下行气泡组件，随 applyReaderTheme 成组切换） */
+	const thoughtCardPanelBg = ref(READER_THEME_LIGHT.thoughtPanelBg)
+	/** 应用阅读主题（整组成组切换：正文/浮层/遮罩/控件色） */
+	function applyReaderTheme(key : string) : void {
+		const theme = readerThemeOf(key)
+		themeKey.value = key
+		nightMode.value = key == 'night'
+		readerBg.value = theme.readerBg
+		selectedBg.value = theme.readerBg
+		bodyColor.value = theme.bodyColor
+		titleColor.value = theme.titleColor
+		labelColor.value = theme.labelColor
+		mutedColor.value = theme.mutedColor
+		menuBottomBg.value = theme.menuBottomBg
+		maskBg.value = theme.maskBg
+		maskTextColor.value = theme.maskTextColor
+		popoverBg.value = theme.popoverBg
+		panelShadow.value = theme.panelShadow
+		coverMaskBg.value = theme.coverMaskBg
+		thoughtCardPanelBg.value = theme.thoughtPanelBg
+	}
+	if (restoredSettings.theme == 'night' || restoredSettings.theme == 'paper') {
+		applyReaderTheme(restoredSettings.theme)
+	}
+
+	/** 模式切换定位遮罩（翻页 → 滚动：盖住「章首渲染 → 锚点定位」的中间跳变，定位确认或超时后收起） */
+	const switchMask = ref(false)
+
 
 	/** 定位覆盖目标字符位的页（跨页段落可精确到字符所在页；字符位未命中——分页回退估算漂移——回退目标段落所在首页，均未命中返回 -1） */
 	function findPageOf(breaks : PageSlice[][], origin : number, charTarget : number) : number {
@@ -997,253 +824,111 @@
 		return -1
 	}
 
-	/** 分页变化（字号调节/设置恢复/标定更新）后钳制当前页码，避免指向不存在的空页 */
-	function clampPageIndex() : void {
-		if (pageIndex.value > pageBreaks.value.length - 1) {
-			pageIndex.value = Math.max(0, pageBreaks.value.length - 1)
-		}
+	/** 浮层状态（进入阅读默认正文全屏，点击正文空白切换控制项显隐；设置/抽屉开关经 ReaderControl 事件在页面维护） */
+	const menuVisible = ref(false)
+	const settingsOpen = ref(false)
+	function closeSettings() : void {
+		settingsOpen.value = false
 	}
 
-	/** 指定页渲染项 */
-	function pageItemsAt(pi : number) : PageItem[] {
-		const breaks = pageBreaks.value
-		if (pi < 0 || pi >= breaks.length) {
-			return [] as PageItem[]
+
+	/** 全书触底态（末章到底提示弹出后置真，底栏百分比按整本计 100%；经章跳复位回落实时章序） */
+	const bookFinished = ref(false)
+	/** 测量串行链：多章/多次请求排队执行，避免离屏节点交叉渲染 */
+	let measureChain : Promise<void> = Promise.resolve()
+	/** StaticLayout 与真实渲染一致性：0=未校验 1=可信（免 DOM 校验）2=禁用（回退 DOM 探测管线） */
+	let staticLayoutMode = 0
+	/** 在测章 id（含末行探测）：门控调用需等待在测章完成，避免提前放行造成可见换算 */
+	let measuringCids : number[] = []
+	/** 在测标记清理 */
+	function removeMeasuring(cid : number) : void {
+		const idx = measuringCids.indexOf(cid)
+		if (idx >= 0) {
+			measuringCids.splice(idx, 1)
 		}
-		return slicesToItems(currentChapterId.value, breaks[pi])
 	}
-
-	/** 当前页渲染项（随 pageIndex 变化） */
-	const currentPageItems = computed(() : PageItem[] => {
-		return pageItemsAt(pageIndex.value)
-	})
-
-	/** 滚动模式程序滚动位置（绑 :scroll-top，仅切章复位/置底时更新，避免与原生滚动形成反馈循环） */
-	const scrollModeTop = ref(0)
-	/** 滚动模式实际阅读位置（@scroll 实时记录，用于进度持久化） */
-	const scrollModePos = ref(0)
-	/** 滚动模式已加载的章节 id 序列（滚到底自动追加下一章，滚到顶自动前插上一章） */
-	const scrollChapters = ref<number[]>([currentChapterId.value])
-	/** 滚动锚点：前插上一章后定位回原首章顶部，视口保持不跳 */
-	const scrollIntoView = ref('')
-
-	/** ===== 书籍内容接入点 ===== */
-	/** 当前书籍（云端 id 用于进度/阅读状态回写与笔记拉取；title 用于顶栏与分享展示） */
-	const bookId = ref(0)
-	const bookTitle = ref('')
-	/** 序章存在性（导入时固化）：底栏章数/章序换算依据（序章不计入总数与章序） */
-	const bookHasPreface = ref(false)
-
-	/** 段落文本数组 → 段落对象数组（本地 txt 解析结果注入前的统一转换） */
-	function toParagraphs(texts : string[]) : Paragraph[] {
-		return texts.map((t : string) : Paragraph => {
-			return { text: t } as Paragraph
+	/** 待实测章头渲染的章 id（驱动离屏章头探针，测完即卸载） */
+	const measureHeaders = ref<number[]>([])
+	/** 待实测整章渲染的章 id（驱动离屏测量节点，测完即卸载） */
+	const measureParas = ref<number[]>([])
+	const layoutProbes = ref<LayoutProbe[]>([])
+	/** 排版版本号：排版参数变化即递增，使在途测量结果作废 */
+	let layoutEpoch = 0
+	/** Map 写时复制更新（返回新 Map 触发响应式重算，测量缓存统一经由本工具落库） */
+	function mapWithEntry<K, V>(src : Map<K, V>, key : K, value : V) : Map<K, V> {
+		const next : Map<K, V> = new Map()
+		src.forEach((v : V, k : K) => {
+			next.set(k, v)
 		})
+		next.set(key, value)
+		return next
 	}
-
-	/** 注入真实书籍数据（章节目录 + 各章段落正文）并重置阅读位置：本地文件解析完成后调用一次，目录、分页、划线/想法/书签渲染全部基于注入后的数据重建 */
-	function loadBookContent(chs : Chapter[], allParas : string[][]) : void {
-		chapters.value = chs
-		chapterParas.value = allParas.map((texts : string[]) : Paragraph[] => toParagraphs(texts))
-		currentChapterId.value = 0
-		pageIndex.value = 0
-		scrollChapters.value = [0]
-		scrollModeTop.value = 0
-		scrollModePos.value = 0
-		// 进度锚点内存重置（restoreProgress 有旧进度时再覆盖）
-		anchorCid = 0
-		anchorOffset = 0
-		clampPageIndex()
-		// 不在此处 saveProgress：openLocalBook 随后调 restoreProgress 恢复旧进度，
-		// 先写会把重置值 {0,0} 覆盖存储中的真实进度，导致每次打开都回到第一章
-	}
-
-	/** ===== 阅读进度（章节/页码/滚动位置，按 bookId 隔离持久化） ===== */
-
-	/** 滚动模式进度锚点（视口顶所在章 id + 距该章顶偏移 px）：滚动停稳后防抖实测，保存进度用 */
-	let anchorCid = 0
-	let anchorOffset = 0
-	let anchorTimer = -1
-
-	/**
-	 * 滚动模式锚点实测（停止滚动 300ms 后防抖执行）：滚动位置的绝对 scrollTop 含已拼接前置章的累计高，
-	 * 而恢复时只渲染当前章（单章高度远小于绝对值，scroll-top 会被 clamp 到章尾），直接保存会导致恢复定位错乱；
-	 * 故实测「视口顶落在哪一章 + 距该章顶的偏移」，恢复时单章渲染按偏移定位即可精确回到原位（跨设备亦稳定）
-	 */
-	function scheduleAnchorCalc() : void {
-		if (!scrollMode.value || bookId.value == VIRTUAL_BOOK_ID) {
-			return
-		}
-		if (anchorTimer >= 0) {
-			clearTimeout(anchorTimer)
-		}
-		anchorTimer = setTimeout(() : void => {
-			anchorTimer = -1
-			uni.createSelectorQuery().selectAll('.scroll-chapter').boundingClientRect((rects : NodeInfo[]) : void => {
-				if (rects == null || rects.length != scrollChapters.value.length) {
-					return
-				}
-				const viewTop = contentTopPx.value
-				let cid = scrollChapters.value[0]
-				let offset = 0
-				// 视口顶落在哪章 rect 内（含章头/章间 gap 时取上一章），偏移=视口顶-章顶
-				for (let i = rects.length - 1; i >= 0; i--) {
-					if (rects[i].top <= viewTop) {
-						cid = scrollChapters.value[i]
-						offset = Math.max(0, Math.round(viewTop - rects[i].top))
-						break
-					}
-				}
-				anchorCid = cid
-				anchorOffset = offset
-			}).exec()
-		}, 300)
-	}
-
-	function saveProgress() : void {
-		if (bookId.value == VIRTUAL_BOOK_ID) {
-			return
-		}
-		// 滚动模式：存「视口顶所在章 + 章内偏移」锚点，恢复时单章渲染按偏移精确定位
-		if (scrollMode.value) {
-			saveBookProgress(bookId.value, { chapterId: anchorCid, pageIndex: 0, scrollTop: anchorOffset } as BookProgress)
-			return
-		}
-		const p = { chapterId: currentChapterId.value, pageIndex: pageIndex.value, scrollTop: scrollModePos.value } as BookProgress
-		saveBookProgress(bookId.value, p)
-	}
-
-	/** 滚动模式实时滚动位置（仅内存记录，随 onHide/onUnload 持久化）；滚动阅读时隐藏上下控制项，并通知信息栏淡入（停止后组件内计时淡出） */
-	function onScrollModeScroll(e : UniScrollEvent) : void {
-		scrollModePos.value = e.detail.scrollTop
-		// 滚动使内容位移，选区与手柄位置失效，随滚动清除
-		if (selSpan.value != null) {
-			clearSelection()
-		}
-		// 设置面板展开期间不收控制项：字号/字体调整引起内容重排会触发程序性 @scroll（内容高度变化致滚动位置漂移），
-		// 属面板内操作而非用户滚动——收起会把设置面板连同控制面板一起带走，打断调节
-		if (menuVisible.value && !settingsOpen.value) {
-			menuVisible.value = false
-		}
-		footerRef.value?.notifyScroll()
-		// 滚动停稳后重算进度锚点（视口顶所在章 + 章内偏移）
-		scheduleAnchorCalc()
-	}
-
-	/** ===== 阅读时长结算（onShow 起算，onHide/onUnload 落库；书架统计卡展示；时钟收口 utils/books.uts） ===== */
-	const readingClock = createReadingClock('txt')
-
-	onShow(() => {
-		readingClock.onShown()
+	/** ===== 正文字体（默认思源黑体，未安装时经回退链落到系统黑体；选择后本地持久化） ===== */
+	const fontKey = ref(loadStoredFontKey())
+	/** 当前生效字体栈（应用至正文；字体真源在 ReaderControl 组件，change 事件同步镜像） */
+	const fontFamily = computed(() : string => {
+		return fontOptionOf(fontKey.value).family
 	})
-
-	/** 根节点触摸：记录操作时间；距上次操作超 10 分钟则上一会话以「最后操作+10min」入账并重新起算 */
-	function onPageTouchStart() : void {
-		readingClock.onActive(bookId.value)
+	const pageH = ref(0)
+	pageH.value = initWin.windowHeight
+	/** 正文区顶部起点（px）：小程序在胶囊下方，其他端在状态栏+导航行下方 */
+	const contentTopPx = ref(92)
+	contentTopPx.value = navTop.value + navHeight.value + 8
+	if (initCapsule != null) {
+		contentTopPx.value = initCapsule.top + initCapsule.height + 8
 	}
-
-	/** 结算本次阅读：累计今日分钟数 + 回写书架最近阅读状态（onHide 先于 onUnload 触发，时钟结算防双计） */
-	function recordReadingSession() : void {
-		if (bookId.value == VIRTUAL_BOOK_ID) {
-			return
-		}
-		readingClock.settle(bookId.value, false)
-		// 滚动模式按锚点章回写（currentChapterId 是滚动加载推进的「到达章」，非视口顶所在章）
-		updateBookReading(bookId.value, scrollMode.value ? anchorCid : currentChapterId.value)
+	/** 底部安全区高度（px，全面屏手势条避让） */
+	const safeAreaBottomPx = ref(0)
+	if (initSafeArea != null) {
+		safeAreaBottomPx.value = Math.max(0, initWin.windowHeight - initSafeArea.bottom)
 	}
-
-	onUnload(() => {
-		// #ifdef WEB
-		window.removeEventListener('mousemove', onWebMouseMove)
-		window.removeEventListener('mouseup', onWebMouseUp)
-		window.removeEventListener('wheel', onPageTouchStart)
-		document.removeEventListener('visibilitychange', onWebVisibilityChange)
-		window.removeEventListener('pagehide', onWebPageHide)
-		// #endif
-		saveProgress()
-		recordReadingSession()
+	/** 正文区底部留白（px）：贴底信息栏文字行（ReaderFooterBar 同式：贴底内边距 max(4, 安全区-10) + 文字行高约 19px）
+	 *  之上保留约 12px 净空，使无控制框时正文尽量接近信息栏且不重叠；控制框呼出时为浮层覆盖正文、不占排版空间 */
+	const contentBottomPx = computed(() : number => Math.max(safeAreaBottomPx.value - 10, 4) + 31)
+	/** ===== 每行字数标定（渲染实测）：纯计算折行与真实渲染存在字距/标点禁则偏差，页尾空白据此累积；
+	 *  屏幕外标定节点（约 20 行字数）实测高度反推实际每行字数，标定前回退纯字宽估算 ===== */
+	const perLineExact = ref(0)
+	/** 翻页行程：页面全屏宽/高（px，与全屏翻页舞台容器宽一致，prev/next 屏外待命位移同源） */
+	const pageW = ref(0)
+	/** 上一页层样式：常驻屏左外预渲染，回翻跟手/补间时作为目标层滑入 */
+	const prevLayerStyle = computed(() : string => flipPrevLayerStyle(pageW.value, flipDir.value, flipOffset.value, flipActive.value))
+	/** 下一页层样式：常驻屏右外预渲染，前翻跟手/补间时作为目标层滑入 */
+	const nextLayerStyle = computed(() : string => flipNextLayerStyle(pageW.value, flipDir.value, flipOffset.value, flipActive.value))
+	/** 覆盖模式遮罩透明度（滑入的下一页上，仅前翻）：出现越多遮罩越浅，落定归零 */
+	const coverNextMaskOpacity = computed(() : number => flipCoverNextOpacity(pageW.value, flipOffset.value))
+	/** 覆盖模式遮罩透明度（当前页上，仅回翻）：被上一页取代越多越深 */
+	const coverCurrentMaskOpacity = computed(() : number => flipCoverCurrentOpacity(pageW.value, flipOffset.value))
+	pageW.value = initWin.windowWidth
+	/** 正文排版宽度（px）：阅读页不限宽（2026-10-22 用户拍板），恒等于窗口宽，
+	 *  每行字数标定/分页/划词换算全部以它为准（与 content-inner/scroll-mode-inner 铺满布局同源） */
+	const bodyW = computed(() : number => pageW.value)
+	const calibWidth = computed(() : number => bodyW.value - rpxToPx(124))
+	/** APP 端引擎级精确排版缓存（章 id → 行数+逐行末字符下标；StaticLayout 条件编译，其余端恒空） */
+	const paraLayoutCache = ref<Map<number, ParaLineLayout>>(new Map())
+	/** 校准得到的真实行高倍率（×字号；自适应端上行高实现差异） */
+	let staticLayoutAlpha = 1.7
+	/** 全书各章段落（章 id → 段落列表；切章/跨章预渲染按 id 取用） */
+	const chapterParas = ref<Paragraph[][]>([])
+	/** 想法/划线卡片列表（组装规则见 readerTypes.buildNoteRecords：划线派生卡片关联想法、无匹配想法独立成卡、按章/段/位置排序） */
+	const noteRecords = computed(() : NoteRecord[] => {
+		return buildNoteRecords(underlineStore.value, thoughts.value, chapterParas.value)
 	})
-
-	onHide(() => {
-		saveProgress()
-		recordReadingSession()
-	})
-
-	/** 滚动到底：自动加载下一章；末章给出到底提示 */
-	function onScrollToLower() : void {
-		const last = scrollChapters.value[scrollChapters.value.length - 1]
-		if (last < chapters.value.length - 1) {
-			const next = last + 1
-			scrollChapters.value.push(next)
-			currentChapterId.value = next
-			saveProgress()
-		} else {
-			bookFinished.value = true
-			showToast(t('reader.lastChapter'))
+	/** 指定章的段落列表（越界返回空数组） */
+	function paragraphsOf(cid : number) : Paragraph[] {
+		if (cid >= 0 && cid < chapterParas.value.length) {
+			return chapterParas.value[cid]
 		}
+		return []
 	}
-
-	/** 滚动到顶：自动前插上一章；首章给出到顶提示 */
-	function onScrollToUpper() : void {
-		const first = scrollChapters.value[0]
-		if (first > 0) {
-			scrollIntoView.value = ''
-			scrollChapters.value.unshift(first - 1)
-			currentChapterId.value = first - 1
-			saveProgress()
-			setTimeout(() => {
-				scrollIntoView.value = 'scroll-ch-' + first
-			}, 50)
-		} else {
-			showToast(t('reader.firstChapter'))
+	/** 探测前缀文本：段落 [0, chars) + 两个全角空格缩进（与正文段首渲染同参） */
+	function probePrefixText(probe : LayoutProbe) : string {
+		const paras = paragraphsOf(probe.cid)
+		if (probe.pi < 0 || probe.pi >= paras.length) {
+			return ''
 		}
+		const full = paras[probe.pi].text
+		return full.substring(0, Math.min(probe.chars, full.length))
 	}
-
-	/** 滚动视口填充进行中标记（防重入：多处滚动序列重置后并发调用） */
-	let fillScrollRunning = false
-
-	/**
-	 * 滚动模式视口填充：已加载内容不足一屏时 scroll-view 无法滚动，scrolltolower 永不触发
-	 * （首章/短章进入场景，如仅一行的序），静默预拼接下一章直至撑满视口或全书到底。
-	 * 预拼接不改当前章、不写进度（非阅读行为，滚到底事件仍是推进当前章的唯一入口）
-	 */
-	function fillScrollViewport() : void {
-		if (!scrollMode.value || fillScrollRunning) {
-			return
-		}
-		fillScrollRunning = true
-		// 等首帧渲染落地后再测量（滚动序列刚重置时 DOM 尚未更新）
-		setTimeout(() => {
-			fillScrollStep()
-		}, 80)
-	}
-
-	/** 视口填充单步：测量内容高与视口高，不足一屏且有下一章则追加后重测 */
-	function fillScrollStep() : void {
-		const last = scrollChapters.value[scrollChapters.value.length - 1]
-		if (last >= chapters.value.length - 1) {
-			fillScrollRunning = false
-			return
-		}
-		uni.createSelectorQuery().select('.scroll-mode-inner').boundingClientRect((inner : NodeInfo | null) : void => {
-			if (inner == null) {
-				fillScrollRunning = false
-				return
-			}
-			uni.createSelectorQuery().select('.scroll-mode').boundingClientRect((view : NodeInfo | null) : void => {
-				if (view == null || inner.height > view.height + 4) {
-					// 节点未就绪或内容已撑满一屏：结束填充
-					fillScrollRunning = false
-					return
-				}
-				scrollChapters.value.push(last + 1)
-				setTimeout(() => {
-					fillScrollStep()
-				}, 50)
-			}).exec()
-		}).exec()
-	}
-
 	/** 指定章的段落渲染项（key 带章 id 防止多章同段落索引冲突；滚动模式整段渲染不切片，from=0/to=段尾） */
 	function chapterParagraphItems(cid : number) : PageItem[] {
 		const paras = paragraphsOf(cid)
@@ -1251,284 +936,6 @@
 			return { origin: i, from: 0, to: p.text.length - 1, text: p.text } as PageItem
 		})
 	}
-
-	/** ===== 翻页动画（仿真/覆盖/平移/上下：跟手位移 + 松手落定/回弹） ===== */
-	const flipActive = ref(false)
-	/** 翻页方向：1 下一页 / -1 上一页 */
-	const flipDir = ref(0)
-	/** 跟手位移（px，0 至页宽/页高） */
-	const flipOffset = ref(0)
-	const flipSettling = ref(false)
-
-	/** 切章瞬间侧层错峰：当前层优先渲染（三层同帧大文本 setData 拖慢首屏），侧层 50ms 后放行填充（空窗远小于翻页手势反应时间，预渲染不受影响） */
-	const sideLayersHeld = ref(false)
-	let sideLayersTimer = -1
-
-	/** 置起侧层延迟放行（切章时调用；侧层预渲染内容暂空，50ms 后恢复填充） */
-	function holdSideLayers() : void {
-		if (sideLayersTimer >= 0) {
-			clearTimeout(sideLayersTimer)
-		}
-		sideLayersHeld.value = true
-		sideLayersTimer = setTimeout(() : void => {
-			sideLayersTimer = -1
-			sideLayersHeld.value = false
-		}, 50)
-	}
-
-	/** 上一页渲染项（常驻预渲染：章内相邻页；章首跨上一章末页——按上一章分页取末页；第一章无上一页为空数组）——目标层视图常驻，跟手时零创建延迟，首次翻到新页无渲染空白 */
-	const prevPageItems = computed(() : PageItem[] => {
-		if (sideLayersHeld.value) {
-			return [] as PageItem[]
-		}
-		if (pageIndex.value > 0) {
-			return pageItemsAt(pageIndex.value - 1)
-		}
-		if (currentChapterId.value > 0) {
-			const pb = chapterBreaks(currentChapterId.value - 1)
-			if (pb.length == 0) {
-				return [] as PageItem[]
-			}
-			return slicesToItems(currentChapterId.value - 1, pb[pb.length - 1])
-		}
-		return [] as PageItem[]
-	})
-
-	/** 是否存在上一页（书首为 false） */
-	const hasPrevPage = computed(() : boolean => pageIndex.value > 0 || currentChapterId.value > 0)
-
-	/** 上一页的章内页索引（章内相邻页；跨章取上一章末页） */
-	const prevPageIndex = computed(() : number => {
-		if (pageIndex.value > 0) {
-			return pageIndex.value - 1
-		}
-		const pb = chapterBreaks(currentChapterId.value - 1)
-		return pb.length - 1
-	})
-
-	/** 上一页所在章 id（章内=当前章；章首跨上一章） */
-	const prevPageChapterId = computed(() : number => {
-		return pageIndex.value > 0 ? currentChapterId.value : (currentChapterId.value > 0 ? currentChapterId.value - 1 : currentChapterId.value)
-	})
-
-	/** 下一页渲染项（常驻预渲染：章内相邻页；章尾跨下一章首页——按下一章分页取首页；末章无下一页为空数组） */
-	const nextPageItems = computed(() : PageItem[] => {
-		if (sideLayersHeld.value) {
-			return [] as PageItem[]
-		}
-		if (pageIndex.value < pageBreaks.value.length - 1) {
-			return pageItemsAt(pageIndex.value + 1)
-		}
-		if (currentChapterId.value < chapters.value.length - 1) {
-			const pb = chapterBreaks(currentChapterId.value + 1)
-			if (pb.length == 0) {
-				return [] as PageItem[]
-			}
-			return slicesToItems(currentChapterId.value + 1, pb[0])
-		}
-		return [] as PageItem[]
-	})
-
-	/** 是否存在下一页（末章为 false） */
-	const hasNextPage = computed(() : boolean => pageIndex.value < pageBreaks.value.length - 1 || currentChapterId.value < chapters.value.length - 1)
-
-	/** 下一页的章内页索引（章内相邻页；跨章取下一章首页） */
-	const nextPageIndex = computed(() : number => {
-		return pageIndex.value < pageBreaks.value.length - 1 ? pageIndex.value + 1 : 0
-	})
-
-	/** 下一页所在章 id（章内=当前章；章尾跨下一章） */
-	const nextPageChapterId = computed(() : number => {
-		return pageIndex.value < pageBreaks.value.length - 1 ? currentChapterId.value : (currentChapterId.value < chapters.value.length - 1 ? currentChapterId.value + 1 : currentChapterId.value)
-	})
-
-	/** 上一层章节头文案（跨章时为上一章） */
-	const prevChapterLabel = computed(() : string => chapterAt(prevPageChapterId.value).label)
-
-	/** 上一层章节头大标题 */
-	const prevChapterTitle = computed(() : string => chapterAt(prevPageChapterId.value).contentTitle)
-
-	/** 下层章节头文案（跨章时为下一章） */
-	const nextChapterLabel = computed(() : string => chapterAt(nextPageChapterId.value).label)
-
-	/** 下层章节头大标题 */
-	const nextChapterTitle = computed(() : string => chapterAt(nextPageChapterId.value).contentTitle)
-
-	/** 跟手方向上是否存在目标页（书首/末章边界为 false，松手回弹并提示） */
-	const flipHasTarget = computed(() : boolean => {
-		if (flipDir.value == -1) {
-			return hasPrevPage.value
-		}
-		if (flipDir.value == 1) {
-			return hasNextPage.value
-		}
-		return false
-	})
-
-	/** 当前页层样式（几何规则见 utils/flipstyle.uts，随翻页模式/方向/位移变化） */
-	const currentLayerStyle = computed(() : string => flipCurrentLayerStyle(pageTurn.value, flipDir.value, flipOffset.value, flipActive.value, flipSettling.value))
-
-	/** 上一页层样式：常驻屏左外预渲染，回翻跟手/补间时作为目标层滑入 */
-	const prevLayerStyle = computed(() : string => flipPrevLayerStyle(pageW.value, flipDir.value, flipOffset.value, flipActive.value))
-
-	/** 下一页层样式：常驻屏右外预渲染，前翻跟手/补间时作为目标层滑入 */
-	const nextLayerStyle = computed(() : string => flipNextLayerStyle(pageW.value, flipDir.value, flipOffset.value, flipActive.value))
-
-	/** 覆盖模式遮罩透明度（滑入的下一页上，仅前翻）：出现越多遮罩越浅，落定归零 */
-	const coverNextMaskOpacity = computed(() : number => flipCoverNextOpacity(pageW.value, flipOffset.value))
-
-	/** 覆盖模式遮罩透明度（当前页上，仅回翻）：被上一页取代越多越深 */
-	const coverCurrentMaskOpacity = computed(() : number => flipCoverCurrentOpacity(pageW.value, flipOffset.value))
-
-	/** 覆盖遮罩面色（主题适配，随 applyReaderTheme 成组切换） */
-	const coverMaskBg = ref(READER_THEME_LIGHT.coverMaskBg)
-
-	/** 主题状态（色值唯一定义于 utils/theme.uts：日间=画布令牌，夜间/纸张为阅读专用主题；控制框组件经 themeKey 自行解析） */
-	const nightMode = ref(false)
-	const readerBg = ref(READER_THEME_LIGHT.readerBg)
-	const bodyColor = ref(READER_THEME_LIGHT.bodyColor)
-	const titleColor = ref(READER_THEME_LIGHT.titleColor)
-	/** 章节标签色：原型内联样式为墨色（覆盖灰色类），日间墨色、夜间浅灰 */
-	const labelColor = ref(READER_THEME_LIGHT.labelColor)
-	/** 弱化文字色（想法引用等） */
-	const mutedColor = ref(READER_THEME_LIGHT.mutedColor)
-	/** 想法查看面板底色取底部面板毛玻璃色 */
-	const menuBottomBg = ref(READER_THEME_LIGHT.menuBottomBg)
-	/** 书签遮罩背景与文字色（夜间浅白遮罩 + 深色文字，与暗底视觉区分） */
-	const maskBg = ref(READER_THEME_LIGHT.maskBg)
-	const maskTextColor = ref(READER_THEME_LIGHT.maskTextColor)
-	/** 划词气泡背景（夜间提亮与暗底区分） */
-	const popoverBg = ref(READER_THEME_LIGHT.popoverBg)
-	/** 底部控制栏投影（夜间切换白色微光，想法查看面板沿用） */
-	const panelShadow = ref(READER_THEME_LIGHT.panelShadow)
-
-	/** 阅读设置镜像（真源在 ReaderControl 组件：调节/持久化内聚，change 事件同步镜像驱动排版与主题渲染） */
-	const fontSize = ref(18)
-	const selectedBg = ref(READER_THEME_LIGHT.readerBg)
-	const pageTurn = ref('滚动')
-
-	/** ===== 每行字数标定（fontSize/字体变化后重跑；标定节点渲染完成约需一帧，延时后实测） ===== */
-	function calibratePerLine() : void {
-		if (calibText.value.length == 0 || fontSize.value <= 0) {
-			return
-		}
-		uni.createSelectorQuery().select('.calib-text').boundingClientRect((r : NodeInfo | null) : void => {
-			if (r == null || r.height <= 0) {
-				return
-			}
-			const lineH = fontSize.value * 1.7
-			const n = Math.max(1, Math.round(r.height / lineH))
-			perLineExact.value = Math.max(1, Math.ceil(calibText.value.length / n))
-		}).exec()
-	}
-
-	onReady(() => {
-		calibratePerLine()
-	})
-
-	/** 是否上下滚动模式（语义化别名，正文手势/定位/渲染均按此分支；信息栏显隐随其下行组件） */
-	const scrollMode = computed(() : boolean => pageTurn.value == '滚动')
-
-	/** 当前主题 key：light / night / paper */
-	const themeKey = ref('light')
-
-	/** 浮层状态（进入阅读默认正文全屏，点击正文空白切换控制项显隐；设置/抽屉开关经 ReaderControl 事件在页面维护） */
-	const menuVisible = ref(false)
-	const settingsOpen = ref(false)
-	const drawerOpen = ref(false)
-
-	/** 模式切换定位遮罩（翻页 → 滚动：盖住「章首渲染 → 锚点定位」的中间跳变，定位确认或超时后收起） */
-	const switchMask = ref(false)
-
-	/** 系统侧滑/返回键（pages.json swipeBackAsBackPress 把侧滑手势转为本事件）：任一浮层展开时先收浮层回正文，不退出页面 */
-	onBackPress((options : OnBackPressOptions) : boolean => {
-		// #ifdef WEB
-		// Web 端直接放行：navigateBack 触发本事件的 from 值与原生不同，浮层展开态的「收浮层不退出」
-		// 拦截会吞掉控制栏返回（返回键出现时菜单必为展开态）；浏览器返回键退出页面属预期行为
-		return false
-		// #endif
-		// #ifndef WEB
-		if (options.from == 'navigateBack') {
-			return false
-		}
-		if (drawerOpen.value || settingsOpen.value || menuVisible.value) {
-			drawerOpen.value = false
-			settingsOpen.value = false
-			menuVisible.value = false
-			return true
-		}
-		return false
-		// #endif
-	})
-
-	/** 顶部导航内容行（px）：与小程序胶囊同行对齐（同子页 BackButton 口径：状态栏高度起、行高 40px） */
-	const navTop = ref(44)
-	const navHeight = ref(40)
-	/** 翻页行程：页面全屏宽/高（px，与全屏翻页舞台容器宽一致，prev/next 屏外待命位移同源） */
-	const pageW = ref(0)
-	const pageH = ref(0)
-	/** 正文区顶部起点（px）：小程序在胶囊下方，其他端在状态栏+导航行下方 */
-	const contentTopPx = ref(92)
-	/** 底部安全区高度（px，全面屏手势条避让） */
-	const safeAreaBottomPx = ref(0)
-	{
-		const win = uni.getWindowInfo()
-		if (win.statusBarHeight > 0) {
-			navTop.value = win.statusBarHeight
-		}
-		pageW.value = win.windowWidth
-		pageH.value = win.windowHeight
-		contentTopPx.value = navTop.value + navHeight.value + 8
-		// 安全区：safeArea 为可空字段，空安全读取（手势条高度=窗口高-安全区底界）
-		const safeArea = win.safeArea
-		if (safeArea != null) {
-			safeAreaBottomPx.value = Math.max(0, win.windowHeight - safeArea.bottom)
-		}
-		// 小程序正文区从胶囊下方起（mpCapsuleRect 内聚条件编译，非微信端为 null 不覆盖）
-		const capsule = mpCapsuleRect()
-		if (capsule != null) {
-			contentTopPx.value = capsule.top + capsule.height + 8
-		}
-	}
-
-	/** 折叠屏展开/折叠、旋转、桌面拖宽：窗口尺寸变化后复用排版失效链（同字号变化口径）——
-	 *  实测缓存清除、重标定、钳制页码、清除选区。正文排版宽度未变（宽屏已限宽 750px）且高度未变时跳过；
-	 *  App 端暂无 onResize 事件（vapor 暂不支持），重开页面自动按新尺寸初始化 */
-	// #ifndef APP-ANDROID || APP-IOS || APP-HARMONY
-	onResize(() : void => {
-		const win = uni.getWindowInfo()
-		if (win.windowWidth == bodyW.value && win.windowHeight == pageH.value) {
-			return
-		}
-		pageW.value = win.windowWidth
-		pageH.value = win.windowHeight
-		invalidateLayoutMeasure()
-		clampPageIndex()
-		clearSelection()
-		// 微信端折叠切换自愈（其他端空实现）：分页排版度量按新窗口重载（进度持久化自动恢复）
-		scheduleResizeReload(win.windowWidth, '/pages/reading/reader?bookId=' + bookId.value)
-	})
-	// #endif
-
-	/** ===== 书签（真源在 ReaderControl 组件：增删/持久化内聚；页面维护内存镜像供当前页旗帜渲染） ===== */
-	const bookmarks = ref<Bookmark[]>([])
-
-	/** 控制框组件书签变更通知（打开书籍云端落缓存后经 reloadNotesMirror 复用）：重读本地存储刷新当前页书签旗帜 */
-	function onBookmarksChanged() : void {
-		bookmarks.value = loadBookmarks()
-	}
-
-	/** ===== 划线与想法（本地存储真源在 utils/readerTypes.uts：气泡组件写入；页面维护内存副本供渲染与查看，组件 sync 事件时重读） ===== */
-
-	const underlineStore = ref<UnderlineEntry[]>([])
-	const thoughts = ref<Thought[]>([])
-
-	/** 读取章+段落的划线区间（无则空列表） */
-	function rangesAt(cid : number, origin : number) : number[][] {
-		const e = findUnderlineEntry(underlineStore.value, cid, origin)
-		return e != null ? e.ranges : [] as number[][]
-	}
-
 	/** 跨段区间与某章某段落的交集（[start, end] 单元素或空数组）：同章取起点段到终点段之间、起点章取起点段及之后、终点章取终点段及之前、中间章全段 */
 	function spanRangeAt(fromCid : number, fromOrigin : number, fromStart : number, toCid : number, toOrigin : number, toEnd : number, renderCid : number, origin : number) : number[] {
 		// 段长按渲染章取：跨章预渲染层（上/下一页层）与滚动模式多章下 origin 属于 renderCid 章
@@ -1567,219 +974,6 @@
 		}
 		return [] as number[]
 	}
-
-	/** 恢复划线与想法镜像（打开书籍云端落缓存后经 reloadNotesMirror 刷新；气泡组件写入后经 onPopoverSync 重读刷新） */
-	function reloadUnderlineThoughtMirror() : void {
-		underlineStore.value = loadUnderlines()
-		thoughts.value = loadThoughts()
-	}
-
-	/** 云端笔记落缓存后的统一镜像刷新（划线/想法/书签；书签面板经 bookId prop 变化自行重载） */
-	function reloadNotesMirror() : void {
-		reloadUnderlineThoughtMirror()
-		onBookmarksChanged()
-	}
-
-	/** 气泡组件划线/想法写入通知：重读本地存储刷新正文划线渲染与目录抽屉卡片 */
-	function onPopoverSync() : void {
-		reloadUnderlineThoughtMirror()
-	}
-
-	/** 当前页是否已有书签 */
-	function indexOfBookmark() : number {
-		for (let i = 0; i < bookmarks.value.length; i++) {
-			const b = bookmarks.value[i]
-			if (b.chapterId == currentChapterId.value && b.pageIndex == pageIndex.value) {
-				return i
-			}
-		}
-		return -1
-	}
-
-	/** 书签标记（右上角旗帜）是否展示：滚动模式无页码概念，仅分页模式展示 */
-	const bookmarkFlagVisible = computed(() : boolean => {
-		if (scrollMode.value) {
-			return false
-		}
-		return indexOfBookmark() >= 0
-	})
-
-	/** 下拉添加进行中：正文纵向下拉超阈值时顶部出现「下拉添加书签」遮罩，松手落定 */
-	const pullState = ref('none')
-	/** 下拉位移量（px，阻尼映射）：正文内容跟手下移，顶部遮罩同步增高填补空白 */
-	const pullOffset = ref(0)
-	/** 松手回弹中：位移与遮罩高度以过渡动画归零（添加落定或取消取消均回弹归位） */
-	const pullSettling = ref(false)
-	/** 遮罩总高（px）：等于内容位移量（遮罩从 0 随下拉长出，内容顶贴遮罩底缘） */
-	const maskHeight = computed(() : number => {
-		return pullOffset.value
-	})
-
-	/** 遮罩提示文案（随添加/移除态切换） */
-	const maskText = computed(() : string => {
-		if (pullState.value == 'removing') {
-			return t('reader.pullRemove')
-		}
-		return t('reader.pullAdd')
-	})
-
-	/** 遮罩内书签图标：夜间浅白遮罩上用墨色描边的日间版图标保证对比，其余用主题变体 */
-	const maskIconSrc = computed(() : string => {
-		const name = pullState.value == 'removing' ? 'reader-bookmark-active' : 'reader-bookmark'
-		return nightMode.value ? '/static/icons/' + name + '.svg' : themeIcon(name)
-	})
-
-	/** ===== 正文字体（默认思源黑体，未安装时经回退链落到系统黑体；选择后本地持久化） ===== */
-	const fontKey = ref(loadStoredFontKey())
-
-	/** 当前生效字体栈（应用至正文；字体真源在 ReaderControl 组件，change 事件同步镜像） */
-	const fontFamily = computed(() : string => {
-		return fontOptionOf(fontKey.value).family
-	})
-
-	/** 跳转到书签所在章节页并关闭抽屉（ReaderControl 书签卡片点击上行；翻页模式先实测目标章再一次性按实测布局切换；滚动模式把书签页码换算为段落锚点定位视区） */
-	function goToBookmark(bm : Bookmark) : void {
-		if (pageTurn.value == '滚动') {
-			applyChapterSwitch(bm.chapterId, false)
-			drawerOpen.value = false
-			// 书签页码是分页模式语义：换算为该书页首切片所在段落，按段落锚点定位滚动视区（换算失败保持章顶）
-			ensureChaptersMeasured([bm.chapterId]).then(() => {
-				const pages = chapterBreaks(bm.chapterId)
-				if (pages.length == 0) {
-					return
-				}
-				const pi = Math.min(Math.max(bm.pageIndex, 0), pages.length - 1)
-				if (pages[pi].length == 0) {
-					return
-				}
-				const origin = pages[pi][0].origin
-				// applyChapterSwitch 已重置滚动序列并清空锚点，延迟至重置渲染落地后设锚（同 goToUnderline 口径）
-				setTimeout(() => {
-					scrollIntoView.value = 'scroll-para-' + bm.chapterId + '-' + origin
-				}, 300)
-			})
-			return
-		}
-		ensureChaptersMeasured([bm.chapterId]).then(() => {
-			applyChapterSwitch(bm.chapterId, false)
-			pageIndex.value = bm.pageIndex
-			clampPageIndex()
-			saveProgress()
-			drawerOpen.value = false
-		})
-	}
-
-	/** 跳转到划线记录位置并关闭抽屉：分页定位到记录章的所在页（跨章先切章），滚动模式定位到记录章的段落锚点（章未加载时先重置加载该章） */
-	function goToUnderline(r : NoteRecord) : void {
-		if (scrollMode.value) {
-			if (scrollChapters.value.indexOf(r.cid) < 0) {
-				// 记录章未在滚动序列中：重置为仅加载该章，从头定位
-				scrollChapters.value = [r.cid]
-				scrollIntoView.value = ''
-				scrollModeTop.value = 0
-				scrollModePos.value = 0
-				currentChapterId.value = r.cid
-				anchorCid = r.cid
-				anchorOffset = 0
-				// 目标章内容不足一屏时预拼接下一章（否则 scrolltolower 永不触发）
-				fillScrollViewport()
-				const targetLate = 'scroll-para-' + r.cid + '-' + r.origin
-				setTimeout(() => {
-					scrollIntoView.value = targetLate
-				}, 300)
-			} else {
-				// 先清空再设值，重复点击同一记录也能重新触发滚动
-				scrollIntoView.value = ''
-				const target = 'scroll-para-' + r.cid + '-' + r.origin
-				setTimeout(() => {
-					scrollIntoView.value = target
-				}, 50)
-			}
-		} else {
-			// 翻页模式：跨章先实测目标章（切换后一次性按实测布局渲染），再定位记录所在段落的分页
-			const proceed = () : void => {
-				if (r.cid != currentChapterId.value) {
-					applyChapterSwitch(r.cid, false)
-				}
-				// 页=段落切片数组（{origin,from,to}）：定位覆盖记录字符位的切片所在页（跨页段落可精确到划线所在页）；
-				// 字符位未命中（分页回退估算漂移）时回退到记录段落所在首页（见 findPageOf）
-				const targetPage = findPageOf(pageBreaks.value, r.origin, r.qStart)
-				if (targetPage >= 0) {
-					pageIndex.value = targetPage
-				}
-			}
-			if (r.cid == currentChapterId.value) {
-				proceed()
-			} else {
-				ensureChaptersMeasured([r.cid]).then(() => {
-					proceed()
-				})
-			}
-		}
-		clearSelection()
-		saveProgress()
-		drawerOpen.value = false
-	}
-
-	/** 划词高亮镜像（选区真源在气泡组件：spanChanged 事件同步，驱动正文高亮渲染与派生上下文） */
-	const selSpan = ref<SelSpan | null>(null)
-
-	/** 选区代次（锚点 id 组成部分）：选区每次变化递增 */
-	const selEpoch = ref(0)
-	/** 选区两端锚点节点 id（携带代次）：渲染未落地时按新 id 查询落空触发重试，旧代次节点不会被误读为当前锚点 */
-	const anchorStartId = computed(() : string => 'sel-anchor-start-' + selEpoch.value)
-	const anchorEndId = computed(() : string => 'sel-anchor-end-' + selEpoch.value)
-
-	function onSpanChanged(s : SelSpan | null) : void {
-		selSpan.value = s
-		if (s != null) {
-			selEpoch.value++
-		}
-	}
-
-	/** 拖动开始：查询正文段落视口矩形回传组件（触点→段落映射在宿主模板内，跨组件查询不可行） */
-	function onDragStarted() : void {
-		cacheParaRects()
-	}
-
-	/** 选区两端锚点（零宽字符，排入选中文本流）：其渲染位置即字符边界的真实位置，手柄/气泡吸附实测值 */
-	const ANCHOR_CHAR = '\u200B'
-	/** 句末标点与闭合引号（句界扫描：句末标点后紧跟闭合引号视为引用嵌入、非句子边界；句末集常量收口 readerTypes） */
-	const SENTENCE_CLOSERS = '”』」）)】》"'
-
-	/** 当前选区文本（跨段拼接，段间换行；段序列经共享 buildSpanSegs 展开，段内字符长度与段落数严格区分） */
-	function selectionText() : string {
-		const s0 = selSpan.value
-		if (s0 == null) {
-			return ''
-		}
-		let out = ''
-		for (const seg of buildSpanSegs(s0, paragraphsOf)) {
-			if (seg.end < seg.start) {
-				continue
-			}
-			if (out.length > 0) {
-				out += '\n'
-			}
-			// 按段所在章取文本：滚动模式跨章选区的段索引属于各自章，不能用当前章段落数组
-			out += paragraphsOf(seg.cid)[seg.origin].text.slice(seg.start, seg.end + 1)
-		}
-		return out
-	}
-
-
-	/** 段落渲染分段（按划线/想法区间与当前选区切分，相邻同属性段合并；选区两端插入零宽锚点段供实测边界坐标） */
-	type TextSeg = {
-		start: number
-		text: string
-		selected: boolean
-		underlined: boolean
-		/** 有想法的区间（下划线样式与纯划线区分，点击可查看想法） */
-		thought: boolean
-		/** 锚点标记：0=普通段 / 1=选区起点锚点段 / 2=选区终点锚点段 */
-		anchor: number
-	}
-
 	/** 段落文本分段（切片窗口化）：renderCid 为渲染内容所属章；item.from/to 为本页展示的整段字符闭区间——
 	 *  划线/想法/选区区间先与窗口求交再平移到切片内坐标（跨页切断的区间在两页各显示一半），文本取自整段切片；
 	 *  滚动模式传整段切片（from=0/to=段尾），行为与旧整段渲染一致；选区支持跨段跨页 */
@@ -1892,30 +1086,250 @@
 		}
 		return segs
 	}
-
-	/** 分段样式类：选区高亮与下划线叠加；想法段实线下划线优先于划线波浪线 */
-	function segClass(seg : TextSeg) : string {
-		let cls = ''
-		if (seg.selected) {
-			cls = cls + 'para-highlight '
+	/** ===== 选区上下文（划词气泡功能数据，按当前选区实时计算下行组件） ===== */
+	/** 选区覆盖段序列（划线按项写入所在章） */
+	const selSegs = computed<SpanSeg[]>(() : SpanSeg[] => {
+		const s = selSpan.value
+		if (s == null) {
+			return [] as SpanSeg[]
 		}
-		if (seg.thought) {
-			cls = cls + 'para-thought'
-		} else if (seg.underlined) {
-			cls = cls + 'para-underlined'
+		return buildSpanSegs(s, paragraphsOf)
+	})
+	/** 当前选区文本（跨段拼接，段间换行；段序列经共享 buildSpanSegs 展开，段内字符长度与段落数严格区分） */
+	function selectionText() : string {
+		const s0 = selSpan.value
+		if (s0 == null) {
+			return ''
 		}
-		return cls
+		let out = ''
+		for (const seg of buildSpanSegs(s0, paragraphsOf)) {
+			if (seg.end < seg.start) {
+				continue
+			}
+			if (out.length > 0) {
+				out += '\n'
+			}
+			// 按段所在章取文本：滚动模式跨章选区的段索引属于各自章，不能用当前章段落数组
+			out += paragraphsOf(seg.cid)[seg.origin].text.slice(seg.start, seg.end + 1)
+		}
+		return out
 	}
-
-	/** 划线段点击协调标志：段落 click 先于父级 content click（微信端无有效 stopPropagation，用标志让父级跳过本次） */
-	let paragraphTapHandled = false
-
-	/** 想法查看面板底色：夜晚用深色浮层，白天用纯白与页面背景区分（下行气泡组件，随 applyReaderTheme 成组切换） */
-	const thoughtCardPanelBg = ref(READER_THEME_LIGHT.thoughtPanelBg)
-
-	/** ===== 用户信息（分享卡片头像下行气泡组件） ===== */
-	const userStore = useUserStore()
-
+	/** 选区文本（跨段拼接） */
+	const selText = computed(() : string => {
+		return selectionText()
+	})
+	/** 切片 → 渲染项（在指定章的段落上取文本切片；text 为切片文本） */
+	function slicesToItems(cid : number, slices : PageSlice[]) : PageItem[] {
+		const paras = paragraphsOf(cid)
+		return slices.map((s) : PageItem => {
+			const full = s.origin >= 0 && s.origin < paras.length ? paras[s.origin].text : ''
+			return { origin: s.origin, from: s.from, to: s.to, text: full.substring(s.from, s.to + 1) } as PageItem
+		})
+	}
+	/** ===== 离屏排版实测（分页数据源）：整章段落行数 + 被切断段落的末行字符数。
+	 *  测量全程在屏外进行，且于页面展示前完成（开书在 loading 遮罩内、切章先测后切、相邻章后台预取），阅读翻页无可见重排；
+	 *  实测未就绪时分页回退字数估算（computePageBreaks）。字号/字体变化使实测数据整体失效并自动重测 ===== */
+	const paraLinesCache = ref<Map<number, number[]>>(new Map())
+	/** 指定章实测行数（长度与段落对齐才有效，未测/失效返回 null） */
+	function measuredLinesOf(cid : number) : number[] | null {
+		const lines = paraLinesCache.value.get(cid)
+		if (lines != null && lines.length == paragraphsOf(cid).length) {
+			return lines
+		}
+		return null
+	}
+	const paraTailCache = ref<Map<number, number[]>>(new Map())
+	/** 末行实测结果落缓存（未收敛段落保持 0，分页内回退均值估算） */
+	function storeTails(cid : number, paras : Paragraph[], found : Map<number, number>) : void {
+		if (found.size == 0) {
+			return
+		}
+		const prev = paraTailCache.value.get(cid)
+		const arr : number[] = []
+		for (let i = 0; i < paras.length; i++) {
+			const f = found.get(i)
+			const p = prev != null && prev[i] > 0 ? prev[i] : 0
+			arr.push(f != null ? f : p)
+		}
+		paraTailCache.value = mapWithEntry(paraTailCache.value, cid, arr)
+	}
+	/** 指定章末行字符数组（与段落对齐；未探测段落为 0，分页内回退均值估算） */
+	function tailCharsOf(cid : number, paras : Paragraph[]) : number[] {
+		const tails = paraTailCache.value.get(cid)
+		const arr : number[] = []
+		for (let i = 0; i < paras.length; i++) {
+			arr.push(tails != null && tails[i] > 0 ? tails[i] : 0)
+		}
+		return arr
+	}
+	/** 章头占位高缓存（章 id → px：实测块高+固定下边距；标题样式固定不随读者字号/字体变化，全会话有效） */
+	const chapterHeadHCache = ref<Map<number, number>>(new Map())
+	/** 章头测量尝试：离屏渲染就绪时机不定（setData 异步），节点缺失时 30ms 轮询重查至多 9 次（总预算约 270ms，快设备首次即中） */
+	function measureHeaderAttempt(cid : number, epoch : number, attempt : number, resolve : (v : void) => void) : void {
+		setTimeout(() => {
+			if (epoch != layoutEpoch) {
+				measureHeaders.value = [] as number[]
+				resolve()
+				return
+			}
+			uni.createSelectorQuery().selectAll('.measure-header-' + cid).boundingClientRect((res : any) : void => {
+				const rects = res == null ? null : (res as NodeInfo[])
+				if (epoch != layoutEpoch) {
+					measureHeaders.value = [] as number[]
+					resolve()
+					return
+				}
+				if (rects != null && rects.length == 1 && (rects[0].height ?? 0) > 0) {
+					// 写时复制落缓存（触发分页重算），卸载探针节点（NodeInfo 字段可空，Kotlin 侧禁可空算术，?? 0 兜底）
+					chapterHeadHCache.value = mapWithEntry(chapterHeadHCache.value, cid, (rects[0].height ?? 0) + rpxToPx(108))
+					measureHeaders.value = [] as number[]
+					resolve()
+					return
+				}
+				if (attempt < 8) {
+					measureHeaderAttempt(cid, epoch, attempt + 1, resolve)
+					return
+				}
+				// 测量失败：卸载节点并保持无数据，该章章头回退常量估算
+				measureHeaders.value = [] as number[]
+				resolve()
+			}).exec()
+		}, 30)
+	}
+	/** 章头占位高实测：离屏渲染与页内同参章头（label 行+大标题+分隔条，同 class 同宽），实测块高+固定下边距（108rpx）。
+	 *  长章节名折行使章头高度随标题行数增长，固定 294rpx 估算会致章首页预算超支、正文末行溢出内容区；
+	 *  标题样式固定（不随读者字号/字体变化），实测值全会话有效。测量失败保持无数据，回退常量估算 */
+	function measureChapterHeader(cid : number, epoch : number) : Promise<void> {
+		return new Promise<void>((resolve : (v : void) => void) => {
+			if (epoch != layoutEpoch || chapterHeadHCache.value.get(cid) != null) {
+				resolve()
+				return
+			}
+			measureHeaders.value = [cid]
+			measureHeaderAttempt(cid, epoch, 0, resolve)
+		})
+	}
+	/** 指定章章头占位高（px）：实测优先（探针块高+108rpx 下边距），未实测回退单行标题常量估算（294rpx） */
+	function headerHeightOf(cid : number) : number {
+		const h = chapterHeadHCache.value.get(cid)
+		return h != null && h > 0 ? h : rpxToPx(294)
+	}
+	/** 滚动模式程序滚动位置（绑 :scroll-top，仅切章复位/置底时更新，避免与原生滚动形成反馈循环） */
+	const scrollModeTop = ref(0)
+	/** 滚动锚点：前插上一章后定位回原首章顶部，视口保持不跳 */
+	const scrollIntoView = ref('')
+	/** 翻页 → 滚动的锚定落位：scroll-into-view 需在锚点 DOM 就绪后由空值变更才可靠触发，
+	 *  全程以纯色遮罩盖住「章首渲染 → 锚点跳位」的中间态；轮询锚点矩形确认滚至视口顶（滚动停滞则清空重设触发），
+	 *  超时兜底收遮罩（落章首，退化为原行为不循环遮罩） */
+	function settleScrollAnchor(cid : number, origin : number) : void {
+		const anchor = 'scroll-para-' + cid + '-' + origin
+		let settled = false
+		let attempts = 0
+		let lastTop = -999
+		const finish = () : void => {
+			if (settled) {
+				return
+			}
+			settled = true
+			switchMask.value = false
+		}
+		function verify() : void {
+			if (settled) {
+				return
+			}
+			attempts++
+			if (attempts > 26) {
+				finish()
+				return
+			}
+			uni.createSelectorQuery().select('#' + anchor).boundingClientRect((res : any) : void => {
+				const r = res == null ? null : (res as NodeInfo | null)
+				if (settled) {
+					return
+				}
+				if (r != null && Math.abs(r.top ?? 0) <= 4) {
+					// 锚点已滚至视口顶：定位完成
+					finish()
+					return
+				}
+				const top = r != null ? (r.top ?? 0) : -999
+				if (r == null || Math.abs(top - lastTop) < 1) {
+					// 锚点未就绪或滚动停滞：清空 → 重设（属性需真变化才触发定位）
+					scrollIntoView.value = ''
+					setTimeout(() : void => {
+						if (settled) {
+							return
+						}
+						scrollIntoView.value = anchor
+						lastTop = -999
+						verify()
+					}, 30)
+					return
+				}
+				// 滚动进行中：跟踪至落定
+				lastTop = top
+				setTimeout(() : void => {
+					verify()
+				}, 30)
+			}).exec()
+		}
+		setTimeout(() : void => {
+			if (settled) {
+				return
+			}
+			scrollIntoView.value = anchor
+			verify()
+		}, 300)
+	}
+	/** 当前页码（章内 0-based，左右滑动翻页切换） */
+	const pageIndex = ref(0)
+	/** 滚动模式实际阅读位置（@scroll 实时记录，用于进度持久化） */
+	const scrollModePos = ref(0)
+	/** ===== 书籍内容接入点 ===== */
+	/** 当前书籍（云端 id 用于进度/阅读状态回写与笔记拉取；title 用于顶栏与分享展示） */
+	const bookId = ref(0)
+	/** 根节点触摸：记录操作时间；距上次操作超 10 分钟则上一会话以「最后操作+10min」入账并重新起算 */
+	function onPageTouchStart() : void {
+		readingClock.onActive(bookId.value)
+	}
+	/** 滚动模式进度锚点（视口顶所在章 id + 距该章顶偏移 px）：滚动停稳后防抖实测，保存进度用 */
+	let anchorCid = 0
+	let anchorOffset = 0
+	/** 目录章节（默认空；真实书籍数据统一经 loadBookContent 注入，id 即章序号） */
+	const chapters = ref<Chapter[]>([])
+	/** 底栏章数/章序换算：序章不计入总数与章序（有序书总数减一、正文章序=cid-1；序章 cid=0 计 0） */
+	const footerChapterCount = computed(() : number => {
+		return chapters.value.length - (bookHasPreface.value ? 1 : 0)
+	})
+	/** 章节安全读取：越界或数据未注入时返回空壳章（页眉/页脚/预渲染层/分享出处统一兜底） */
+	function chapterAt(id : number) : Chapter {
+		const c = chapters.value[id]
+		if (c != null) {
+			return c
+		}
+		return { id: id, title: '', label: '', contentTitle: '', active: false } as Chapter
+	}
+	/** 分享卡片内容快照（组装规则见 readerTypes.buildShareQuoteCtx；上下文按选区端点所在章取——滚动模式跨章选区的端点分属两章） */
+	const shareCtx = computed<ShareQuoteCtx | null>(() : ShareQuoteCtx | null => {
+		const s = selSpan.value
+		if (s == null) {
+			return null
+		}
+		const fromP = paragraphsOf(s.fromCid)[s.fromOrigin]
+		const toP = paragraphsOf(s.toCid)[s.toOrigin]
+		if (fromP == null || toP == null) {
+			// 段落未注入（数据未就绪即出现选区的防御）：不产出分享上下文
+			return null
+		}
+		return buildShareQuoteCtx(s, fromP.text, toP.text, thoughts.value, selectionText(), chapterAt(s.toCid).title, bookTitle.value)
+	})
+	/** 当前阅读章节 id（滚动/翻页/进度均以此为准） */
+	const currentChapterId = ref(0)
+	/** 气泡分享卡片预生成的封面图（引文长图临时文件路径；''=无，转发回落默认封面图）。模板 @share-image 绑定此 handler，vdom 模板绑定不可指向条件编译内函数，提为全端存在 */
+	const cardShareImage = ref('')
+	function onCardShareImage(path : string) : void {
+		cardShareImage.value = path
+	}
 	// #ifdef MP-WEIXIN
 	/** 当前转发封面路径（''=未就绪）：事件通道优先，ref 直读兜底（emit 事件链真机不可靠，
 	 *  ref 链与 beginSelection 同机制、真机已验证） */
@@ -1923,9 +1337,8 @@
 		if (cardShareImage.value.length > 0) {
 			return cardShareImage.value
 		}
-		return popoverRef.value?.coverImagePath() ?? ''
+		return (popoverRef.value?.$callMethod('coverImagePath') as string | null) ?? ''
 	}
-
 	onShareAppMessage(() : CustomShareContent => {
 		// 气泡分享卡片预生成的 5:4 引文封面优先作为封面（组装逻辑收口 utils/shareCover.uts）
 		return buildShareAppContent('《' + bookTitle.value + '》' + chapterAt(currentChapterId.value).title, '/pages/reading/reader', () : string => shareCoverPath())
@@ -1934,72 +1347,544 @@
 		return { title: t('reader.shareTitle'), imageUrl: '/static/share-cover.png' }
 	})
 	// #endif
-
-	/** 点击正文段落（100% 可靠的 view 载体）：段落含划线/想法时吞掉父级点击，异步按点击坐标精判——命中想法弹查看面板，命中纯划线无展示，未命中划线自动补执行父级点击行为；
-	 *  from/to 为本页渲染的整段字符切片区间（流式分页段落可跨页），切片内行列换算后加 from 偏移对齐划线/想法的整段坐标 */
-	function onParaTap(e : UniPointerEvent, origin : number, cid : number, from : number, to : number) : void {
-		const renderCid = cid >= 0 ? cid : currentChapterId.value
-		const ranges = rangesAt(renderCid, origin)
-		if (ranges.length == 0) {
+	const footerChapterIndex = computed(() : number => {
+		// 触底态（末章到底提示已弹）按整本章数计 → 百分比 100%；离开末章由 goToChapter 复位回落
+		if (bookFinished.value && currentChapterId.value == chapters.value.length - 1) {
+			return footerChapterCount.value
+		}
+		return Math.max(0, currentChapterId.value - (bookHasPreface.value ? 1 : 0))
+	})
+	/** 当前章节信息（标签/标题/底部进度均由此派生） */
+	const currentChapter = computed(() : Chapter => {
+		return chapterAt(currentChapterId.value)
+	})
+	const chapterLabel = computed(() : string => {
+		return currentChapter.value.label
+	})
+	const contentTitle = computed(() : string => {
+		return currentChapter.value.contentTitle
+	})
+	/** 上一页所在章 id（章内=当前章；章首跨上一章） */
+	const prevPageChapterId = computed(() : number => {
+		return pageIndex.value > 0 ? currentChapterId.value : (currentChapterId.value > 0 ? currentChapterId.value - 1 : currentChapterId.value)
+	})
+	/** 上一层章节头文案（跨章时为上一章） */
+	const prevChapterLabel = computed(() : string => chapterAt(prevPageChapterId.value).label)
+	/** 上一层章节头大标题 */
+	const prevChapterTitle = computed(() : string => chapterAt(prevPageChapterId.value).contentTitle)
+	/** 当前页是否已有书签 */
+	function indexOfBookmark() : number {
+		for (let i = 0; i < bookmarks.value.length; i++) {
+			const b = bookmarks.value[i]
+			if (b.chapterId == currentChapterId.value && b.pageIndex == pageIndex.value) {
+				return i
+			}
+		}
+		return -1
+	}
+	/** 是否存在上一页（书首为 false） */
+	const hasPrevPage = computed(() : boolean => pageIndex.value > 0 || currentChapterId.value > 0)
+	/** 滚动模式已加载的章节 id 序列（滚到底自动追加下一章，滚到顶自动前插上一章） */
+	const scrollChapters = ref<number[]>([currentChapterId.value])
+	/** 滚动视口填充进行中标记（防重入：多处滚动序列重置后并发调用） */
+	let fillScrollRunning = false
+	/** 视口填充单步：测量内容高与视口高，不足一屏且有下一章则追加后重测 */
+	function fillScrollStep() : void {
+		const last = scrollChapters.value[scrollChapters.value.length - 1]
+		if (last >= chapters.value.length - 1) {
+			fillScrollRunning = false
 			return
 		}
-		paragraphTapHandled = true
-		const clientX = e.clientX
-		const clientY = e.clientY
-		uni.createSelectorQuery().select(selectionParaId(origin, cid)).boundingClientRect((rect : NodeInfo | null) : void => {
-			if (rect == null || selSpan.value != null) {
-				// 查询失败或已进入划词状态：放行父级点击
-				paragraphTapHandled = false
-				onContentTap()
+		uni.createSelectorQuery().select('.scroll-mode-inner').boundingClientRect((res : any) : void => {
+			const inner = res == null ? null : (res as NodeInfo | null)
+			if (inner == null) {
+				fillScrollRunning = false
 				return
 			}
-			const charIdx = charIndexOfRect(rect, clientX, clientY, from, to)
-			let inUl = false
-			for (const u of ranges) {
-				if (charIdx >= u[0] && charIdx <= u[1]) {
-					inUl = true
-					break
+			uni.createSelectorQuery().select('.scroll-mode').boundingClientRect((res : any) : void => {
+				const view = res == null ? null : (res as NodeInfo | null)
+				if (view == null || (inner.height ?? 0) > (view.height ?? 0) + 4) {
+					// 节点未就绪或内容已撑满一屏：结束填充
+					fillScrollRunning = false
+					return
 				}
-			}
-			if (!inUl) {
-				// 点击段落内未划线区域：补执行父级点击行为（菜单/清选区等）
-				paragraphTapHandled = false
-				onContentTap()
-				return
-			}
-			// 命中划线区间：有想法则弹查看卡片（气泡组件内聚，锚定划线下方，空间不足转上方），纯划线无展示
-			const hit = thoughtAt(thoughts.value, renderCid, origin, charIdx)
-			if (hit != null) {
-				popoverRef.value?.showThoughtView(hit.quote, hit.content, rect.bottom, rect.top)
-			}
+				scrollChapters.value.push(last + 1)
+				setTimeout(() => {
+					fillScrollStep()
+				}, 50)
 			}).exec()
-			}
-
-	/** 想法/划线卡片列表（组装规则见 readerTypes.buildNoteRecords：划线派生卡片关联想法、无匹配想法独立成卡、按章/段/位置排序） */
-	const noteRecords = computed(() : NoteRecord[] => {
-		return buildNoteRecords(underlineStore.value, thoughts.value, chapterParas.value)
-	})
-
-	/** 启动恢复本地设置镜像（真源同一存储，与 ReaderControl 组件各自恢复保持一致；字号/翻页模式/主题） */
-	{
-		const s = loadSettings()
-		fontSize.value = s.fontSize
-		clampPageIndex()
-		// 存储值不在当前端可选列表内（如非 APP 端的历史"仿真"设置）时回退默认，避免选中无按钮模式
-		const modes = ['滚动', '覆盖', '平移']
-		// #ifdef APP
-		modes.splice(1, 0, '仿真')
-		// #endif
-		if (modes.indexOf(s.pageTurn) >= 0) {
-			pageTurn.value = s.pageTurn
-		} else {
-			pageTurn.value = modes[0]
+		}).exec()
+	}
+	/** 切章瞬间侧层错峰：当前层优先渲染（三层同帧大文本 setData 拖慢首屏），侧层 50ms 后放行填充（空窗远小于翻页手势反应时间，预渲染不受影响） */
+	const sideLayersHeld = ref(false)
+	let sideLayersTimer = -1
+	/** 置起侧层延迟放行（切章时调用；侧层预渲染内容暂空，50ms 后恢复填充） */
+	function holdSideLayers() : void {
+		if (sideLayersTimer >= 0) {
+			clearTimeout(sideLayersTimer)
 		}
-		if (s.theme == 'night' || s.theme == 'paper') {
-			applyReaderTheme(s.theme)
+		sideLayersHeld.value = true
+		sideLayersTimer = setTimeout(() : void => {
+			sideLayersTimer = -1
+			sideLayersHeld.value = false
+		}, 50)
+	}
+	/** 阅读设置镜像（真源在 ReaderControl 组件：调节/持久化内聚，change 事件同步镜像驱动排版与主题渲染） */
+	const fontSize = ref(18)
+	fontSize.value = restoredSettings.fontSize
+	/** 末行探测轮次重入（环断链）：probeTailChars↔probeTailQuery↔applyProbeResults 互递归经两个函数值间接层，赋值在定义后（UTS 顶层无函数提升，直调后置定义报「找不到名称」） */
+	let probeTailQueryEntry : ((cid : number, probes : LayoutProbe[], lines : number[], search : Map<number, TailSearch>, found : Map<number, number>, epoch : number, round : number, resolve : (v : void) => void, attempt : number) => void) | null = null
+	let probeTailRestart : ((cid : number, epoch : number, search : Map<number, TailSearch>, found : Map<number, number>, round : number, resolve : (v : void) => void) => void) | null = null
+	/** 探针结果判定：前缀行数 ≤ 行数-1 ⟺ 候选 rc ≥ 末行字符数，据此收缩各段区间；收敛即落定并进入下一轮 */
+	function applyProbeResults(cid : number, probes : LayoutProbe[], rects : NodeInfo[], lines : number[], search : Map<number, TailSearch>, found : Map<number, number>, epoch : number, round : number, resolve : (v : void) => void) : void {
+		const lineH = fontSize.value * 1.7
+		for (let i = 0; i < probes.length; i++) {
+			const probe = probes[i]
+			const paras = paragraphsOf(probe.cid)
+			if (probe.pi < 0 || probe.pi >= paras.length || probe.pi >= lines.length) {
+				continue
+			}
+			const len = paras[probe.pi].text.length
+			const rc = len - probe.chars
+			const m = Math.round((rects[i].height ?? 0) / lineH)
+			const totalLines = Math.max(1, lines[probe.pi])
+			let st = search.get(probe.pi)
+			if (st == null) {
+				st = { lo: 1, hi: Math.min(len, 48) } as TailSearch
+			}
+			if (m <= totalLines - 1) {
+				st.hi = Math.min(st.hi, rc)
+			} else {
+				st.lo = Math.max(st.lo, rc + 1)
+			}
+			search.set(probe.pi, st)
+			if (st.lo >= st.hi) {
+				found.set(probe.pi, st.hi)
+			}
+		}
+		storeTails(cid, paragraphsOf(cid), found)
+		const nextRound = probeTailRestart
+		if (nextRound != null) {
+			nextRound(cid, epoch, search, found, round + 1, resolve)
 		}
 	}
-
+	/** 末行字符探测驱动：按当前数据打包，收集被切断且末行未知的段落；无则完成，否则生成前缀探针进入本轮实测 */
+	function probeTailChars(cid : number, epoch : number, search : Map<number, TailSearch>, found : Map<number, number>, round : number, resolve : (v : void) => void) : void {
+		const paras = paragraphsOf(cid)
+		const lines = measuredLinesOf(cid)
+		if (epoch != layoutEpoch || lines == null || round >= 5) {
+			resolve()
+			return
+		}
+		const texts : string[] = []
+		for (let i = 0; i < paras.length; i++) {
+			texts.push(paras[i].text)
+		}
+		const tailArr = tailCharsOf(cid, paras)
+		const breaks = computePageBreaksMeasured(texts, lines, tailArr, pageH.value, fontSize.value, contentTopPx.value, contentBottomPx.value, headerHeightOf(cid))
+		// 收集被切断且末行未知的段落（去重）；区间已收敛的直接落定
+		const probes : LayoutProbe[] = []
+		for (let pg = 0; pg < breaks.length; pg++) {
+			const slices = breaks[pg]
+			for (let si = 0; si < slices.length; si++) {
+				const origin = slices[si].origin
+				if (slices[si].to >= paras[origin].text.length - 1 || tailArr[origin] > 0) {
+					continue
+				}
+				const len = paras[origin].text.length
+				const st = search.get(origin)
+				const lo = st != null ? st.lo : 1
+				const hi = st != null ? st.hi : Math.min(len, 48)
+				if (lo >= hi) {
+					found.set(origin, lo)
+					continue
+				}
+				const step = Math.max(1, Math.floor((hi - lo) / 3))
+				const candidates = [lo + step, Math.min(hi, lo + step * 2)]
+				for (let j = 0; j < candidates.length; j++) {
+					const rc = candidates[j]
+					let dup = false
+					for (let k = 0; k < probes.length; k++) {
+						if (probes[k].pi == origin && probes[k].chars == len - rc) {
+							dup = true
+							break
+						}
+					}
+					if (!dup) {
+						probes.push({ cid: cid, pi: origin, chars: len - rc } as LayoutProbe)
+					}
+				}
+			}
+		}
+		if (probes.length == 0) {
+			storeTails(cid, paras, found)
+			resolve()
+			return
+		}
+		layoutProbes.value = probes
+		const queryEntry = probeTailQueryEntry
+		if (queryEntry != null) {
+			queryEntry(cid, probes, lines, search, found, epoch, round, resolve, 0)
+		}
+	}
+	/** 末行探测查询尝试：探针渲染就绪时机不定（setData 异步），节点数不符时 30ms 轮询重查至多 8 次。
+	 *  原固定 80ms 单查——慢渲染即整章放弃末行探测（全部回退均值估算）；
+	 *  轮询后快设备就绪即中（轮询间隔成本即查询耗时）、慢设备 240ms 预算耗尽才静默降级 */
+	function probeTailQuery(cid : number, probes : LayoutProbe[], lines : number[], search : Map<number, TailSearch>, found : Map<number, number>, epoch : number, round : number, resolve : (v : void) => void, attempt : number) : void {
+		setTimeout(() => {
+			if (epoch != layoutEpoch) {
+				layoutProbes.value = [] as LayoutProbe[]
+				resolve()
+				return
+			}
+			uni.createSelectorQuery().selectAll('.measure-probe').boundingClientRect((res : any) : void => {
+				const rects = res == null ? null : (res as NodeInfo[])
+				if (epoch != layoutEpoch) {
+					layoutProbes.value = [] as LayoutProbe[]
+					resolve()
+					return
+				}
+				if (rects == null || rects.length != probes.length) {
+					if (attempt < 7) {
+						// 探针未就绪：保持挂载轮询重查
+						probeTailQuery(cid, probes, lines, search, found, epoch, round, resolve, attempt + 1)
+						return
+					}
+					// 查询耗尽：卸载探针放弃本轮（未收敛段落末行保持 0，分页内回退均值估算）
+					layoutProbes.value = [] as LayoutProbe[]
+					resolve()
+					return
+				}
+				layoutProbes.value = [] as LayoutProbe[]
+				applyProbeResults(cid, probes, rects, lines, search, found, epoch, round, resolve)
+			}).exec()
+		}, 30)
+	}
+	probeTailQueryEntry = probeTailQuery
+	probeTailRestart = probeTailChars
+	/** 行数测量尝试：离屏渲染就绪时机不定（setData 异步），节点数不符时 40ms 轮询重查至多 9 次
+	 *  （总预算 360ms 与原 3×120ms 一致；快设备就绪即查询，不再空等整段固定延时） */
+	function measureLinesAttempt(cid : number, epoch : number, attempt : number, resolve : (v : void) => void) : void {
+		setTimeout(() => {
+			const paras = paragraphsOf(cid)
+			if (epoch != layoutEpoch || paras.length == 0) {
+				measureParas.value = [] as number[]
+				resolve()
+				return
+			}
+			uni.createSelectorQuery().selectAll('.measure-para-' + cid).boundingClientRect((res : any) : void => {
+				const rects = res == null ? null : (res as NodeInfo[])
+				if (epoch != layoutEpoch) {
+					measureParas.value = [] as number[]
+					resolve()
+					return
+				}
+				if (rects == null || rects.length != paras.length || rects.length == 0) {
+					if (attempt < 8) {
+						measureLinesAttempt(cid, epoch, attempt + 1, resolve)
+					} else {
+						// 测量失败：卸载节点并保持无数据，该章分页回退字数估算
+						measureParas.value = [] as number[]
+						resolve()
+					}
+					return
+				}
+				const lineH = fontSize.value * 1.7
+				const lines : number[] = []
+				for (let i = 0; i < paras.length; i++) {
+					const len = paras[i].text.length
+					lines.push(len > 0 ? Math.max(1, Math.round((rects[i].height ?? 0) / lineH)) : 0)
+				}
+				paraLinesCache.value = mapWithEntry(paraLinesCache.value, cid, lines)
+				// 卸载整章节点，转入末行探测（探测节点更轻量）
+				measureParas.value = [] as number[]
+				probeTailChars(cid, epoch, new Map<number, TailSearch>(), new Map<number, number>(), 0, resolve)
+			}).exec()
+		}, 40)
+	}
+	/** 单章行数实测：挂载整章离屏渲染（章头探针同批挂载、并行实测——共享一次 setData 与挂载等待，
+	 *  章头 30ms 轮询查询先于段落完成，末行探测打包前已落缓存）→ 批量查询段落块高度反推行数 → 卸载后转入末行探测；
+	 *  resolve 前等待章头落定（成功或放弃），保证切换前章首页预算就绪、无二次重排 */
+	function measureChapterLines(cid : number, epoch : number) : Promise<void> {
+		return new Promise<void>((resolve : (v : void) => void) => {
+			measuringCids.push(cid)
+			measureParas.value = [cid]
+			let headerP : Promise<void> = Promise.resolve()
+			if (chapterHeadHCache.value.get(cid) == null) {
+				measureHeaders.value = [cid]
+				headerP = new Promise<void>((hr) => {
+					measureHeaderAttempt(cid, epoch, 0, hr)
+				})
+			}
+			measureLinesAttempt(cid, epoch, 0, (v : void) : void => {
+				headerP.then(() : void => {
+					resolve()
+				})
+			})
+		})
+	}
+	// #ifdef APP-ANDROID
+	/** 精确排版数据落缓存（写时复制触发分页重算） */
+	function storeLayout(cid : number, layout : ParaLineLayout) : void {
+		paraLayoutCache.value = mapWithEntry(paraLayoutCache.value, cid, layout)
+	}
+	/** APP 端测量：StaticLayout 引擎直读断行（引擎级精确，无 DOM 探测）。会话首章做一次同参一致性校验
+	 *  （离屏 DOM 块高 vs 预测行数的行高比例 α 一致性），通过后本会话后续章免 DOM 校验；校验失败回退 DOM 探测管线 */
+	function measureChapterAuto(cid : number, epoch : number) : Promise<void> {
+		return new Promise<void>((resolve) => {
+			const paras = paragraphsOf(cid)
+			if (epoch != layoutEpoch || paras.length == 0) {
+				resolve()
+				return
+			}
+			const texts : string[] = []
+			for (let i = 0; i < paras.length; i++) {
+				texts.push(paras[i].text)
+			}
+			const layout = buildParaLayout(texts, fontSize.value, fontFamily.value, rpxToPx(0.4), calibWidth.value)
+			if (layout.lines.length != paras.length) {
+				resolve()
+				return
+			}
+			if (staticLayoutMode == 1) {
+				// 已验证可信：免 DOM 校验，直接采用引擎断行；章头占位独立实测（resolve 前落定，保证切换前章首页预算就绪）
+				storeLayout(cid, layout)
+				measureChapterHeader(cid, epoch).then(() : void => {
+					resolve()
+				})
+				return
+			}
+			// 未校验：挂整章离屏节点做一次同参校验
+			measureParas.value = [cid]
+			setTimeout(() => {
+				if (epoch != layoutEpoch) {
+					measureParas.value = [] as number[]
+					resolve()
+					return
+				}
+				uni.createSelectorQuery().selectAll('.measure-para-' + cid).boundingClientRect((res : any) : void => {
+					const rects = res == null ? null : (res as NodeInfo[])
+					measureParas.value = [] as number[]
+					if (epoch != layoutEpoch || rects == null || rects.length != paras.length) {
+						// DOM 校验不可用：保守禁用引擎路径，回退 DOM 探测管线
+						staticLayoutMode = 2
+						measureChapterLines(cid, epoch).then(() => {
+							resolve()
+						})
+						return
+					}
+					// 行高比例 α = 真实块高 /（预测行数 × 字号）。断行不同源时 L 失真致 α 离散，
+					// 仅行高实现差异时 α 一致——按离散度判定断行可信性，并自校准真实行高
+					let sum = 0
+					let count = 0
+					for (let i = 0; i < rects.length; i++) {
+						if (layout.lines[i] > 0 && fontSize.value > 0) {
+							sum += (rects[i].height ?? 0) / (layout.lines[i] * fontSize.value)
+							count++
+						}
+					}
+					const mean = count > 0 ? sum / count : 0
+					let keep = 0
+					let sum2 = 0
+					for (let i = 0; i < rects.length; i++) {
+						if (layout.lines[i] > 0 && fontSize.value > 0) {
+							const a = (rects[i].height ?? 0) / (layout.lines[i] * fontSize.value)
+							if (Math.abs(a - mean) <= 0.2) {
+								keep++
+								sum2 += a
+							}
+						}
+					}
+					const alpha = keep > 0 ? sum2 / keep : 1.7
+					if (count > 0 && keep >= count * 0.8 && alpha > 0.5 && alpha < 4) {
+						staticLayoutMode = 1
+						staticLayoutAlpha = alpha
+						storeLayout(cid, layout)
+						// 章头占位独立实测（resolve 前落定）
+						measureChapterHeader(cid, epoch).then(() : void => {
+							resolve()
+						})
+					} else {
+						staticLayoutMode = 2
+						measureChapterLines(cid, epoch).then(() => {
+							resolve()
+						})
+					}
+				}).exec()
+			}, 120)
+		})
+	}
+	// #endif
+	/** 依序测量多章（运行时再次校验缓存与版本号，避免重复/过期测量；APP-ANDROID 走引擎直读，其余端走 DOM 探测。
+	 *  章头占位测量在各路径内部并行：DOM 路径并入整章挂载批次（见 measureChapterLines），APP 引擎路径直读后 resolve 前补测（见 measureChapterAuto） */
+	function runMeasureChapters(ids : number[], epoch : number) : Promise<void> {
+		let p : Promise<void> = Promise.resolve()
+		for (let i = 0; i < ids.length; i++) {
+			const cid = ids[i]
+			p = p.then(() : Promise<void> => {
+				if (epoch != layoutEpoch || paraLinesCache.value.get(cid) != null || paraLayoutCache.value.get(cid) != null || paragraphsOf(cid).length == 0) {
+					removeMeasuring(cid)
+					return Promise.resolve()
+				}
+				// #ifdef APP-ANDROID
+				return measureChapterAuto(cid, epoch).then(() : void => {
+					removeMeasuring(cid)
+				})
+				// #endif
+				// #ifndef APP-ANDROID
+				return measureChapterLines(cid, epoch).then(() : void => {
+					removeMeasuring(cid)
+				})
+				// #endif
+			})
+		}
+		return p
+	}
+	/** 确保章节实测完成（APP 端引擎断行直读 / 其余端行数+末行探测）；已实测立即返回，在测等待串行链，未测排队执行离屏测量 */
+	function ensureChaptersMeasured(cids : number[]) : Promise<void> {
+		const ids : number[] = []
+		let waitChain = false
+		for (let i = 0; i < cids.length; i++) {
+			const cid = cids[i]
+			if (cid < 0 || cid >= chapters.value.length || paraLinesCache.value.get(cid) != null || paraLayoutCache.value.get(cid) != null) {
+				continue
+			}
+			if (measuringCids.indexOf(cid) >= 0) {
+				// 该章测量在途：等待串行链跑完（含末行探测）
+				waitChain = true
+				continue
+			}
+			if (ids.indexOf(cid) < 0) {
+				ids.push(cid)
+			}
+		}
+		if (ids.length > 0) {
+			const epoch = layoutEpoch
+			measureChain = measureChain.then(() : Promise<void> => {
+				return runMeasureChapters(ids, epoch)
+			})
+		}
+		if (ids.length == 0 && !waitChain) {
+			return Promise.resolve()
+		}
+		return measureChain
+	}
+	const perLineEstimate = computed(() : number => {
+		return Math.max(1, Math.floor((bodyW.value - rpxToPx(124)) / fontSize.value))
+	})
+	/** 标定文本（约 20 行字数：行数累计放大偏差，ceil 反推可检出 ±1 字/行的差异） */
+	const calibText = computed(() : string => {
+		let s = ''
+		const n = perLineEstimate.value * 20
+		for (let i = 0; i < n; i++) {
+			s += '测'
+		}
+		return s
+	})
+	/** ===== 每行字数标定（fontSize/字体变化后重跑；标定节点渲染完成约需一帧，延时后实测） ===== */
+	function calibratePerLine() : void {
+		if (calibText.value.length == 0 || fontSize.value <= 0) {
+			return
+		}
+		uni.createSelectorQuery().select('.calib-text').boundingClientRect((res : any) : void => {
+			const r = res == null ? null : (res as NodeInfo | null)
+			if (r == null || (r.height ?? 0) <= 0) {
+				return
+			}
+			const lineH = fontSize.value * 1.7
+			const n = Math.max(1, Math.round((r.height ?? 0) / lineH))
+			perLineExact.value = Math.max(1, Math.ceil(calibText.value.length / n))
+		}).exec()
+	}
+	onReady(() => {
+		calibratePerLine()
+	})
+	const perLineEffective = computed(() : number => {
+		return perLineExact.value > 0 ? perLineExact.value : perLineEstimate.value
+	})
+	/** 划词排版度量（TextMetrics 见 utils/readerTypes.uts 共享层，气泡组件随 metrics props 使用同源参数）；perLine 用渲染标定值，与分页引擎同源 */
+	function layoutMetrics() : TextMetrics {
+		const charW = fontSize.value
+		const contentW = bodyW.value - rpxToPx(124)
+		const perLine = perLineEffective.value
+		return {
+			perLine: perLine,
+			lineH: fontSize.value * 1.7,
+			charW: charW,
+			fullCharW: contentW / perLine,
+			indentPx: fontSize.value * 2
+		} as TextMetrics
+	}
+	/** 排版度量（响应式：随字号/屏宽变化，下行气泡组件供划词换算） */
+	const metrics = computed<TextMetrics>(() : TextMetrics => layoutMetrics())
+	/** 触点 → 整段字符索引（触点相对本页切片渲染矩形做行列换算，切片内索引加切片偏移对齐整段坐标；
+	 *  与分页排版同源公式：段首切片首行容量 perLine-2（缩进占 2 字），续行 perLine） */
+	function charIndexOfRect(rect : NodeInfo, clientX : number, clientY : number, from : number, to : number) : number {
+		const m = layoutMetrics()
+		const sliceLen = to - from + 1
+		// 切片行数：段首切片（from==0）首行容量 = perLine-2（缩进占 2 字），续切片每行 perLine
+		let maxRow : number
+		if (from == 0) {
+			const rest = sliceLen - (m.perLine - 2)
+			maxRow = rest <= 0 ? 0 : Math.ceil(rest / m.perLine)
+		} else {
+			maxRow = Math.max(0, Math.ceil(sliceLen / m.perLine) - 1)
+		}
+		let row = Math.floor((clientY - (rect.top ?? 0)) / m.lineH)
+		row = Math.max(0, Math.min(row, maxRow))
+		// 首行触点先扣除缩进宽（两个全角空格），字距：首行与末行未拉伸用自然字距，中间满行用两端对齐拉伸字距
+		const indent = (from == 0 && row == 0) ? m.indentPx : 0
+		const spacing = row == 0 ? m.charW : (row < maxRow ? m.fullCharW : m.charW)
+		let col = Math.floor((clientX - (rect.left ?? 0) - indent) / spacing)
+		col = Math.max(0, Math.min(col, m.perLine - 1))
+		// 切片内字符索引（首行容量 perLine-2）加切片偏移 = 整段坐标
+		const sliceIdx = row == 0 ? col : (m.perLine - 2) + (row - 1) * m.perLine + col
+		return Math.min(sliceIdx, sliceLen - 1) + from
+	}
+	/** 指定章的分页结果（跨章预渲染取相邻章末页/首页用）：APP 端引擎断行就绪走逐行断点精确分页，
+	 *  其余实测行数就绪走实测分页（切断段末行未探测时回退段均估算）；均未就绪回退字数估算（perLine 标定口径） */
+	function chapterBreaks(cid : number) : PageSlice[][] {
+		const paras = paragraphsOf(cid)
+		const texts : string[] = []
+		for (let i = 0; i < paras.length; i++) {
+			texts.push(paras[i].text)
+		}
+		const layout = paraLayoutCache.value.get(cid)
+		if (layout != null && layout.lines.length == paras.length) {
+			// APP 端引擎级断行（StaticLayout 条件编译）：切断位置即真实行边界
+			return computePageBreaksExact(texts, layout, pageH.value, fontSize.value, staticLayoutAlpha * fontSize.value, contentTopPx.value, contentBottomPx.value, headerHeightOf(cid))
+		}
+		const lines = measuredLinesOf(cid)
+		if (lines != null) {
+			return computePageBreaksMeasured(texts, lines, tailCharsOf(cid, paras), pageH.value, fontSize.value, contentTopPx.value, contentBottomPx.value, headerHeightOf(cid))
+		}
+		return computePageBreaks(texts, perLineEffective.value, pageH.value, fontSize.value, contentTopPx.value, contentBottomPx.value, headerHeightOf(cid))
+	}
+	/** 上一页的章内页索引（章内相邻页；跨章取上一章末页） */
+	const prevPageIndex = computed(() : number => {
+		if (pageIndex.value > 0) {
+			return pageIndex.value - 1
+		}
+		const pb = chapterBreaks(currentChapterId.value - 1)
+		return pb.length - 1
+	})
+	/** 分页结果：每页的段落切片数组（流式分页，段落可跨页）。实测就绪走实测分页（与真实渲染零漂移），
+	 *  未就绪回退字数估算；随字号/字体/窗口/实测进度变化重算（实测在展示前完成，阅读中不发生换算重排） */
+	const pageBreaks = computed(() : PageSlice[][] => {
+		return chapterBreaks(currentChapterId.value)
+	})
+	/** 下一页的章内页索引（章内相邻页；跨章取下一章首页） */
+	const nextPageIndex = computed(() : number => {
+		return pageIndex.value < pageBreaks.value.length - 1 ? pageIndex.value + 1 : 0
+	})
+	/** 下一页所在章 id（章内=当前章；章尾跨下一章） */
+	const nextPageChapterId = computed(() : number => {
+		return pageIndex.value < pageBreaks.value.length - 1 ? currentChapterId.value : (currentChapterId.value < chapters.value.length - 1 ? currentChapterId.value + 1 : currentChapterId.value)
+	})
+	/** 下层章节头文案（跨章时为下一章） */
+	const nextChapterLabel = computed(() : string => chapterAt(nextPageChapterId.value).label)
+	/** 下层章节头大标题 */
+	const nextChapterTitle = computed(() : string => chapterAt(nextPageChapterId.value).contentTitle)
 	/** 恢复上次阅读进度（进度随书籍记录存储，云端为准经缓存读取；章节/页码/滚动位置）。在 loadBookContent 注入数据后调用：窗口页序依赖流高实测（未实测前按估算钳制） */
 	function restoreProgress(bid : number) : void {
 		const p = loadBookProgress(bid)
@@ -2019,122 +1904,159 @@
 			anchorOffset = scrollModeTop.value
 		}
 	}
-
-	/** ===== 打开本地书籍（书架点击传入 bookId） ===== */
-	onLoad((options : OnLoadOptions) : void => {
-		const bid = options['bookId']
-		const bidNum = bid != null ? parseInt(bid) : 0
-		// 0/非法为异常入参；负数 id 为离线导入待同步书籍，正常打开
-		if (bidNum == 0 || isNaN(bidNum)) {
-			showToast(t('reader.bookMissing'))
-			return
+	/** 是否存在下一页（末章为 false） */
+	const hasNextPage = computed(() : boolean => pageIndex.value < pageBreaks.value.length - 1 || currentChapterId.value < chapters.value.length - 1)
+	/** 跟手方向上是否存在目标页（书首/末章边界为 false，松手回弹并提示） */
+	const flipHasTarget = computed(() : boolean => {
+		if (flipDir.value == -1) {
+			return hasPrevPage.value
 		}
-		openLocalBook(bidNum)
+		if (flipDir.value == 1) {
+			return hasNextPage.value
+		}
+		return false
 	})
-
-	/**
-	 * 云端笔记拉取并落当前书籍缓存（划线/想法/书签；云端为准覆盖本地，容错收口 readerTypes）。
-	 * 镜像刷新由调用方在落缓存后统一执行
-	 */
-	async function syncNotesFromCloud(bid : number) : Promise<void> {
-		// 复用云端行的离线书（dirty）：本地笔记尚未回补云端，先拉取会覆盖掉离线新增，跳过待书架回补完成后恢复
-		if (isBookDirty(bid)) {
-			return
+	/** 分页变化（字号调节/设置恢复/标定更新）后钳制当前页码，避免指向不存在的空页 */
+	function clampPageIndex() : void {
+		if (pageIndex.value > pageBreaks.value.length - 1) {
+			pageIndex.value = Math.max(0, pageBreaks.value.length - 1)
 		}
-		await fetchNotesToCache(bid)
-		await fetchBookmarksToCache(bid)
 	}
-
-	/** 读取本地书籍文件并解析注入（云端笔记先行落缓存）；失败（书被删/文件被清理）提示后返回书架 */
-	async function openLocalBook(bid : number) : Promise<void> {
-		const book : LocalBook | null = findBook(bid)
-		if (book == null) {
-			showToast(t('reader.bookMissingOrDeleted'))
-			setTimeout(() => {
-				uni.navigateBack()
-			}, 1200)
-			return
+	clampPageIndex()
+	/** 注入真实书籍数据（章节目录 + 各章段落正文）并重置阅读位置：本地文件解析完成后调用一次，目录、分页、划线/想法/书签渲染全部基于注入后的数据重建 */
+	function loadBookContent(chs : Chapter[], allParas : string[][]) : void {
+		chapters.value = chs
+		chapterParas.value = allParas.map((texts : string[]) : Paragraph[] => toParagraphs(texts))
+		currentChapterId.value = 0
+		pageIndex.value = 0
+		scrollChapters.value = [0]
+		scrollModeTop.value = 0
+		scrollModePos.value = 0
+		// 进度锚点内存重置（restoreProgress 有旧进度时再覆盖）
+		anchorCid = 0
+		anchorOffset = 0
+		clampPageIndex()
+		// 不在此处 saveProgress：openLocalBook 随后调 restoreProgress 恢复旧进度，
+		// 先写会把重置值 {0,0} 覆盖存储中的真实进度，导致每次打开都回到第一章
+	}
+	/** 排版失效（字号/字体变化）：实测缓存即时清除（分页先按估算渲染），随后重标定并重测当前章邻域、钳制页码 */
+	function invalidateLayoutMeasure() : void {
+		layoutEpoch++
+		paraLinesCache.value = new Map()
+		paraTailCache.value = new Map()
+		paraLayoutCache.value = new Map()
+		// 排版参数变化后 StaticLayout 同参一致性需重新校验（字体族映射可能随字体变化）
+		staticLayoutMode = 0
+		if (relayoutTimer >= 0) {
+			clearTimeout(relayoutTimer)
 		}
-		if (book.path.length == 0) {
-			showToast(t('reader.fileMissing'))
-			setTimeout(() => {
-				uni.navigateBack()
-			}, 1200)
-			return
-		}
-		bookTitle.value = book.title
-		bookHasPreface.value = book.hasPreface
-		uni.showLoading({ title: t('reader.opening'), mask: true })
-		// 锁定当前书籍后拉取云端笔记（划线/想法/书签云端为准），落缓存后刷新镜像；
-		// bookId 赋值置于落缓存之后：书签面板 watch 该 prop 重载，避免先重载读到旧缓存
-		setActiveBookId(book.id)
-		await syncNotesFromCloud(book.id)
-		reloadNotesMirror()
-		bookId.value = book.id
-		// 先让 loading 完成渲染，再进入同步的文件读取与章节解析（大文件解析耗时，主线程会短暂阻塞）
-		await new Promise<void>((resolve) => {
-			setTimeout(resolve, 60)
-		})
-		try {
-			const text = await readTextFile(book.path)
-			const parsed = parseChapters(text, book.title)
-			// 旧书（导入时未标记序章）：剔除新解析生成的序章，章 id 与存量进度/划线/书签保持对齐
-			const chaptersParsed = book.hasPreface == true ? parsed : parsed.filter((c : ParsedChapter) : boolean => !c.preface)
-			const chs = chaptersParsed.map((c, i) : Chapter => {
-				return { id: i, title: c.title, label: c.label, contentTitle: c.contentTitle, active: false } as Chapter
-			})
-			loadBookContent(chs, chaptersParsed.map((c) : string[] => c.paragraphs))
-			restoreProgress(book.id)
-			if (pageTurn.value != '滚动') {
-				// 翻页模式：首屏页在 loading 遮罩内完成实测，展示即最终布局（邻章后台预取供跨章预渲染）
-				const cid = currentChapterId.value
-				await ensureChaptersMeasured([cid - 1, cid, cid + 1])
+		relayoutTimer = setTimeout(() => {
+			relayoutTimer = -1
+			calibratePerLine()
+			const cid = currentChapterId.value
+			ensureChaptersMeasured([cid - 1, cid, cid + 1]).then(() => {
 				clampPageIndex()
-			} else {
-				// 滚动模式：首章/恢复章内容不足一屏时预拼接下一章（否则 scrolltolower 永不触发）
-				fillScrollViewport()
-			}
-		} catch (e) {
-			showToast(t('reader.readFail'))
+			})
+		}, 150)
+	}
+	/** 指定页渲染项 */
+	function pageItemsAt(pi : number) : PageItem[] {
+		const breaks = pageBreaks.value
+		if (pi < 0 || pi >= breaks.length) {
+			return [] as PageItem[]
 		}
-		uni.hideLoading()
+		return slicesToItems(currentChapterId.value, breaks[pi])
 	}
-
-	/** 排版度量（响应式：随字号/屏宽变化，下行气泡组件供划词换算） */
-	const metrics = computed<TextMetrics>(() : TextMetrics => layoutMetrics())
-
-	/** 全局提示（ReaderToast 组件化：文案/显隐/自动消失计时内聚） */
-	function showToast(msg: string) : void {
-		toastRef.value?.show(msg)
+	/** 上一页渲染项（常驻预渲染：章内相邻页；章首跨上一章末页——按上一章分页取末页；第一章无上一页为空数组）——目标层视图常驻，跟手时零创建延迟，首次翻到新页无渲染空白 */
+	const prevPageItems = computed(() : PageItem[] => {
+		if (sideLayersHeld.value) {
+			return [] as PageItem[]
+		}
+		if (pageIndex.value > 0) {
+			return pageItemsAt(pageIndex.value - 1)
+		}
+		if (currentChapterId.value > 0) {
+			const pb = chapterBreaks(currentChapterId.value - 1)
+			if (pb.length == 0) {
+				return [] as PageItem[]
+			}
+			return slicesToItems(currentChapterId.value - 1, pb[pb.length - 1])
+		}
+		return [] as PageItem[]
+	})
+	/** 下一页渲染项（常驻预渲染：章内相邻页；章尾跨下一章首页——按下一章分页取首页；末章无下一页为空数组） */
+	const nextPageItems = computed(() : PageItem[] => {
+		if (sideLayersHeld.value) {
+			return [] as PageItem[]
+		}
+		if (pageIndex.value < pageBreaks.value.length - 1) {
+			return pageItemsAt(pageIndex.value + 1)
+		}
+		if (currentChapterId.value < chapters.value.length - 1) {
+			const pb = chapterBreaks(currentChapterId.value + 1)
+			if (pb.length == 0) {
+				return [] as PageItem[]
+			}
+			return slicesToItems(currentChapterId.value + 1, pb[0])
+		}
+		return [] as PageItem[]
+	})
+	/** 当前页渲染项（随 pageIndex 变化） */
+	const currentPageItems = computed(() : PageItem[] => {
+		return pageItemsAt(pageIndex.value)
+	})
+	const pageTurn = ref('滚动')
+	/** 当前页层样式（几何规则见 utils/flipstyle.uts，随翻页模式/方向/位移变化） */
+	const currentLayerStyle = computed(() : string => flipCurrentLayerStyle(pageTurn.value, flipDir.value, flipOffset.value, flipActive.value, flipSettling.value))
+	if (restoredModes.indexOf(restoredSettings.pageTurn) >= 0) {
+		pageTurn.value = restoredSettings.pageTurn
+	} else {
+		pageTurn.value = restoredModes[0]
 	}
-
-	/** 主题图标路径：夜间使用 -light 白色变体 */
-	function themeIcon(name: string) : string {
-		return readerThemeIcon(name, nightMode.value)
-	}
-
-	/** 左右滑动翻页手势（Stitch 设置面板"翻页"模式：左滑下一章、右滑上一章，水平位移阈值避免与纵向滚动冲突） */
-	let touchStartX = 0
-	let touchStartY = 0
-
-	function handleGestureStart(x : number, y : number) : void {
-		pullSettling.value = false
-		flipSettling.value = false
-		touchStartX = x
-		touchStartY = y
-	}
-
-	function onContentTouchStart(e: UniTouchEvent) : void {
-		handleGestureStart(e.touches[0].clientX, e.touches[0].clientY)
-	}
-
-	function onContentTouchMove(e: UniTouchEvent) : void {
-		if (e.touches.length == 0) {
+	/** 是否上下滚动模式（语义化别名，正文手势/定位/渲染均按此分支；信息栏显隐随其下行组件） */
+	const scrollMode = computed(() : boolean => pageTurn.value == '滚动')
+	/**
+	 * 滚动模式锚点实测（停止滚动 300ms 后防抖执行）：滚动位置的绝对 scrollTop 含已拼接前置章的累计高，
+	 * 而恢复时只渲染当前章（单章高度远小于绝对值，scroll-top 会被 clamp 到章尾），直接保存会导致恢复定位错乱；
+	 * 故实测「视口顶落在哪一章 + 距该章顶的偏移」，恢复时单章渲染按偏移定位即可精确回到原位（跨设备亦稳定）
+	 */
+	function scheduleAnchorCalc() : void {
+		if (!scrollMode.value || bookId.value == VIRTUAL_BOOK_ID) {
 			return
 		}
-		handleGestureMove(e.touches[0].clientX, e.touches[0].clientY)
+		if (anchorTimer >= 0) {
+			clearTimeout(anchorTimer)
+		}
+		anchorTimer = setTimeout(() : void => {
+			anchorTimer = -1
+			uni.createSelectorQuery().selectAll('.scroll-chapter').boundingClientRect((res : any) : void => {
+				const rects = res == null ? null : (res as NodeInfo[])
+				if (rects == null || rects.length != scrollChapters.value.length) {
+					return
+				}
+				const viewTop = contentTopPx.value
+				let cid = scrollChapters.value[0]
+				let offset = 0
+				// 视口顶落在哪章 rect 内（含章头/章间 gap 时取上一章），偏移=视口顶-章顶
+				for (let i = rects.length - 1; i >= 0; i--) {
+					if ((rects[i].top ?? 0) <= viewTop) {
+						cid = scrollChapters.value[i]
+						offset = Math.max(0, Math.round(viewTop - (rects[i].top ?? 0)))
+						break
+					}
+				}
+				anchorCid = cid
+				anchorOffset = offset
+			}).exec()
+		}, 300)
 	}
-
+	/** 书签标记（右上角旗帜）是否展示：滚动模式无页码概念，仅分页模式展示 */
+	const bookmarkFlagVisible = computed(() : boolean => {
+		if (scrollMode.value) {
+			return false
+		}
+		return indexOfBookmark() >= 0
+	})
 	/** 手势移动核心（触摸与 Web 鼠标桥接共用；x/y 为当前触点视口坐标） */
 	function handleGestureMove(x : number, y : number) : void {
 		if (scrollMode.value) {
@@ -2162,7 +2084,7 @@
 			// #ifdef APP
 			if (pageTurn.value == '仿真') {
 				// 仿真跟手：触点横向绝对位置即卷曲前缘（前翻自右缘向左卷、回翻自左缘向右展开）
-				const relX = Math.max(0, Math.min(pageW.value, x - uni.upx2px(62)))
+				const relX = Math.max(0, Math.min(pageW.value, x - rpxToPx(62)))
 				flipOffset.value = dir == 1 ? pageW.value - relX : relX
 			} else {
 				const span = verticalMode ? pageH.value : pageW.value
@@ -2196,329 +2118,147 @@
 			pullState.value = 'none'
 		}
 	}
-
-	function onContentTouchEnd(e: UniTouchEvent) : void {
-		if (scrollMode.value) {
+	function onContentTouchMove(e: UniTouchEvent) : void {
+		if (e.touches.length == 0) {
 			return
 		}
-		handleGestureEnd(e.changedTouches[0].clientX, e.changedTouches[0].clientY)
+		handleGestureMove(e.touches[0].clientX, e.touches[0].clientY)
 	}
-
-	/** 手势收尾核心（触摸与 Web 鼠标桥接共用；x/y 为释放点视口坐标） */
-	function handleGestureEnd(x : number, y : number) : void {
-		const dx = x - touchStartX
-		const dy = y - touchStartY
-		// 翻页跟手收尾：位移过阈值（或快速轻扫）且有目标页时，先补间到满行程再切换内容；否则回弹归位
-		if (flipActive.value) {
-			const done = flipOffset.value > pageW.value * 0.35 || Math.abs(dx) > 80
-			const d = flipDir.value
-			if (done && flipHasTarget.value) {
-				// 补间到满行程：两页平滑滑到替换完成位置（内容全程完整），过渡结束后再切换，消除瞬间替换造成的内容缺失
-				flipSettling.value = true
-				flipOffset.value = pageW.value
-				setTimeout(() => {
-					flipPage(d)
-					flipActive.value = false
-					flipDir.value = 0
-					flipOffset.value = 0
-					flipSettling.value = false
-				}, 300)
-			} else {
-				// 未达阈值或章界无目标页：跟手位移归零回弹；已达轻扫阈值时走 flipPage 边界提示
-				flipSettling.value = true
-				flipOffset.value = 0
-				if (done) {
-					flipPage(d)
-				}
-				setTimeout(() => {
-					flipSettling.value = false
-					flipActive.value = false
-					flipDir.value = 0
-				}, 300)
-			}
-			return
-		}
-		// 快速水平轻扫（未进入跟手态）：直接翻页
-		if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 2) {
-			flipPage(dx < 0 ? 1 : -1)
-			settlePull()
-			return
-		}
-		const vertical = dy > 40 && dy > Math.abs(dx) * 1.5
-		// 下拉态松手：仍拉起则落定（添加/移除书签，增删/持久化在控制框组件内），否则为取消——两者均回弹归位
-		if (pullState.value == 'adding') {
-			if (vertical) {
-				controlRef.value?.addBookmark(currentChapterId.value, pageIndex.value)
-			}
-			settlePull()
-		} else if (pullState.value == 'removing') {
-			if (vertical) {
-				controlRef.value?.removeBookmark(currentChapterId.value, pageIndex.value)
-			}
-			settlePull()
-		}
-	}
-
-	// #ifdef WEB
-	/** PC 宽屏：触摸事件对鼠标不响应，桥接鼠标事件到统一手势核心，
-	 * 使覆盖/平移翻页与下拉书签手势在桌面浏览器与触屏同行为（滚轮/滚动模式不受影响） */
-	let webDragging = false
-	/** 手势位移已消费时抑制随后的合成 click（防止拖拽翻页/下拉后误触菜单显隐） */
-	let webClickSuppressed = false
-	/** 鼠标长按检测计时器（按下段落 350ms 未移动即触发，对齐 uni-app longpress 时长） */
-	let webPressTimer = -1
-
-	/** 清理长按计时器 */
-	function clearWebPressTimer() : void {
-		if (webPressTimer >= 0) {
-			clearTimeout(webPressTimer)
-			webPressTimer = -1
-		}
-	}
-
-	/** 鼠标长按触发：从段落 DOM id 反解段落身份（ppara-<origin>=翻页 / scroll-para-<cid>-<origin>=滚动），推导切片区间后走长按核心 */
-	function onWebLongPress(pid : string, x : number, y : number) : void {
-		if (pid.startsWith('scroll-para-')) {
-			const rest = pid.substring('scroll-para-'.length)
-			const dash = rest.indexOf('-')
-			const cid = parseInt(rest.substring(0, dash))
-			const pi = parseInt(rest.substring(dash + 1))
-			const paras = paragraphsOf(cid)
-			if (isNaN(cid) || isNaN(pi) || pi < 0 || pi >= paras.length) {
-				return
-			}
-			onLongPressAt(pi, cid, x, y, 0, paras[pi].text.length - 1)
-		} else if (pid.startsWith('ppara-')) {
-			const pi = parseInt(pid.substring('ppara-'.length))
-			const item = currentPageItems.value.find((it : PageItem) : boolean => it.origin == pi)
-			if (isNaN(pi) || item == null) {
-				return
-			}
-			onLongPressAt(pi, -1, x, y, item.from, item.to)
-		}
-	}
-
-	function onWebMouseDown(e : MouseEvent) : void {
-		if (e.button != 0) {
-			return
-		}
-		e.preventDefault()
-		webDragging = true
-		handleGestureStart(e.clientX, e.clientY)
-		// 长按检测：按在段落元素上才开始计时
-		clearWebPressTimer()
-		const target = e.target as Element
-		const paraEl = target.closest != null ? target.closest('.novel-paragraph') : null
-		if (paraEl != null) {
-			const pid = paraEl.id
-			const px = e.clientX
-			const py = e.clientY
-			webPressTimer = setTimeout(() => {
-				webPressTimer = -1
-				// 长按命中：抑制随后的合成 click（防止气泡出现后被点击收起）
-				webClickSuppressed = true
-				onWebLongPress(pid, px, py)
-			}, 350)
-		}
-	}
-
-	function onWebMouseMove(e : MouseEvent) : void {
-		// 桌面端无 touch 事件：鼠标移动/滚轮作为阅读活性信号驱动时长跟踪（含 10 分钟无操作截断与会话滚动）
-		onPageTouchStart()
-		// 位移超过容差取消长按检测（对齐 touch 长按的移动取消语义）
-		if (webPressTimer >= 0 && (Math.abs(e.clientX - touchStartX) > 10 || Math.abs(e.clientY - touchStartY) > 10)) {
-			clearWebPressTimer()
-		}
-		if (!webDragging) {
-			return
-		}
-		handleGestureMove(e.clientX, e.clientY)
-	}
-
-	function onWebMouseUp(e : MouseEvent) : void {
-		clearWebPressTimer()
-		if (!webDragging) {
-			return
-		}
-		webDragging = false
-		const moved = Math.abs(e.clientX - touchStartX) > 10 || Math.abs(e.clientY - touchStartY) > 10
-		handleGestureEnd(e.clientX, e.clientY)
-		if (moved) {
-			webClickSuppressed = true
-		}
-	}
-
-	onReady(() => {
-		// mousedown 仅挂正文区（菜单/控制框点击不受影响）；move/up 挂 window 防拖出区域后丢释放事件；
-		// 滚轮同为阅读活性信号（连续滚动阅读的时长统计依赖）
-		const el = document.querySelector('.content')
-		if (el != null) {
-			el.addEventListener('mousedown', onWebMouseDown)
-		}
-		window.addEventListener('mousemove', onWebMouseMove)
-		window.addEventListener('mouseup', onWebMouseUp)
-		window.addEventListener('wheel', onPageTouchStart)
-		// 时长结算兜底：uni-app x H5 页面级 onHide/onUnload 不随浏览器切标签/关标签触发（实测），
-		// 切走即结算（页面存活，普通上报链路可靠），切回重新起算；直接关标签/刷新经 pagehide 安静结算
-		document.addEventListener('visibilitychange', onWebVisibilityChange)
-		window.addEventListener('pagehide', onWebPageHide)
-	})
-
-	/** 切走标签页/最小化：结算本次阅读（含进度回写）；切回重新起算。onShow 若被框架同场景触发，
-	 *  settle 防双计与 onShown 幂等重置均无害 */
-	function onWebVisibilityChange() : void {
-		if (document.visibilityState == 'hidden') {
-			recordReadingSession()
-		} else {
-			readingClock.onShown()
-		}
-	}
-
-	/** 直接关闭标签页/刷新（未经 visibilitychange hidden）：安静结算，仅写本地镜像与离线流水队列，
-	 *  时长经下次进入书架补传聚合；进度本地落库，云端回写由下次结算/书架刷新覆盖 */
-	function onWebPageHide() : void {
-		saveProgress()
+	/** 结算本次阅读：累计今日分钟数 + 回写书架最近阅读状态（onHide 先于 onUnload 触发，时钟结算防双计） */
+	function recordReadingSession() : void {
 		if (bookId.value == VIRTUAL_BOOK_ID) {
 			return
 		}
-		readingClock.settle(bookId.value, true)
+		readingClock.settle(bookId.value, false)
+		// 滚动模式按锚点章回写（currentChapterId 是滚动加载推进的「到达章」，非视口顶所在章）
+		updateBookReading(bookId.value, scrollMode.value ? anchorCid : currentChapterId.value)
 	}
-
-	// #endif
-
-	/** 回弹归位：内容位移与遮罩高度以过渡动画归零（松手后触发，触摸重新按下时立即恢复跟手） */
-	function settlePull() : void {
-		if (pullOffset.value == 0 && pullState.value == 'none') {
+	function saveProgress() : void {
+		if (bookId.value == VIRTUAL_BOOK_ID) {
 			return
 		}
-		pullSettling.value = true
-		pullOffset.value = 0
-		pullState.value = 'none'
+		// 滚动模式：存「视口顶所在章 + 章内偏移」锚点，恢复时单章渲染按偏移精确定位
+		if (scrollMode.value) {
+			saveBookProgress(bookId.value, { chapterId: anchorCid, pageIndex: 0, scrollTop: anchorOffset } as BookProgress)
+			return
+		}
+		const p = { chapterId: currentChapterId.value, pageIndex: pageIndex.value, scrollTop: scrollModePos.value } as BookProgress
+		saveBookProgress(bookId.value, p)
+	}
+	onHide(() => {
+		saveProgress()
+		recordReadingSession()
+	})
+	/** 位置映射应用：切换到视口所在章并定位包含目标字符的页（字符位未命中——估算漂移——回退记录段落所在首页） */
+	function applyScrollToPage(cid : number, origin : number, charTarget : number) : void {
+		if (cid < 0 || cid >= chapters.value.length) {
+			return
+		}
+		currentChapterId.value = cid
+		const breaks = chapterBreaks(cid)
+		const pi = findPageOf(breaks, origin, charTarget)
+		if (pi >= 0) {
+			pageIndex.value = pi
+		}
+		saveProgress()
+	}
+	/** 滚动 → 翻页的位置映射：趁滚动 DOM 卸载前批量查询段落锚点矩形，按 scrollChapters 渲染顺序拉平 (cid, origin) 与 rects 对齐，
+	 *  以正文区逻辑顶（contentTopPx，对齐翻页页首）所在段落及段内偏移行换算目标字符，再到目标章分页定位所在页；
+	 *  查询失败（渲染未就绪/空章）保持原状态。定位精度段落级：章未实测时按估算分页换算，实测完成后页边界轻微漂移可接受 */
+	function locatePageFromScrollPos() : void {
+		const cids = scrollChapters.value
+		if (cids.length == 0) {
+			return
+		}
+		let expected = 0
+		for (let i = 0; i < cids.length; i++) {
+			expected += paragraphsOf(cids[i]).length
+		}
+		if (expected == 0) {
+			return
+		}
+		uni.createSelectorQuery().selectAll('.para-scroll').boundingClientRect((res : any) : void => {
+			const rects = res == null ? null : (res as NodeInfo[])
+			if (rects == null || rects.length != expected) {
+				return
+			}
+			const viewTop = contentTopPx.value
+			let hit = -1
+			for (let i = 0; i < rects.length; i++) {
+				if ((rects[i].top ?? 0) <= viewTop && (rects[i].bottom ?? 0) > viewTop) {
+					hit = i
+					break
+				}
+			}
+			if (hit < 0) {
+				// 视口参照点落在段间距/章头：取其上方最后一个段落
+				for (let i = rects.length - 1; i >= 0; i--) {
+					if ((rects[i].bottom ?? 0) <= viewTop) {
+						hit = i
+						break
+					}
+				}
+			}
+			if (hit < 0) {
+				return
+			}
+			let cid = -1
+			let origin = -1
+			let acc = 0
+			for (let ci = 0; ci < cids.length; ci++) {
+				const len = paragraphsOf(cids[ci]).length
+				if (hit < acc + len) {
+					cid = cids[ci]
+					origin = hit - acc
+					break
+				}
+				acc += len
+			}
+			if (cid < 0) {
+				return
+			}
+			// 段内偏移行 → 段内目标字符（行容量近似，缩进 2 字误差可接受）
+			const lineH = fontSize.value * 1.7
+			const offsetRows = Math.max(0, Math.round((viewTop - (rects[hit].top ?? 0)) / lineH))
+			applyScrollToPage(cid, origin, offsetRows * perLineEffective.value)
+		}).exec()
+	}
+	/**
+	 * 滚动模式视口填充：已加载内容不足一屏时 scroll-view 无法滚动，scrolltolower 永不触发
+	 * （首章/短章进入场景，如仅一行的序），静默预拼接下一章直至撑满视口或全书到底。
+	 * 预拼接不改当前章、不写进度（非阅读行为，滚到底事件仍是推进当前章的唯一入口）
+	 */
+	function fillScrollViewport() : void {
+		if (!scrollMode.value || fillScrollRunning) {
+			return
+		}
+		fillScrollRunning = true
+		// 等首帧渲染落地后再测量（滚动序列刚重置时 DOM 尚未更新）
 		setTimeout(() => {
-			pullSettling.value = false
-		}, 350)
+			fillScrollStep()
+		}, 80)
 	}
-
-	/** 翻页（左滑下一页、右滑上一页；章首/章尾越界时切换上一章末页/下一章首页，Stitch 边界 toast 提示） */
-	function flipPage(delta: number) : void {
-		const next = pageIndex.value + delta
-		if (next < 0) {
-			if (currentChapterId.value === 0) {
-				showToast(t('reader.firstChapter'))
-				return
-			}
-			goToChapter(currentChapterId.value - 1, true)
-			return
-		}
-		if (next > pageBreaks.value.length - 1) {
-			if (currentChapterId.value === chapters.value.length - 1) {
-				bookFinished.value = true
-				showToast(t('reader.lastChapter'))
-				return
-			}
-			goToChapter(currentChapterId.value + 1, false)
-			return
-		}
-		pageIndex.value = next
-		clearSelection()
-		saveProgress()
-	}
-
-	/** 切换章节并定位页（实测门控：翻页模式等目标章测量完成后再切换，目标页一次性按实测布局渲染，切章无可见重排；滚动模式直接切换） */
-	function goToChapter(id : number, atLastPage : boolean) : void {
-		// 章界防御：书签/进度等存量索引可能指向未注入数据中不存在的章
-		if (id < 0 || id >= chapters.value.length) {
-			return
-		}
-		// 章跳离开原位置：触底态复位（百分比回落实时章序，重新触底时再置真）
-		bookFinished.value = false
-		if (pageTurn.value == '滚动') {
-			applyChapterSwitch(id, atLastPage)
-			if (!atLastPage) {
-				// 滚动模式章跳定位：Web 端 scroll-view 内容替换后滚动位置残留且 scroll-top 同值绑定不再触发，
-				// 落点会停在前章内部；延迟至重置渲染落地后按章锚点定位保证落点为章首
-				//（同书签/划线跳转口径，对其他端为幂等冗余；atLastPage 仍走超大偏移沉底语义）
-				setTimeout(() : void => {
-					scrollIntoView.value = 'scroll-ch-' + id
-				}, 300)
-			}
-			return
-		}
-		ensureChaptersMeasured([id]).then(() => {
-			applyChapterSwitch(id, atLastPage)
-			// 相邻章后台预取：跨章翻页的预渲染层需要邻章实测数据（已测则跳过）
-			ensureChaptersMeasured([id - 1, id + 1])
-		})
-	}
-
-	/** 目录点击的抽屉延迟收起标志与目标章：抽屉收起对齐切章完成（selectChapterById 置位，此处消费；
-	 *  目标章匹配防止连点场景下前一章切换提前收起抽屉） */
-	let drawerClosePending = false
-	let drawerCloseTarget = -1
-
-	/** 应用切章（同步）：进入新章默认首页，回退上一章定位末页；滚动模式复位章节序列与滚动位置。
-	 *  侧层错峰填充 + 首帧渲染落地后收抽屉：切章首帧渲染过程被抽屉收起动画掩盖（见 holdSideLayers） */
-	function applyChapterSwitch(id : number, atLastPage : boolean) : void {
-		// 章界防御：书签/进度等存量索引可能指向未注入数据中不存在的章
-		if (id < 0 || id >= chapters.value.length) {
-			return
-		}
-		currentChapterId.value = id
-		pageIndex.value = atLastPage ? pageBreaks.value.length - 1 : 0
-		scrollChapters.value = [id]
-		scrollModeTop.value = atLastPage ? 999999 : 0
-		scrollModePos.value = scrollModeTop.value
-		scrollIntoView.value = ''
-		// 进度锚点内存同步（末页跳转用超大偏移，恢复时 clamp 到章尾）
-		anchorCid = id
-		anchorOffset = scrollModeTop.value
-		clearSelection()
-		saveProgress()
-		// 滚动模式：目标章内容不足一屏时预拼接下一章（否则 scrolltolower 永不触发）
-		fillScrollViewport()
-		holdSideLayers()
-		if (drawerClosePending && id == drawerCloseTarget) {
-			drawerClosePending = false
-			// 等首帧渲染落地后收起抽屉：抽屉与 0.32s 收起动画掩盖测量等待后的切换与渲染过程
-			setTimeout(() : void => {
-				drawerOpen.value = false
-			}, 50)
-		}
-	}
-
-	/** 点击正文空白（Stitch: 划线段点击已处理→跳过；想法查看卡片由其全屏遮罩自行拦截点击关闭；抽屉打开→收起；划词激活→清除；设置展开→收起；否则切换菜单显隐） */
-	function onContentTap() : void {
+	const drawerOpen = ref(false)
+	/** 系统侧滑/返回键（pages.json swipeBackAsBackPress 把侧滑手势转为本事件）：任一浮层展开时先收浮层回正文，不退出页面 */
+	onBackPress((options : OnBackPressOptions) : boolean => {
 		// #ifdef WEB
-		// 鼠标拖拽手势已消费时吞掉随后合成的 click（避免翻页/下拉后误触菜单显隐）
-		if (webClickSuppressed) {
-			webClickSuppressed = false
-			return
-		}
+		// Web 端直接放行：navigateBack 触发本事件的 from 值与原生不同，浮层展开态的「收浮层不退出」
+		// 拦截会吞掉控制栏返回（返回键出现时菜单必为展开态）；浏览器返回键退出页面属预期行为
+		return false
 		// #endif
-		// 正文划线段 click 已处理（含纯划线吞点击）：跳过本次父级点击
-		if (paragraphTapHandled) {
-			paragraphTapHandled = false
-			return
+		// #ifndef WEB
+		if (options.from == 'navigateBack') {
+			return false
 		}
-		if (drawerOpen.value) {
-			closeDrawer()
-			menuVisible.value = true
-			return
-		}
-		if (selSpan.value != null) {
-			clearSelection()
-			return
-		}
-		if (settingsOpen.value) {
-			closeSettings()
-			return
-		}
-		menuVisible.value = !menuVisible.value
-		if (menuVisible.value) {
+		if (drawerOpen.value || settingsOpen.value || menuVisible.value) {
+			drawerOpen.value = false
 			settingsOpen.value = false
+			menuVisible.value = false
+			return true
 		}
-	}
-
+		return false
+		// #endif
+	})
 	function onBackTap() : void {
 		// #ifdef WEB
 		// Web 端绕过 uni.navigateBack（其触发的 onBackPress from 值与原生不同，会被浮层展开态拦截吞掉，
@@ -2535,87 +2275,35 @@
 		// #endif
 		uni.navigateBack()
 	}
-
-	/** 划词排版度量（TextMetrics 见 utils/readerTypes.uts 共享层，气泡组件随 metrics props 使用同源参数）；perLine 用渲染标定值，与分页引擎同源 */
-	function layoutMetrics() : TextMetrics {
-		const charW = fontSize.value
-		const contentW = bodyW.value - uni.upx2px(124)
-		const perLine = perLineEffective.value
-		return {
-			perLine: perLine,
-			lineH: fontSize.value * 1.7,
-			charW: charW,
-			fullCharW: contentW / perLine,
-			indentPx: fontSize.value * 2
-		} as TextMetrics
-	}
-
-	/** 触点 → 整段字符索引（触点相对本页切片渲染矩形做行列换算，切片内索引加切片偏移对齐整段坐标；
-	 *  与分页排版同源公式：段首切片首行容量 perLine-2（缩进占 2 字），续行 perLine） */
-	function charIndexOfRect(rect : NodeInfo, clientX : number, clientY : number, from : number, to : number) : number {
-		const m = layoutMetrics()
-		const sliceLen = to - from + 1
-		// 切片行数：段首切片（from==0）首行容量 = perLine-2（缩进占 2 字），续切片每行 perLine
-		let maxRow : number
-		if (from == 0) {
-			const rest = sliceLen - (m.perLine - 2)
-			maxRow = rest <= 0 ? 0 : Math.ceil(rest / m.perLine)
-		} else {
-			maxRow = Math.max(0, Math.ceil(sliceLen / m.perLine) - 1)
+	/** 设置面板开关（Stitch: 展开时隐藏顶栏与听书球） */
+	function toggleSettings() : void {
+		settingsOpen.value = !settingsOpen.value
+		if (settingsOpen.value) {
+			// 与目录抽屉互斥：打开设置时收起抽屉并回到菜单呼出态（控制栏保留展示设置表单）
+			drawerOpen.value = false
+			menuVisible.value = true
 		}
-		let row = Math.floor((clientY - rect.top) / m.lineH)
-		row = Math.max(0, Math.min(row, maxRow))
-		// 首行触点先扣除缩进宽（两个全角空格），字距：首行与末行未拉伸用自然字距，中间满行用两端对齐拉伸字距
-		const indent = (from == 0 && row == 0) ? m.indentPx : 0
-		const spacing = row == 0 ? m.charW : (row < maxRow ? m.fullCharW : m.charW)
-		let col = Math.floor((clientX - rect.left - indent) / spacing)
-		col = Math.max(0, Math.min(col, m.perLine - 1))
-		// 切片内字符索引（首行容量 perLine-2）加切片偏移 = 整段坐标
-		const sliceIdx = row == 0 ? col : (m.perLine - 2) + (row - 1) * m.perLine + col
-		return Math.min(sliceIdx, sliceLen - 1) + from
 	}
-
-	/** 所在句范围（[起点, 终点] 闭区间）：触点向前/向后扫句末标点定句界，标点后的闭合引号随句并入 */
-	function sentenceRange(text : string, idx : number) : number[] {
-		let start = 0
-		for (let i = idx - 1; i >= 0; i--) {
-			if (SENTENCE_END_CHARS.indexOf(text.charAt(i)) >= 0) {
-				if (i + 1 < text.length && SENTENCE_CLOSERS.indexOf(text.charAt(i + 1)) >= 0) {
-					continue
-				}
-				start = i + 1
-				break
-			}
-		}
-		let end = text.length - 1
-		for (let i = idx; i < text.length; i++) {
-			if (SENTENCE_END_CHARS.indexOf(text.charAt(i)) >= 0) {
-				if (i + 1 < text.length && SENTENCE_CLOSERS.indexOf(text.charAt(i + 1)) >= 0) {
-					continue
-				}
-				end = i
-				break
-			}
-		}
-		while (end + 1 < text.length && SENTENCE_CLOSERS.indexOf(text.charAt(end + 1)) >= 0) {
-			end++
-		}
-		return [start, end]
+	function closeDrawer() : void {
+		drawerOpen.value = false
 	}
-
-	/** 选中段落元素查询 id（滚动模式按段落所在章 id 前缀防多章同索引冲突，cid<0 为分页模式；滚动模式 id 同时用作 scroll-into-view 锚点） */
-	function selectionParaId(pi : number, cid : number) : string {
-		if (cid >= 0) {
-			return '#scroll-para-' + cid + '-' + pi
+	/** 目录抽屉（Stitch: 遮罩渐显 + 抽屉顶部下滑 0.32s） */
+	/** 目录按钮：切换抽屉（打开时顶部控制栏收起、抽屉标题位于小程序控制项下方；再次点击收起抽屉、回到菜单呼出态，控制项保留） */
+	function toggleDrawer() : void {
+		if (drawerOpen.value) {
+			closeDrawer()
+			menuVisible.value = true
+			return
 		}
-		return '#ppara-' + pi
+		// 与设置面板互斥：打开抽屉时收起设置面板与顶部控制栏
+		settingsOpen.value = false
+		menuVisible.value = false
+		drawerOpen.value = true
 	}
-
-	/** 测量选区两端锚点与起/终段落的渲染矩形（同一查询批次，坐标系一致），批量回传气泡组件做差分定位 */
-	function measureAnchors() : void {
-		measureAnchorsAttempt(0)
-	}
-
+	/** 目录点击的抽屉延迟收起标志与目标章：抽屉收起对齐切章完成（selectChapterById 置位，此处消费；
+	 *  目标章匹配防止连点场景下前一章切换提前收起抽屉） */
+	let drawerClosePending = false
+	let drawerCloseTarget = -1
 	/** 锚点测量尝试：选区分段（含零宽锚点）随选区状态变更渲染，查询与渲染存在竞态——
 	 *  起终锚点双双缺失时延迟重试（至多 2 次），避免首测落空后退化为估算定位且不再校正 */
 	function measureAnchorsAttempt(attempt : number) : void {
@@ -2657,18 +2345,19 @@
 						toSlice = items[i].from
 					}
 				}
-				popoverRef.value?.setAnchors(s, arr[0], arr[1], arr[2], arr[3], fromSlice, toSlice)
+				popoverRef.value?.$callMethod('setAnchors', s, arr[0], arr[1], arr[2], arr[3], fromSlice, toSlice)
 			})
 	}
-
-	/** 拖动中的段落视口矩形收集容器（触点→段落映射在气泡组件内换算，正文段落元素查询必须在宿主） */
-	let dragParaRects : ParaRect[] = []
-
+	/** 测量选区两端锚点与起/终段落的渲染矩形（同一查询批次，坐标系一致），批量回传气泡组件做差分定位 */
+	function measureAnchors() : void {
+		measureAnchorsAttempt(0)
+	}
 	/** 缓存正文段落视口矩形（滚动模式含已加载各章，分页模式仅当前页段落；rect 顺序与段序一致），完成后回传气泡组件 */
 	function cacheParaRects() : void {
 		dragParaRects = []
 		if (scrollMode.value) {
-			uni.createSelectorQuery().selectAll('.para-scroll').boundingClientRect((rects : NodeInfo[]) : void => {
+			uni.createSelectorQuery().selectAll('.para-scroll').boundingClientRect((res : any) : void => {
+				const rects = res == null ? null : (res as NodeInfo[])
 				if (rects == null) {
 					return
 				}
@@ -2677,24 +2366,26 @@
 				for (let ci = 0; ci < scrollChapters.value.length; ci++) {
 					const cid = scrollChapters.value[ci]
 					const paras = paragraphsOf(cid)
-					for (let o = 0; o < paras.length && idx < rects.length; o++, idx++) {
+					for (let o = 0; o < paras.length && idx < rects.length; o++) {
 						dragParaRects.push({
 							cid: cid,
 							origin: o,
-							left: rects[idx].left,
-							top: rects[idx].top,
-							bottom: rects[idx].bottom,
+							left: rects[idx].left ?? 0,
+							top: rects[idx].top ?? 0,
+							bottom: rects[idx].bottom ?? 0,
 							len: paras[o].text.length,
 							from: 0,
 							firstLen: -1,
 							secondOrigin: -1
 						} as ParaRect)
+						idx++
 					}
 				}
-				popoverRef.value?.setDragRects(dragParaRects)
+				popoverRef.value?.$callMethod('setDragRects', dragParaRects)
 			}).exec()
 		} else {
-			uni.createSelectorQuery().selectAll('.para-page').boundingClientRect((rects : NodeInfo[]) : void => {
+			uni.createSelectorQuery().selectAll('.para-page').boundingClientRect((res : any) : void => {
+				const rects = res == null ? null : (res as NodeInfo[])
 				if (rects == null) {
 					return
 				}
@@ -2706,31 +2397,23 @@
 					dragParaRects.push({
 						cid: currentChapterId.value,
 						origin: it.origin,
-						left: rects[i].left,
-						top: rects[i].top,
-						bottom: rects[i].bottom,
+						left: rects[i].left ?? 0,
+						top: rects[i].top ?? 0,
+						bottom: rects[i].bottom ?? 0,
 						len: it.to - it.from + 1,
 						from: it.from,
 						firstLen: -1,
 						secondOrigin: -1
 					} as ParaRect)
 				}
-				popoverRef.value?.setDragRects(dragParaRects)
+				popoverRef.value?.$callMethod('setDragRects', dragParaRects)
 			}).exec()
 		}
 	}
-
-	/** 手柄拖动（跨段）与触摸事件处理已内聚气泡组件（正文段落矩形由宿主查询回传 setDragRects） */
-
-	/** 长按段落：触点位置估算字符索引，定位所在句整句选中并显示拖动手柄（cid=-1 为分页模式，滚动模式传段落所在章 id）；
-	 *  from/to 为本页渲染的整段字符切片区间（流式分页段落可跨页），切片内行列换算后加 from 偏移对齐划线/想法的整段坐标 */
-	function onLongPress(pi : number, cid : number, e : UniTouchEvent, from : number, to : number) : void {
-		if (e.touches.length == 0) {
-			return
-		}
-		onLongPressAt(pi, cid, e.touches[0].clientX, e.touches[0].clientY, from, to)
+	/** 拖动开始：查询正文段落视口矩形回传组件（触点→段落映射在宿主模板内，跨组件查询不可行） */
+	function onDragStarted() : void {
+		cacheParaRects()
 	}
-
 	/** 长按核心（触摸与 Web 鼠标桥接共用；pressX/Y 为按点视口坐标） */
 	function onLongPressAt(pi : number, cid : number, pressX : number, pressY : number, from : number, to : number) : void {
 		menuVisible.value = false
@@ -2740,7 +2423,8 @@
 		// 滚动模式自动加载相邻章后 currentChapterId 可能跳变，而视口停留内容仍属原章：
 		// 长按段落时把当前章同步为被长按段落所在章，保证选区渲染的章匹配条件成立（用户在哪里操作，哪里即当前阅读章）
 		const spanCid = cid >= 0 ? cid : currentChapterId.value
-		uni.createSelectorQuery().select(selectionParaId(pi, cid)).boundingClientRect((rect : NodeInfo | null) : void => {
+		uni.createSelectorQuery().select(selectionParaId(pi, cid)).boundingClientRect((res : any) : void => {
+			const rect = res == null ? null : (res as NodeInfo | null)
 			if (rect == null) {
 				return
 			}
@@ -2771,82 +2455,131 @@
 				} as SelSpan
 			}
 			// 选区状态与手柄/气泡在气泡组件内建立（锚点实测由组件发起请求、宿主查询回传）；起点段长按本页切片长度与偏移传（手柄估算的切片口径）
-			popoverRef.value?.beginSelection(span, rect.left, rect.top, clientX, Math.min(sliceLen, p.text.length - from), from)
+			popoverRef.value?.$callMethod('beginSelection', span, rect.left ?? 0, rect.top ?? 0, clientX, Math.min(sliceLen, p.text.length - from), from)
 		}).exec()
 	}
-
+	/** 长按段落：触点位置估算字符索引，定位所在句整句选中并显示拖动手柄（cid=-1 为分页模式，滚动模式传段落所在章 id）；
+	 *  from/to 为本页渲染的整段字符切片区间（流式分页段落可跨页），切片内行列换算后加 from 偏移对齐划线/想法的整段坐标 */
+	// 模板 @longpress 的 $event 为 Any（vdom 事件绑定无静态类型），内部收窄 UniTouchEvent
+	function onLongPress(pi : number, cid : number, e : any, from : number, to : number) : void {
+		const te = e as UniTouchEvent
+		if (te.touches.length == 0) {
+			return
+		}
+		onLongPressAt(pi, cid, te.touches[0].clientX, te.touches[0].clientY, from, to)
+	}
 	/** 清除选区（选区状态在气泡组件，联动收起想法查看卡片并同步高亮镜像） */
 	function clearSelection() : void {
-		popoverRef.value?.hideSelection()
+		popoverRef.value?.$callMethod('hideSelection')
 	}
-
-	/** ===== 选区上下文（划词气泡功能数据，按当前选区实时计算下行组件） ===== */
-	/** 选区覆盖段序列（划线按项写入所在章） */
-	const selSegs = computed<SpanSeg[]>(() : SpanSeg[] => {
-		const s = selSpan.value
-		if (s == null) {
-			return [] as SpanSeg[]
+	/** 滚动模式实时滚动位置（仅内存记录，随 onHide/onUnload 持久化）；滚动阅读时隐藏上下控制项，并通知信息栏淡入（停止后组件内计时淡出） */
+	function onScrollModeScroll(e : UniScrollEvent) : void {
+		scrollModePos.value = e.detail.scrollTop
+		// 滚动使内容位移，选区与手柄位置失效，随滚动清除
+		if (selSpan.value != null) {
+			clearSelection()
 		}
-		return buildSpanSegs(s, paragraphsOf)
-	})
-
-	/** 选区文本（跨段拼接） */
-	const selText = computed(() : string => {
-		return selectionText()
-	})
-
-	/** 分享卡片内容快照（组装规则见 readerTypes.buildShareQuoteCtx；上下文按选区端点所在章取——滚动模式跨章选区的端点分属两章） */
-	const shareCtx = computed<ShareQuoteCtx | null>(() : ShareQuoteCtx | null => {
-		const s = selSpan.value
-		if (s == null) {
-			return null
+		// 设置面板展开期间不收控制项：字号/字体调整引起内容重排会触发程序性 @scroll（内容高度变化致滚动位置漂移），
+		// 属面板内操作而非用户滚动——收起会把设置面板连同控制面板一起带走，打断调节
+		if (menuVisible.value && !settingsOpen.value) {
+			menuVisible.value = false
 		}
-		const fromP = paragraphsOf(s.fromCid)[s.fromOrigin]
-		const toP = paragraphsOf(s.toCid)[s.toOrigin]
-		if (fromP == null || toP == null) {
-			// 段落未注入（数据未就绪即出现选区的防御）：不产出分享上下文
-			return null
+		footerRef.value?.$callMethod('notifyScroll')
+		// 滚动停稳后重算进度锚点（视口顶所在章 + 章内偏移）
+		scheduleAnchorCalc()
+	}
+	/** 折叠屏展开/折叠、旋转、桌面拖宽：窗口尺寸变化后复用排版失效链（同字号变化口径）——
+	 *  实测缓存清除、重标定、钳制页码、清除选区。正文排版宽度未变（宽屏已限宽 750px）且高度未变时跳过；
+	 *  App 端暂无 onResize 事件（vapor 暂不支持），重开页面自动按新尺寸初始化 */
+	// #ifndef APP-ANDROID || APP-IOS || APP-HARMONY
+	onResize(() : void => {
+		const win = uni.getWindowInfo()
+		if (win.windowWidth == bodyW.value && win.windowHeight == pageH.value) {
+			return
 		}
-		return buildShareQuoteCtx(s, fromP.text, toP.text, thoughts.value, selectionText(), chapterAt(s.toCid).title, bookTitle.value)
+		pageW.value = win.windowWidth
+		pageH.value = win.windowHeight
+		invalidateLayoutMeasure()
+		clampPageIndex()
+		clearSelection()
+		// 微信端折叠切换自愈（其他端空实现）：分页排版度量按新窗口重载（进度持久化自动恢复）
+		scheduleResizeReload(win.windowWidth, '/pages/reading/reader?bookId=' + bookId.value)
 	})
-
-	/** 分享卡片头像：登录用户取其头像 key 映射的静态图，未登录/无头像用默认 hei */
-	const shareLogoSrc = computed(() : string => avatarSrcOf(userStore.userInfo))
-
-	/** 设置面板开关（Stitch: 展开时隐藏顶栏与听书球） */
-	function toggleSettings() : void {
-		settingsOpen.value = !settingsOpen.value
-		if (settingsOpen.value) {
-			// 与目录抽屉互斥：打开设置时收起抽屉并回到菜单呼出态（控制栏保留展示设置表单）
-			drawerOpen.value = false
+	// #endif
+	/** 点击正文空白（Stitch: 划线段点击已处理→跳过；想法查看卡片由其全屏遮罩自行拦截点击关闭；抽屉打开→收起；划词激活→清除；设置展开→收起；否则切换菜单显隐） */
+	function onContentTap() : void {
+		// #ifdef WEB
+		// 鼠标拖拽手势已消费时吞掉随后合成的 click（避免翻页/下拉后误触菜单显隐）
+		if (webClickSuppressed) {
+			webClickSuppressed = false
+			return
+		}
+		// #endif
+		// 正文划线段 click 已处理（含纯划线吞点击）：跳过本次父级点击
+		if (paragraphTapHandled) {
+			paragraphTapHandled = false
+			return
+		}
+		if (drawerOpen.value) {
+			closeDrawer()
 			menuVisible.value = true
+			return
+		}
+		if (selSpan.value != null) {
+			clearSelection()
+			return
+		}
+		if (settingsOpen.value) {
+			closeSettings()
+			return
+		}
+		menuVisible.value = !menuVisible.value
+		if (menuVisible.value) {
+			settingsOpen.value = false
 		}
 	}
-
-	function closeSettings() : void {
-		settingsOpen.value = false
-	}
-
-	/** 应用阅读主题（整组成组切换：正文/浮层/遮罩/控件色） */
-	function applyReaderTheme(key : string) : void {
-		const theme = readerThemeOf(key)
-		themeKey.value = key
-		nightMode.value = key == 'night'
-		readerBg.value = theme.readerBg
-		selectedBg.value = theme.readerBg
-		bodyColor.value = theme.bodyColor
-		titleColor.value = theme.titleColor
-		labelColor.value = theme.labelColor
-		mutedColor.value = theme.mutedColor
-		menuBottomBg.value = theme.menuBottomBg
-		maskBg.value = theme.maskBg
-		maskTextColor.value = theme.maskTextColor
-		popoverBg.value = theme.popoverBg
-		panelShadow.value = theme.panelShadow
-		coverMaskBg.value = theme.coverMaskBg
-		thoughtCardPanelBg.value = theme.thoughtPanelBg
-	}
-
+	/** 点击正文段落（100% 可靠的 view 载体）：段落含划线/想法时吞掉父级点击，异步按点击坐标精判——命中想法弹查看面板，命中纯划线无展示，未命中划线自动补执行父级点击行为；
+	 *  from/to 为本页渲染的整段字符切片区间（流式分页段落可跨页），切片内行列换算后加 from 偏移对齐划线/想法的整段坐标 */
+	// 模板 @click 的 $event 为 Any（vdom 事件绑定无静态类型），内部收窄 UniPointerEvent
+	function onParaTap(e : any, origin : number, cid : number, from : number, to : number) : void {
+		const pe = e as UniPointerEvent
+		const renderCid = cid >= 0 ? cid : currentChapterId.value
+		const ranges = rangesAt(renderCid, origin)
+		if (ranges.length == 0) {
+			return
+		}
+		paragraphTapHandled = true
+		const clientX = pe.clientX
+		const clientY = pe.clientY
+		uni.createSelectorQuery().select(selectionParaId(origin, cid)).boundingClientRect((res : any) : void => {
+			const rect = res == null ? null : (res as NodeInfo | null)
+			if (rect == null || selSpan.value != null) {
+				// 查询失败或已进入划词状态：放行父级点击
+				paragraphTapHandled = false
+				onContentTap()
+				return
+			}
+			const charIdx = charIndexOfRect(rect, clientX, clientY, from, to)
+			let inUl = false
+			for (const u of ranges) {
+				if (charIdx >= u[0] && charIdx <= u[1]) {
+					inUl = true
+					break
+				}
+			}
+			if (!inUl) {
+				// 点击段落内未划线区域：补执行父级点击行为（菜单/清选区等）
+				paragraphTapHandled = false
+				onContentTap()
+				return
+			}
+			// 命中划线区间：有想法则弹查看卡片（气泡组件内聚，锚定划线下方，空间不足转上方），纯划线无展示
+			const hit = thoughtAt(thoughts.value, renderCid, origin, charIdx)
+			if (hit != null) {
+				popoverRef.value?.$callMethod('showThoughtView', hit.quote, hit.content, rect.bottom ?? 0, rect.top ?? 0)
+			}
+			}).exec()
+			}
 	/** 控制框设置变更应用（设置真源在组件：调节/持久化/提示内聚；页面同步镜像并应用渲染） */
 	function onControlChange(s : ReaderSettings) : void {
 		const fontChanged = s.fontSize != fontSize.value
@@ -2891,161 +2624,143 @@
 			applyReaderTheme(s.theme)
 		}
 	}
-
-	/** 翻页 → 滚动的锚定落位：scroll-into-view 需在锚点 DOM 就绪后由空值变更才可靠触发，
-	 *  全程以纯色遮罩盖住「章首渲染 → 锚点跳位」的中间态；轮询锚点矩形确认滚至视口顶（滚动停滞则清空重设触发），
-	 *  超时兜底收遮罩（落章首，退化为原行为不循环遮罩） */
-	function settleScrollAnchor(cid : number, origin : number) : void {
-		const anchor = 'scroll-para-' + cid + '-' + origin
-		let settled = false
-		let attempts = 0
-		let lastTop = -999
-		const finish = () : void => {
-			if (settled) {
-				return
-			}
-			settled = true
-			switchMask.value = false
-		}
-		const verify = () : void => {
-			if (settled) {
-				return
-			}
-			attempts++
-			if (attempts > 26) {
-				finish()
-				return
-			}
-			uni.createSelectorQuery().select('#' + anchor).boundingClientRect((r : NodeInfo | null) : void => {
-				if (settled) {
-					return
-				}
-				if (r != null && Math.abs(r.top) <= 4) {
-					// 锚点已滚至视口顶：定位完成
-					finish()
-					return
-				}
-				const top = r != null ? r.top : -999
-				if (r == null || Math.abs(top - lastTop) < 1) {
-					// 锚点未就绪或滚动停滞：清空 → 重设（属性需真变化才触发定位）
-					scrollIntoView.value = ''
-					setTimeout(() : void => {
-						if (settled) {
-							return
-						}
-						scrollIntoView.value = anchor
-						lastTop = -999
-						verify()
-					}, 30)
-					return
-				}
-				// 滚动进行中：跟踪至落定
-				lastTop = top
-				setTimeout(verify, 30)
-			}).exec()
-		}
-		setTimeout(() : void => {
-			if (settled) {
-				return
-			}
-			scrollIntoView.value = anchor
-			verify()
-		}, 300)
-	}
-
-	/** 滚动 → 翻页的位置映射：趁滚动 DOM 卸载前批量查询段落锚点矩形，按 scrollChapters 渲染顺序拉平 (cid, origin) 与 rects 对齐，
-	 *  以正文区逻辑顶（contentTopPx，对齐翻页页首）所在段落及段内偏移行换算目标字符，再到目标章分页定位所在页；
-	 *  查询失败（渲染未就绪/空章）保持原状态。定位精度段落级：章未实测时按估算分页换算，实测完成后页边界轻微漂移可接受 */
-	function locatePageFromScrollPos() : void {
-		const cids = scrollChapters.value
-		if (cids.length == 0) {
+	/** 应用切章（同步）：进入新章默认首页，回退上一章定位末页；滚动模式复位章节序列与滚动位置。
+	 *  侧层错峰填充 + 首帧渲染落地后收抽屉：切章首帧渲染过程被抽屉收起动画掩盖（见 holdSideLayers） */
+	function applyChapterSwitch(id : number, atLastPage : boolean) : void {
+		// 章界防御：书签/进度等存量索引可能指向未注入数据中不存在的章
+		if (id < 0 || id >= chapters.value.length) {
 			return
 		}
-		let expected = 0
-		for (let i = 0; i < cids.length; i++) {
-			expected += paragraphsOf(cids[i]).length
-		}
-		if (expected == 0) {
-			return
-		}
-		uni.createSelectorQuery().selectAll('.para-scroll').boundingClientRect((rects : NodeInfo[]) : void => {
-			if (rects == null || rects.length != expected) {
-				return
-			}
-			const viewTop = contentTopPx.value
-			let hit = -1
-			for (let i = 0; i < rects.length; i++) {
-				if (rects[i].top <= viewTop && rects[i].bottom > viewTop) {
-					hit = i
-					break
-				}
-			}
-			if (hit < 0) {
-				// 视口参照点落在段间距/章头：取其上方最后一个段落
-				for (let i = rects.length - 1; i >= 0; i--) {
-					if (rects[i].bottom <= viewTop) {
-						hit = i
-						break
-					}
-				}
-			}
-			if (hit < 0) {
-				return
-			}
-			let cid = -1
-			let origin = -1
-			let acc = 0
-			for (let ci = 0; ci < cids.length; ci++) {
-				const len = paragraphsOf(cids[ci]).length
-				if (hit < acc + len) {
-					cid = cids[ci]
-					origin = hit - acc
-					break
-				}
-				acc += len
-			}
-			if (cid < 0) {
-				return
-			}
-			// 段内偏移行 → 段内目标字符（行容量近似，缩进 2 字误差可接受）
-			const lineH = fontSize.value * 1.7
-			const offsetRows = Math.max(0, Math.round((viewTop - rects[hit].top) / lineH))
-			applyScrollToPage(cid, origin, offsetRows * perLineEffective.value)
-		}).exec()
-	}
-
-	/** 位置映射应用：切换到视口所在章并定位包含目标字符的页（字符位未命中——估算漂移——回退记录段落所在首页） */
-	function applyScrollToPage(cid : number, origin : number, charTarget : number) : void {
-		if (cid < 0 || cid >= chapters.value.length) {
-			return
-		}
-		currentChapterId.value = cid
-		const breaks = chapterBreaks(cid)
-		const pi = findPageOf(breaks, origin, charTarget)
-		if (pi >= 0) {
-			pageIndex.value = pi
-		}
+		currentChapterId.value = id
+		pageIndex.value = atLastPage ? pageBreaks.value.length - 1 : 0
+		scrollChapters.value = [id]
+		scrollModeTop.value = atLastPage ? 999999 : 0
+		scrollModePos.value = scrollModeTop.value
+		scrollIntoView.value = ''
+		// 进度锚点内存同步（末页跳转用超大偏移，恢复时 clamp 到章尾）
+		anchorCid = id
+		anchorOffset = scrollModeTop.value
+		clearSelection()
 		saveProgress()
+		// 滚动模式：目标章内容不足一屏时预拼接下一章（否则 scrolltolower 永不触发）
+		fillScrollViewport()
+		holdSideLayers()
+		if (drawerClosePending && id == drawerCloseTarget) {
+			drawerClosePending = false
+			// 等首帧渲染落地后收起抽屉：抽屉与 0.32s 收起动画掩盖测量等待后的切换与渲染过程
+			setTimeout(() : void => {
+				drawerOpen.value = false
+			}, 50)
+		}
 	}
-
-	/** 目录抽屉（Stitch: 遮罩渐显 + 抽屉顶部下滑 0.32s） */
-	/** 目录按钮：切换抽屉（打开时顶部控制栏收起、抽屉标题位于小程序控制项下方；再次点击收起抽屉、回到菜单呼出态，控制项保留） */
-	function toggleDrawer() : void {
-		if (drawerOpen.value) {
-			closeDrawer()
-			menuVisible.value = true
+	/** 跳转到书签所在章节页并关闭抽屉（ReaderControl 书签卡片点击上行；翻页模式先实测目标章再一次性按实测布局切换；滚动模式把书签页码换算为段落锚点定位视区） */
+	function goToBookmark(bm : Bookmark) : void {
+		if (pageTurn.value == '滚动') {
+			applyChapterSwitch(bm.chapterId, false)
+			drawerOpen.value = false
+			// 书签页码是分页模式语义：换算为该书页首切片所在段落，按段落锚点定位滚动视区（换算失败保持章顶）
+			ensureChaptersMeasured([bm.chapterId]).then(() => {
+				const pages = chapterBreaks(bm.chapterId)
+				if (pages.length == 0) {
+					return
+				}
+				const pi = Math.min(Math.max(bm.pageIndex, 0), pages.length - 1)
+				if (pages[pi].length == 0) {
+					return
+				}
+				const origin = pages[pi][0].origin
+				// applyChapterSwitch 已重置滚动序列并清空锚点，延迟至重置渲染落地后设锚（同 goToUnderline 口径）
+				setTimeout(() => {
+					scrollIntoView.value = 'scroll-para-' + bm.chapterId + '-' + origin
+				}, 300)
+			})
 			return
 		}
-		// 与设置面板互斥：打开抽屉时收起设置面板与顶部控制栏
-		settingsOpen.value = false
-		menuVisible.value = false
-		drawerOpen.value = true
+		ensureChaptersMeasured([bm.chapterId]).then(() => {
+			applyChapterSwitch(bm.chapterId, false)
+			pageIndex.value = bm.pageIndex
+			clampPageIndex()
+			saveProgress()
+			drawerOpen.value = false
+		})
 	}
-
-	function closeDrawer() : void {
+	/** 跳转到划线记录位置并关闭抽屉：分页定位到记录章的所在页（跨章先切章），滚动模式定位到记录章的段落锚点（章未加载时先重置加载该章） */
+	function goToUnderline(r : NoteRecord) : void {
+		if (scrollMode.value) {
+			if (scrollChapters.value.indexOf(r.cid) < 0) {
+				// 记录章未在滚动序列中：重置为仅加载该章，从头定位
+				scrollChapters.value = [r.cid]
+				scrollIntoView.value = ''
+				scrollModeTop.value = 0
+				scrollModePos.value = 0
+				currentChapterId.value = r.cid
+				anchorCid = r.cid
+				anchorOffset = 0
+				// 目标章内容不足一屏时预拼接下一章（否则 scrolltolower 永不触发）
+				fillScrollViewport()
+				const targetLate = 'scroll-para-' + r.cid + '-' + r.origin
+				setTimeout(() => {
+					scrollIntoView.value = targetLate
+				}, 300)
+			} else {
+				// 先清空再设值，重复点击同一记录也能重新触发滚动
+				scrollIntoView.value = ''
+				const target = 'scroll-para-' + r.cid + '-' + r.origin
+				setTimeout(() => {
+					scrollIntoView.value = target
+				}, 50)
+			}
+		} else {
+			// 翻页模式：跨章先实测目标章（切换后一次性按实测布局渲染），再定位记录所在段落的分页
+			const proceed = () : void => {
+				if (r.cid != currentChapterId.value) {
+					applyChapterSwitch(r.cid, false)
+				}
+				// 页=段落切片数组（{origin,from,to}）：定位覆盖记录字符位的切片所在页（跨页段落可精确到划线所在页）；
+				// 字符位未命中（分页回退估算漂移）时回退到记录段落所在首页（见 findPageOf）
+				const targetPage = findPageOf(pageBreaks.value, r.origin, r.qStart)
+				if (targetPage >= 0) {
+					pageIndex.value = targetPage
+				}
+			}
+			if (r.cid == currentChapterId.value) {
+				proceed()
+			} else {
+				ensureChaptersMeasured([r.cid]).then(() => {
+					proceed()
+				})
+			}
+		}
+		clearSelection()
+		saveProgress()
 		drawerOpen.value = false
 	}
-
+	/** 切换章节并定位页（实测门控：翻页模式等目标章测量完成后再切换，目标页一次性按实测布局渲染，切章无可见重排；滚动模式直接切换） */
+	function goToChapter(id : number, atLastPage : boolean) : void {
+		// 章界防御：书签/进度等存量索引可能指向未注入数据中不存在的章
+		if (id < 0 || id >= chapters.value.length) {
+			return
+		}
+		// 章跳离开原位置：触底态复位（百分比回落实时章序，重新触底时再置真）
+		bookFinished.value = false
+		if (pageTurn.value == '滚动') {
+			applyChapterSwitch(id, atLastPage)
+			if (!atLastPage) {
+				// 滚动模式章跳定位：Web 端 scroll-view 内容替换后滚动位置残留且 scroll-top 同值绑定不再触发，
+				// 落点会停在前章内部；延迟至重置渲染落地后按章锚点定位保证落点为章首
+				//（同书签/划线跳转口径，对其他端为幂等冗余；atLastPage 仍走超大偏移沉底语义）
+				setTimeout(() : void => {
+					scrollIntoView.value = 'scroll-ch-' + id
+				}, 300)
+			}
+			return
+		}
+		ensureChaptersMeasured([id]).then(() => {
+			applyChapterSwitch(id, atLastPage)
+			// 相邻章后台预取：跨章翻页的预渲染层需要邻章实测数据（已测则跳过）
+			ensureChaptersMeasured([id - 1, id + 1])
+		})
+	}
 	/** 章节点击（ReaderControl 目录卡片点击上行；不弹提示，抽屉收起对齐切章完成）。
 	 *  抽屉收起对齐切章完成而非固定延时：已测章立即切换、未测章等测量完成后（applyChapterSwitch）50ms 收起，
 	 *  测量等待与首帧渲染被抽屉及其 0.32s 收起动画掩盖，无裸露渲染过程 */
@@ -3063,11 +2778,321 @@
 		goToChapter(id, false)
 	}
 
+
+	const toastRef = ref<ComponentPublicInstance | null>(null)
+	/** 全局提示（ReaderToast 组件化：文案/显隐/自动消失计时内聚） */
+	function showToast(msg: string) : void {
+		toastRef.value?.$callMethod('show', msg)
+	}
+	/** 滚动到底：自动加载下一章；末章给出到底提示 */
+	function onScrollToLower() : void {
+		const last = scrollChapters.value[scrollChapters.value.length - 1]
+		if (last < chapters.value.length - 1) {
+			const next = last + 1
+			scrollChapters.value.push(next)
+			currentChapterId.value = next
+			saveProgress()
+		} else {
+			bookFinished.value = true
+			showToast(t('reader.lastChapter'))
+		}
+	}
+	/** 滚动到顶：自动前插上一章；首章给出到顶提示 */
+	function onScrollToUpper() : void {
+		const first = scrollChapters.value[0]
+		if (first > 0) {
+			scrollIntoView.value = ''
+			scrollChapters.value.unshift(first - 1)
+			currentChapterId.value = first - 1
+			saveProgress()
+			setTimeout(() => {
+				scrollIntoView.value = 'scroll-ch-' + first
+			}, 50)
+		} else {
+			showToast(t('reader.firstChapter'))
+		}
+	}
+	/** 读取本地书籍文件并解析注入（云端笔记先行落缓存）；失败（书被删/文件被清理）提示后返回书架 */
+	async function openLocalBook(bid : number) : Promise<void> {
+		const book : LocalBook | null = findBook(bid)
+		if (book == null) {
+			showToast(t('reader.bookMissingOrDeleted'))
+			setTimeout(() => {
+				uni.navigateBack()
+			}, 1200)
+			return
+		}
+		if (book.path.length == 0) {
+			showToast(t('reader.fileMissing'))
+			setTimeout(() => {
+				uni.navigateBack()
+			}, 1200)
+			return
+		}
+		bookTitle.value = book.title
+		bookHasPreface.value = book.hasPreface
+		uni.showLoading({ title: t('reader.opening'), mask: true })
+		// 锁定当前书籍后拉取云端笔记（划线/想法/书签云端为准），落缓存后刷新镜像；
+		// bookId 赋值置于落缓存之后：书签面板 watch 该 prop 重载，避免先重载读到旧缓存
+		setActiveBookId(book.id)
+		await syncNotesFromCloud(book.id)
+		reloadNotesMirror()
+		bookId.value = book.id
+		// 先让 loading 完成渲染，再进入同步的文件读取与章节解析（大文件解析耗时，主线程会短暂阻塞）
+		await new Promise<void>((resolve) => {
+			setTimeout(() : void => {
+				resolve()
+			}, 60)
+		})
+		try {
+			const text = await readTextFile(book.path)
+			const parsed = parseChapters(text, book.title)
+			// 旧书（导入时未标记序章）：剔除新解析生成的序章，章 id 与存量进度/划线/书签保持对齐
+			const chaptersParsed = book.hasPreface == true ? parsed : parsed.filter((c : ParsedChapter) : boolean => !c.preface)
+			const chs = chaptersParsed.map((c, i) : Chapter => {
+				return { id: i, title: c.title, label: c.label, contentTitle: c.contentTitle, active: false } as Chapter
+			})
+			loadBookContent(chs, chaptersParsed.map((c) : string[] => c.paragraphs))
+			restoreProgress(book.id)
+			if (pageTurn.value != '滚动') {
+				// 翻页模式：首屏页在 loading 遮罩内完成实测，展示即最终布局（邻章后台预取供跨章预渲染）
+				const cid = currentChapterId.value
+				await ensureChaptersMeasured([cid - 1, cid, cid + 1])
+				clampPageIndex()
+			} else {
+				// 滚动模式：首章/恢复章内容不足一屏时预拼接下一章（否则 scrolltolower 永不触发）
+				fillScrollViewport()
+			}
+		} catch (e) {
+			showToast(t('reader.readFail'))
+		}
+		uni.hideLoading()
+	}
+	/** ===== 打开本地书籍（书架点击传入 bookId） ===== */
+	onLoad((options : OnLoadOptions) : void => {
+		const bid = options['bookId']
+		const bidNum = bid != null ? parseInt(bid) : 0
+		// 0/非法为异常入参；负数 id 为离线导入待同步书籍，正常打开
+		if (bidNum == 0 || isNaN(bidNum)) {
+			showToast(t('reader.bookMissing'))
+			return
+		}
+		openLocalBook(bidNum)
+	})
+	/** 翻页（左滑下一页、右滑上一页；章首/章尾越界时切换上一章末页/下一章首页，Stitch 边界 toast 提示） */
+	function flipPage(delta: number) : void {
+		const next = pageIndex.value + delta
+		if (next < 0) {
+			if (currentChapterId.value === 0) {
+				showToast(t('reader.firstChapter'))
+				return
+			}
+			goToChapter(currentChapterId.value - 1, true)
+			return
+		}
+		if (next > pageBreaks.value.length - 1) {
+			if (currentChapterId.value === chapters.value.length - 1) {
+				bookFinished.value = true
+				showToast(t('reader.lastChapter'))
+				return
+			}
+			goToChapter(currentChapterId.value + 1, false)
+			return
+		}
+		pageIndex.value = next
+		clearSelection()
+		saveProgress()
+	}
+	/** 手势收尾核心（触摸与 Web 鼠标桥接共用；x/y 为释放点视口坐标） */
+	function handleGestureEnd(x : number, y : number) : void {
+		const dx = x - touchStartX
+		const dy = y - touchStartY
+		// 翻页跟手收尾：位移过阈值（或快速轻扫）且有目标页时，先补间到满行程再切换内容；否则回弹归位
+		if (flipActive.value) {
+			const done = flipOffset.value > pageW.value * 0.35 || Math.abs(dx) > 80
+			const d = flipDir.value
+			if (done && flipHasTarget.value) {
+				// 补间到满行程：两页平滑滑到替换完成位置（内容全程完整），过渡结束后再切换，消除瞬间替换造成的内容缺失
+				flipSettling.value = true
+				flipOffset.value = pageW.value
+				setTimeout(() => {
+					flipPage(d)
+					flipActive.value = false
+					flipDir.value = 0
+					flipOffset.value = 0
+					flipSettling.value = false
+				}, 300)
+			} else {
+				// 未达阈值或章界无目标页：跟手位移归零回弹；已达轻扫阈值时走 flipPage 边界提示
+				flipSettling.value = true
+				flipOffset.value = 0
+				if (done) {
+					flipPage(d)
+				}
+				setTimeout(() => {
+					flipSettling.value = false
+					flipActive.value = false
+					flipDir.value = 0
+				}, 300)
+			}
+			return
+		}
+		// 快速水平轻扫（未进入跟手态）：直接翻页
+		if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 2) {
+			flipPage(dx < 0 ? 1 : -1)
+			settlePull()
+			return
+		}
+		const vertical = dy > 40 && dy > Math.abs(dx) * 1.5
+		// 下拉态松手：仍拉起则落定（添加/移除书签，增删/持久化在控制框组件内），否则为取消——两者均回弹归位
+		if (pullState.value == 'adding') {
+			if (vertical) {
+				controlRef.value?.$callMethod('addBookmark', currentChapterId.value, pageIndex.value)
+			}
+			settlePull()
+		} else if (pullState.value == 'removing') {
+			if (vertical) {
+				controlRef.value?.$callMethod('removeBookmark', currentChapterId.value, pageIndex.value)
+			}
+			settlePull()
+		}
+	}
+	function onContentTouchEnd(e: UniTouchEvent) : void {
+		if (scrollMode.value) {
+			return
+		}
+		handleGestureEnd(e.changedTouches[0].clientX, e.changedTouches[0].clientY)
+	}
+	// #ifdef WEB
+	/** PC 宽屏：触摸事件对鼠标不响应，桥接鼠标事件到统一手势核心，
+	 * 使覆盖/平移翻页与下拉书签手势在桌面浏览器与触屏同行为（滚轮/滚动模式不受影响） */
+	let webDragging = false
+	/** 鼠标长按检测计时器（按下段落 350ms 未移动即触发，对齐 uni-app longpress 时长） */
+	let webPressTimer = -1
+	/** 清理长按计时器 */
+	function clearWebPressTimer() : void {
+		if (webPressTimer >= 0) {
+			clearTimeout(webPressTimer)
+			webPressTimer = -1
+		}
+	}
+	/** 鼠标长按触发：从段落 DOM id 反解段落身份（ppara-<origin>=翻页 / scroll-para-<cid>-<origin>=滚动），推导切片区间后走长按核心 */
+	function onWebLongPress(pid : string, x : number, y : number) : void {
+		if (pid.startsWith('scroll-para-')) {
+			const rest = pid.substring('scroll-para-'.length)
+			const dash = rest.indexOf('-')
+			const cid = parseInt(rest.substring(0, dash))
+			const pi = parseInt(rest.substring(dash + 1))
+			const paras = paragraphsOf(cid)
+			if (isNaN(cid) || isNaN(pi) || pi < 0 || pi >= paras.length) {
+				return
+			}
+			onLongPressAt(pi, cid, x, y, 0, paras[pi].text.length - 1)
+		} else if (pid.startsWith('ppara-')) {
+			const pi = parseInt(pid.substring('ppara-'.length))
+			const item = currentPageItems.value.find((it : PageItem) : boolean => it.origin == pi)
+			if (isNaN(pi) || item == null) {
+				return
+			}
+			onLongPressAt(pi, -1, x, y, item.from, item.to)
+		}
+	}
+	function onWebMouseDown(e : MouseEvent) : void {
+		if (e.button != 0) {
+			return
+		}
+		e.preventDefault()
+		webDragging = true
+		handleGestureStart(e.clientX, e.clientY)
+		// 长按检测：按在段落元素上才开始计时
+		clearWebPressTimer()
+		const target = e.target as Element
+		const paraEl = target.closest != null ? target.closest('.novel-paragraph') : null
+		if (paraEl != null) {
+			const pid = paraEl.id
+			const px = e.clientX
+			const py = e.clientY
+			webPressTimer = setTimeout(() => {
+				webPressTimer = -1
+				// 长按命中：抑制随后的合成 click（防止气泡出现后被点击收起）
+				webClickSuppressed = true
+				onWebLongPress(pid, px, py)
+			}, 350)
+		}
+	}
+	function onWebMouseMove(e : MouseEvent) : void {
+		// 桌面端无 touch 事件：鼠标移动/滚轮作为阅读活性信号驱动时长跟踪（含 10 分钟无操作截断与会话滚动）
+		onPageTouchStart()
+		// 位移超过容差取消长按检测（对齐 touch 长按的移动取消语义）
+		if (webPressTimer >= 0 && (Math.abs(e.clientX - touchStartX) > 10 || Math.abs(e.clientY - touchStartY) > 10)) {
+			clearWebPressTimer()
+		}
+		if (!webDragging) {
+			return
+		}
+		handleGestureMove(e.clientX, e.clientY)
+	}
+	function onWebMouseUp(e : MouseEvent) : void {
+		clearWebPressTimer()
+		if (!webDragging) {
+			return
+		}
+		webDragging = false
+		const moved = Math.abs(e.clientX - touchStartX) > 10 || Math.abs(e.clientY - touchStartY) > 10
+		handleGestureEnd(e.clientX, e.clientY)
+		if (moved) {
+			webClickSuppressed = true
+		}
+	}
+	/** 切走标签页/最小化：结算本次阅读（含进度回写）；切回重新起算。onShow 若被框架同场景触发，
+	 *  settle 防双计与 onShown 幂等重置均无害 */
+	function onWebVisibilityChange() : void {
+		if (document.visibilityState == 'hidden') {
+			recordReadingSession()
+		} else {
+			readingClock.onShown()
+		}
+	}
+	/** 直接关闭标签页/刷新（未经 visibilitychange hidden）：安静结算，仅写本地镜像与离线流水队列，
+	 *  时长经下次进入书架补传聚合；进度本地落库，云端回写由下次结算/书架刷新覆盖 */
+	function onWebPageHide() : void {
+		saveProgress()
+		if (bookId.value == VIRTUAL_BOOK_ID) {
+			return
+		}
+		readingClock.settle(bookId.value, true)
+	}
+	onReady(() => {
+		// mousedown 仅挂正文区（菜单/控制框点击不受影响）；move/up 挂 window 防拖出区域后丢释放事件；
+		// 滚轮同为阅读活性信号（连续滚动阅读的时长统计依赖）
+		const el = document.querySelector('.content')
+		if (el != null) {
+			el.addEventListener('mousedown', onWebMouseDown)
+		}
+		window.addEventListener('mousemove', onWebMouseMove)
+		window.addEventListener('mouseup', onWebMouseUp)
+		window.addEventListener('wheel', onPageTouchStart)
+		// 时长结算兜底：uni-app x H5 页面级 onHide/onUnload 不随浏览器切标签/关标签触发（实测），
+		// 切走即结算（页面存活，普通上报链路可靠），切回重新起算；直接关标签/刷新经 pagehide 安静结算
+		document.addEventListener('visibilitychange', onWebVisibilityChange)
+		window.addEventListener('pagehide', onWebPageHide)
+	})
+	// #endif
+	onUnload(() => {
+		// #ifdef WEB
+		window.removeEventListener('mousemove', onWebMouseMove)
+		window.removeEventListener('mouseup', onWebMouseUp)
+		window.removeEventListener('wheel', onPageTouchStart)
+		document.removeEventListener('visibilitychange', onWebVisibilityChange)
+		window.removeEventListener('pagehide', onWebPageHide)
+		// #endif
+		saveProgress()
+		recordReadingSession()
+	})
 	/** 听书悬浮球点击（ReaderControl 上行，功能占位） */
 	function onListenTap() : void {
 		showToast(t('reader.listenTodo'))
 	}
-
 	/** 控制框组件内部动作提示（如目录正/倒序切换） */
 	function onControlToast(msg: string) : void {
 		showToast(msg)
