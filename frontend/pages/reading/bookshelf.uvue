@@ -46,7 +46,7 @@
 				<view class="stats-card" @click="openStats">
 					<view class="stats-left">
 						<view class="stats-num-row">
-							<text class="stats-num">{{ todayMinutes }}</text>
+							<text class="stats-num">{{ fmtMinuteCount(todayMinutes) }}</text>
 							<text class="stats-unit">{{ t('bookshelf.minutes') }}</text>
 						</view>
 						<text class="stats-label">{{ t('bookshelf.todayRead') }}</text>
@@ -223,7 +223,7 @@
 	import type { ApiResponse } from '@/utils/requestDefs.ts'
 	import { hasAccessToken } from '@/utils/request.uts'
 	import { mpCapsuleRect, CONTENT_CAP_PX, scheduleResizeReload, rpxToPx } from '@/utils/layout.uts'
-	import { REWARD_TIERS, fmtRemainMinutes, tierTotalReward } from '@/utils/rewards.uts'
+	import { REWARD_TIERS, fmtRemainMinutes, fmtMinuteCount, tierTotalReward } from '@/utils/rewards.uts'
 	import { fetchActivitySummary, claimReadingReward } from '@/api/activity.uts'
 	import { t, tf } from '@/utils/i18n.uts'
 
@@ -1483,11 +1483,13 @@
 		flex-direction: column;
 	}
 
-	/* 列间距 28rpx 与三本满行时 space-between 等效；不满行时卡片紧挨补位，不再两端分布 */
+	/* 列间距 28rpx 与三本满行时 space-between 等效；不满行时卡片紧挨补位，不再两端分布。
+	   App 原生端 gap 不生效（实测列间距为 0），改用 card 的 margin-right + 行容器负 margin
+	   抵消末列，跨端结果一致 */
 	.shelf-row {
 		flex-direction: row;
 		align-items: flex-start;
-		gap: 28rpx;
+		margin-right: -28rpx;
 	}
 
 	.shelf-row-gap {
@@ -1496,6 +1498,7 @@
 
 	.book-item {
 		width: 206rpx;
+		margin-right: 28rpx;
 		flex-direction: column;
 		position: relative;
 	}
@@ -1677,12 +1680,14 @@
 	.edit-styles {
 		flex-direction: row;
 		align-items: center;
-		gap: 15rpx;
+		/* App 原生端 gap 不生效：按钮间距用 margin-right + 容器负 margin 抵消（同书架网格口径） */
+		margin-right: -15rpx;
 	}
 
 	.style-btn {
 		flex-direction: row;
 		align-items: center;
+		margin-right: 15rpx;
 		padding: 12rpx 23rpx;
 		border-radius: $bai-rounded-pill;
 		background-color: $bai-canvas;

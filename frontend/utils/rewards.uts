@@ -28,12 +28,13 @@ export function tierTotalReward(base: number, bonus: number) : number {
 
 /**
  * 剩余分钟数 → 文案（与活动页档位卡「还差 X 解锁」口径一致）
- * <60 → "X 分钟"；≥60 → "X 小时" / "X 小时 Y 分钟"
+ * 分钟单位不计小数：先向上取整并显式转 Int（Math.ceil 返回 number，直接拼接会得到 5.0），
+ * 不足 1 分钟按 1 分钟提示；<60 → "X 分钟"；≥60 → "X 小时" / "X 小时 Y 分钟"
  */
 export function fmtRemainMinutes(mins: number) : string {
-	const m = mins < 0 ? 0 : mins
-	const h = Math.floor(m / 60)
-	const r = m % 60
+	const total = Math.max(0, Math.ceil(mins))
+	const h = Math.floor(total / 60).toInt()
+	const r = (total % 60).toInt()
 	if (h > 0 && r > 0) {
 		return h + ' ' + t('rewards.hour') + ' ' + r + ' ' + t('rewards.minute')
 	}
@@ -41,4 +42,13 @@ export function fmtRemainMinutes(mins: number) : string {
 		return h + ' ' + t('rewards.hour')
 	}
 	return r + ' ' + t('rewards.minute')
+}
+
+/**
+ * 分钟数 → 分钟整数文本（分钟单位不计小数）
+ * 用于「今日已读 / 总阅读时长」等直接展示分钟数值的位置；向下取整（已读不夸大），
+ * 与 fmtRemainMinutes 的剩余时长向上取整口径区分
+ */
+export function fmtMinuteCount(mins: number) : string {
+	return Math.floor(mins).toInt().toString()
 }

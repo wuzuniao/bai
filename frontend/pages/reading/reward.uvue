@@ -79,8 +79,8 @@
 					<view class="reward-head">
 						<text class="reward-title">{{ tr('reward.readEarn') }}</text>
 						<view class="reward-stat">
-							<view class="reward-stat-line"><text>{{ tr('reward.totalMinutes') }}</text><text class="reward-stat-num">{{ totalMinutes }}</text><text class="reward-stat-unit">{{ tr('rewards.minute') }}</text></view>
-							<view class="reward-stat-line"><text>{{ tr('reward.todayMinutes') }}</text><text class="reward-stat-num">{{ todayMinutes }}</text><text class="reward-stat-unit">{{ tr('rewards.minute') }}</text></view>
+							<view class="reward-stat-line"><text>{{ tr('reward.totalMinutes') }}</text><text class="reward-stat-num">{{ fmtMinuteCount(totalMinutes) }}</text><text class="reward-stat-unit">{{ tr('rewards.minute') }}</text></view>
+							<view class="reward-stat-line reward-stat-line--second"><text>{{ tr('reward.todayMinutes') }}</text><text class="reward-stat-num">{{ fmtMinuteCount(todayMinutes) }}</text><text class="reward-stat-unit">{{ tr('rewards.minute') }}</text></view>
 						</view>
 					</view>
 					<view class="progress-track">
@@ -125,7 +125,7 @@
 	import type { ApiResponse } from '@/utils/requestDefs.ts'
 	import { hasAccessToken } from '@/utils/request.uts'
 	import { fetchActivitySummary, postCheckin, postCheckinMakeup, claimReadingReward } from '@/api/activity.uts'
-	import { REWARD_TIERS, fmtRemainMinutes, tierTotalReward } from '@/utils/rewards.uts'
+	import { REWARD_TIERS, fmtRemainMinutes, fmtMinuteCount, tierTotalReward } from '@/utils/rewards.uts'
 	import { useUserStore, hasMembershipRole } from '@/stores/user.uts'
 	// i18n：本页 v-for 变量名 t 与取词函数冲突，取词函数别名 tr
 	import { t as tr, tf } from '@/utils/i18n.uts'
@@ -811,7 +811,8 @@
 		flex: 1;
 	}
 
-	/* 主内容（Stitch: 左右 20px、顶部间距 24px、卡片间距 24px；宽屏限宽居中） */
+	/* 主内容（Stitch: 左右 20px、顶部间距 24px、卡片间距 24px；宽屏限宽居中）。
+	   App 原生端 gap 不生效（实测卡片间距为 0），卡片间距改由各卡的 margin-top 承担（同值 46rpx） */
 	.main {
 		width: 100%;
 		/* #ifdef WEB */
@@ -825,13 +826,12 @@
 		box-sizing: border-box;
 		padding: 46rpx 38rpx 60rpx 38rpx;
 		flex-direction: column;
-		gap: 46rpx;
 	}
 
 	/* 资产总览卡（令牌 card-content: 白底 圆角 xl 24px 内边距 24px；层级 2 表层对比承载高度，无边框无阴影）
-	   margin-top 18rpx：叠加父级 gap 46rpx，标题区到首卡间距 64rpx，对齐帮助子页节奏 */
+	   margin-top 64rpx：标题区到首卡间距（原父级 gap 46rpx + 本卡 18rpx，gap 改 margin 后合并为单值） */
 	.asset-card {
-		margin-top: 18rpx;
+		margin-top: 64rpx;
 		border-radius: $bai-rounded-xl;
 		padding: 46rpx;
 		background-color: $bai-canvas;
@@ -851,7 +851,6 @@
 	.asset-num-row {
 		flex-direction: row;
 		align-items: flex-end;
-		gap: 15rpx;
 		margin-top: 15rpx;
 	}
 
@@ -862,6 +861,7 @@
 	}
 
 	.asset-unit {
+		margin-left: 15rpx;
 		font-size: 23rpx;
 		font-weight: 500;
 		color: $bai-mute;
@@ -898,13 +898,13 @@
 	.coin-item {
 		flex-direction: row;
 		align-items: center;
-		gap: 6rpx;
 		margin-left: 23rpx;
 	}
 
 	.coin-icon {
 		width: 31rpx;
 		height: 31rpx;
+		margin-left: 6rpx;
 	}
 
 	.coin-num {
@@ -915,18 +915,17 @@
 
 	/* 连续签到卡（令牌 card-content: 白底 圆角 xl 24px 内边距 24px，7 天胶囊网格 + 补签提示条） */
 	.checkin-card {
+		margin-top: 46rpx;
 		border-radius: $bai-rounded-xl;
 		padding: 46rpx;
 		background-color: $bai-canvas;
 		flex-direction: column;
-		gap: 38rpx;
 	}
 
 	.checkin-title-row {
 		flex-direction: row;
 		/* App 不支持 baseline（仅 center/flex-start/flex-end/stretch）：底对齐 + 小字号上移近似基线 */
 		align-items: flex-end;
-		gap: 8rpx;
 	}
 
 	.checkin-title {
@@ -937,6 +936,8 @@
 	}
 
 	.checkin-days {
+		margin-left: 8rpx;
+		margin-right: 8rpx;
 		font-size: 46rpx;
 		font-weight: 700;
 		color: $bai-ink;
@@ -948,16 +949,18 @@
 		color: $bai-mute;
 	}
 
-	/* 7 天胶囊网格（Stitch: 7 列 间距 6px，项高 92px 圆角 16px） */
+	/* 7 天胶囊网格（Stitch: 7 列 间距 6px，项高 92px 圆角 16px）。
+	   margin-top 46rpx = 卡片节间距 38rpx + 原网格自带 8rpx；列间距改 margin-right + 容器负 margin（App gap 不生效） */
 	.checkin-grid {
 		flex-direction: row;
-		gap: 12rpx;
-		margin-top: 8rpx;
+		margin-top: 46rpx;
+		margin-right: -12rpx;
 	}
 
 	.day-cell {
 		flex: 1;
 		min-height: 177rpx;
+		margin-right: 12rpx;
 		padding: 23rpx 8rpx;
 		border-radius: $bai-rounded-lg;
 		flex-direction: column;
@@ -1097,6 +1100,7 @@
 
 	/* 补签提示条（Stitch: 画布灰底 圆角 lg 16px 两端分布） */
 	.makeup-bar {
+		margin-top: 38rpx;
 		padding: 19rpx 27rpx;
 		border-radius: $bai-rounded-lg;
 		background-color: $bai-canvas-soft;
@@ -1117,13 +1121,14 @@
 		text-decoration-line: underline;
 	}
 
-	/* 阅读领铜币卡（令牌 card-content: 白底 圆角 xl 24px 内边距 24px + 进度条 + 五档阶梯） */
+	/* 阅读领铜币卡（令牌 card-content: 白底 圆角 xl 24px 内边距 24px + 进度条 + 五档阶梯）
+	   节间距 23rpx 改由进度条/档位列表的 margin-top 承担（App gap 不生效） */
 	.reward-card {
+		margin-top: 46rpx;
 		border-radius: $bai-rounded-xl;
 		padding: 46rpx;
 		background-color: $bai-canvas;
 		flex-direction: column;
-		gap: 23rpx;
 	}
 
 	.reward-title {
@@ -1135,7 +1140,6 @@
 	.reward-stat {
 		margin-top: 8rpx;
 		flex-direction: column;
-		gap: 15rpx;
 	}
 
 	.reward-stat-line {
@@ -1144,6 +1148,11 @@
 		align-items: center;
 		font-size: 23rpx;
 		color: $bai-mute;
+	}
+
+	/* 两行统计的间距（App gap 不生效改 margin；首行不设，避免与 .reward-stat 的边距叠加） */
+	.reward-stat-line--second {
+		margin-top: 15rpx;
 	}
 
 	.reward-stat-num {
@@ -1157,6 +1166,7 @@
 	}
 
 	.progress-track {
+		margin-top: 23rpx;
 		width: 100%;
 		height: 12rpx;
 		border-radius: $bai-rounded-pill;
@@ -1171,17 +1181,19 @@
 		background-color: $bai-ink;
 	}
 
+	/* 档位列表：margin-top 38rpx = 卡片节间距 23rpx + 原列表自带 15rpx；
+	   档间距改 tier-item 的 margin-bottom + 列表负 margin 抵消末档（App gap 不生效） */
 	.tier-list {
-		margin-top: 15rpx;
+		margin-top: 38rpx;
+		margin-bottom: -20rpx;
 		flex-direction: column;
-		gap: 20rpx;
 	}
 
 	.tier-item {
+		margin-bottom: 20rpx;
 		border-radius: $bai-rounded-lg;
 		padding: 24rpx;
 		flex-direction: column;
-		gap: 15rpx;
 	}
 
 	.tier-dim {
@@ -1197,7 +1209,6 @@
 	.tier-top {
 		flex-direction: row;
 		align-items: center;
-		gap: 19rpx;
 	}
 
 	.tier-badge {
@@ -1231,13 +1242,17 @@
 	.tier-title-row {
 		flex-direction: row;
 		align-items: center;
-		gap: 15rpx;
-		/* 占满徽标右侧剩余宽度（宽度有界），档位标签一行放不下时整体换到标题下一行 */
+		/* 占满徽标右侧剩余宽度（宽度有界），档位标签一行放不下时整体换到标题下一行；
+		   margin-left 19rpx 替代 App 不生效的 gap；右侧负 margin 抵消标题的 15rpx 间距，
+		   保证换行后标签仍贴行首 */
 		flex: 1;
 		flex-wrap: wrap;
+		margin-left: 19rpx;
+		margin-right: -15rpx;
 	}
 
 	.tier-title {
+		margin-right: 15rpx;
 		font-size: 23rpx;
 		font-weight: 500;
 		color: $bai-body;
@@ -1289,6 +1304,7 @@
 	}
 
 	.tier-bottom {
+		margin-top: 15rpx;
 		flex-direction: row;
 		align-items: center;
 		justify-content: space-between;

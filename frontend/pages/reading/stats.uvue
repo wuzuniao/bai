@@ -33,7 +33,7 @@
 			<!-- 总览卡：周期总时长 + 日均 + 四项指标 -->
 			<view class="card">
 				<text class="total-text">{{ totalText }}</text>
-				<text class="avg-text">{{ tf('stats.avgN', [avgMinutes.toString()]) }}</text>
+				<text class="avg-text">{{ avgText }}</text>
 				<view class="metric-grid">
 					<view class="metric-cell">
 						<text class="metric-label">{{ tr('stats.metricRead') }}</text>
@@ -175,6 +175,7 @@
 	import { fetchReadingReport, fetchReadingRanking } from '@/api/reading.uts'
 	import { hasAccessToken } from '@/utils/request.uts'
 	import { loadBooks, exportPendingSessionRows } from '@/utils/books.uts'
+	import { fmtMinuteCount } from '@/utils/rewards.uts'
 	import { countCachedNotes } from '@/utils/readerTypes.uts'
 	// i18n：本页 v-for 变量名 t 与取词函数冲突，取词函数别名 tr
 	import { t as tr, tf } from '@/utils/i18n.uts'
@@ -266,10 +267,11 @@
 	}
 	const anchor = ref(todayStr())
 
-	/** 分钟数 → 「X小时Y分钟 / X小时 / Y分钟」（i18n） */
+	/** 分钟数 → 「X小时Y分钟 / X小时 / Y分钟」（i18n）；分钟单位不计小数（先取整并转 Int 再拆分） */
 	function fmtMinutes(mins : number) : string {
-		const h = Math.floor(mins / 60)
-		const r = mins % 60
+		const total = Math.floor(mins)
+		const h = Math.floor(total / 60).toInt()
+		const r = (total % 60).toInt()
 		if (h > 0 && r > 0) {
 			return tf('stats.fmtHM', [h.toString(), r.toString()])
 		}
@@ -320,6 +322,8 @@
 
 	/** 周期总时长文案 */
 	const totalText = computed((): string => fmtMinutes(totalMinutes.value))
+	/** 日均文案（分钟单位不计小数，服务端可能返回小数） */
+	const avgText = computed((): string => tf('stats.avgN', [fmtMinuteCount(avgMinutes.value)]))
 	/** 阅读最久书籍行 */
 	type BookRow = {
 		title: string
@@ -719,13 +723,13 @@
 		calendarCells.value = cells
 	}
 
-	/** 刻度值文案（英文单位）：满 60 分钟按小时（最多 1 位小数），否则按分钟整数 */
+	/** 刻度值文案（英文单位）：满 60 分钟按小时（最多 1 位小数），否则按分钟整数（分钟单位不计小数） */
 	function yTickText(v : number) : string {
 		if (v >= 60) {
 			const h = Math.round(v / 6) / 10
 			return (h % 1 == 0 ? '' + Math.round(h) : '' + h) + 'h'
 		}
-		return Math.round(v) + 'm'
+		return Math.round(v).toInt().toString() + 'm'
 	}
 
 	/** 纵坐标刻度（顶=最大值，四等分；不展示 0，底部留空位保持刻度与柱高对位；本期无时长全空）。
