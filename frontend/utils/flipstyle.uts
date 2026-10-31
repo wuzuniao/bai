@@ -1,10 +1,16 @@
 /**
  * 翻页层样式（纯函数）：平移/覆盖/仿真（APP 端）三种模式的层位移、层级与遮罩透明度规则
  * 页面仅持 computed 薄壳（响应式依赖经参数传入自动追踪），翻页几何规则单点维护。
+ * APP-ANDROID 例外：位移/补间/遮罩由 utils/flipengine.uts 的原生引擎接管，
+ * 本文件只提供 idle 静态位移（与原生 reset 同值），避免逐帧 CSS 与原生动画互相覆盖。
  */
 
 /** 当前页层样式：按翻页模式产生位移与层级（跟手与回弹共用） */
 export function flipCurrentLayerStyle(mode : string, dir : number, offset : number, active : boolean, settling : boolean) : string {
+	// #ifdef APP-ANDROID
+	return ''
+	// #endif
+	// #ifndef APP-ANDROID
 	if (!active && !settling) {
 		return ''
 	}
@@ -26,10 +32,19 @@ export function flipCurrentLayerStyle(mode : string, dir : number, offset : numb
 		return 'z-index:1'
 	}
 	return ''
+	// #endif
 }
 
 /** 上一页层样式：常驻屏左外预渲染（pageW 未就绪时先透明），回翻跟手/补间时作为目标层滑入（覆盖/仿真/平移通用） */
 export function flipPrevLayerStyle(pageW : number, dir : number, offset : number, active : boolean) : string {
+	// #ifdef APP-ANDROID
+	// 原生引擎接管跟手/补间位移；CSS 仅保留 idle 左侧屏外位置（新挂载层不闪叠）
+	if (pageW <= 0) {
+		return 'opacity:0;z-index:2'
+	}
+	return 'transform:translateX(-' + pageW + 'px);z-index:2'
+	// #endif
+	// #ifndef APP-ANDROID
 	if (pageW <= 0) {
 		return 'opacity:0;z-index:2'
 	}
@@ -37,10 +52,19 @@ export function flipPrevLayerStyle(pageW : number, dir : number, offset : number
 		return 'transform:translateX(' + (offset - pageW) + 'px);z-index:2'
 	}
 	return 'transform:translateX(-' + pageW + 'px);z-index:2'
+	// #endif
 }
 
 /** 下一页层样式：常驻屏右外预渲染，前翻跟手/补间时作为目标层滑入（覆盖/仿真/平移通用） */
 export function flipNextLayerStyle(pageW : number, dir : number, offset : number, active : boolean) : string {
+	// #ifdef APP-ANDROID
+	// 原生引擎接管跟手/补间位移；CSS 仅保留 idle 右侧屏外位置（新挂载层不闪叠）
+	if (pageW <= 0) {
+		return 'opacity:0;z-index:2'
+	}
+	return 'transform:translateX(' + pageW + 'px);z-index:2'
+	// #endif
+	// #ifndef APP-ANDROID
 	if (pageW <= 0) {
 		return 'opacity:0;z-index:2'
 	}
@@ -48,6 +72,7 @@ export function flipNextLayerStyle(pageW : number, dir : number, offset : number
 		return 'transform:translateX(' + (pageW - offset) + 'px);z-index:2'
 	}
 	return 'transform:translateX(' + pageW + 'px);z-index:2'
+	// #endif
 }
 
 /** 覆盖模式遮罩透明度（滑入的下一页上，仅前翻）：出现越多遮罩越浅，落定归零 */

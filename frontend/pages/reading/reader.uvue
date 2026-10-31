@@ -68,8 +68,8 @@
 			     #sel-anchor-* 供气泡实测），跨组件 createSelectorQuery 在微信端失效（见 SelectionPopover 协议），
 			     正文渲染必须留在宿主 -->
 			<view v-else class="page-stack">
-				<!-- 当前页层 -->
-				<view class="page-layer" :class="flipSettling ? 'page-layer-settle' : ''" :style="'background-color:' + readerBg + ';' + currentLayerStyle">
+				<!-- 当前页层（id 供 App 原生翻页引擎取原生视图，改名须同步 utils/flipengine.uts） -->
+				<view id="flip-layer-current" class="page-layer" :class="flipSettling ? 'page-layer-settle' : ''" :style="'background-color:' + readerBg + ';' + currentLayerStyle">
 					<view class="content-inner" :style="'padding-top:' + contentTopPx + 'px;padding-bottom:' + contentBottomPx + 'px'">
 						<view v-if="pageIndex === 0" class="chapter-header">
 							<view class="chapter-label-row">
@@ -101,12 +101,18 @@
 							</view>
 						</view>
 					</view>
+					<!-- #ifdef APP-ANDROID -->
+					<!-- 覆盖模式遮罩（App 原生管线）：暗化被覆盖的当前页，alpha 由 flipengine 原生驱动（前翻/回翻同口径） -->
+					<view v-if="pageTurn === '覆盖' && flipDir != 0" id="flip-cover-mask" class="page-cover-mask" :style="'background-color:' + coverMaskBg"></view>
+					<!-- #endif -->
+					<!-- #ifndef APP-ANDROID -->
 					<!-- 覆盖模式回翻遮罩（仅回翻）：盖在当前页上，随上一页覆盖进度由浅入深；上一页保持高亮 -->
 					<view v-if="pageTurn === '覆盖' && flipDir == -1 && hasPrevPage" class="page-cover-mask" :class="flipSettling ? 'page-cover-mask-settle' : ''" :style="'background-color:' + coverMaskBg + ';opacity:' + coverCurrentMaskOpacity"></view>
+					<!-- #endif -->
 				</view>
 				<!-- 上一页常驻层：非跟手时停在屏外预渲染，回翻跟手时作为目标层滑入（首次翻到新页无渲染空白） -->
-				<view v-if="hasPrevPage" class="page-layer" :class="flipSettling ? 'page-layer-settle' : ''" :style="'background-color:' + readerBg + ';' + prevLayerStyle">
-					<!-- #ifdef APP -->
+				<view v-if="hasPrevPage" id="flip-layer-prev" class="page-layer" :class="flipSettling ? 'page-layer-settle' : ''" :style="'background-color:' + readerBg + ';' + prevLayerStyle">
+					<!-- #ifdef APP-IOS || APP-HARMONY -->
 					<!-- 仿真卷曲（APP 端真实实现）：回翻时前缘为卷起纸筒弧面 + 落在下层的投影 -->
 					<view v-if="pageTurn === '仿真' && flipDir == -1 && flipOffset > 0" class="page-curl-roller page-curl-roller-right"></view>
 					<view v-if="pageTurn === '仿真' && flipDir == -1 && flipOffset > 0" class="page-curl-shadow page-curl-shadow-right"></view>
@@ -141,8 +147,8 @@
 					</view>
 				</view>
 				<!-- 下一页常驻层：非跟手时停在屏外预渲染，前翻跟手时作为目标层滑入 -->
-				<view v-if="hasNextPage" class="page-layer" :class="flipSettling ? 'page-layer-settle' : ''" :style="'background-color:' + readerBg + ';' + nextLayerStyle">
-					<!-- #ifdef APP -->
+				<view v-if="hasNextPage" id="flip-layer-next" class="page-layer" :class="flipSettling ? 'page-layer-settle' : ''" :style="'background-color:' + readerBg + ';' + nextLayerStyle">
+					<!-- #ifdef APP-IOS || APP-HARMONY -->
 					<!-- 仿真卷曲（APP 端真实实现）：前翻时前缘为卷起纸筒弧面 + 落在下层的投影 -->
 					<view v-if="pageTurn === '仿真' && flipDir == 1 && flipOffset > 0" class="page-curl-roller page-curl-roller-left"></view>
 					<view v-if="pageTurn === '仿真' && flipDir == 1 && flipOffset > 0" class="page-curl-shadow page-curl-shadow-left"></view>
@@ -175,9 +181,15 @@
 							</view>
 						</view>
 					</view>
+					<!-- #ifndef APP-ANDROID -->
 					<!-- 覆盖模式滑入遮罩（仅前翻）：盖在滑入的下一页上的均匀暗层，出现越多遮罩越浅，落定归零 -->
 					<view v-if="pageTurn === '覆盖' && flipDir == 1" class="page-cover-mask" :class="flipSettling ? 'page-cover-mask-settle' : ''" :style="'background-color:' + coverMaskBg + ';opacity:' + coverNextMaskOpacity"></view>
+					<!-- #endif -->
 				</view>
+				<!-- #ifdef APP-ANDROID -->
+				<!-- 仿真卷曲浮层（App 原生管线）：flipengine 写入位图背景，无事件绑定不拦截触摸；z 序在页层之上 -->
+				<view id="flip-curl-overlay" class="flip-curl-overlay"></view>
+				<!-- #endif -->
 			</view>
 			<!-- 底部信息栏（组件化：进度/百分比/贴底计算与滚动淡入淡出出现时机内聚 ReaderFooterBar，滚动信号经 ref 驱动） -->
 			<ReaderFooterBar
@@ -229,6 +241,7 @@
 			:chapters="chapters"
 			:active-chapter-id="currentChapterId"
 			:notes="noteRecords"
+			:nav-row-px="navHeight"
 			@back="onBackTap"
 			@toggle-drawer="toggleDrawer"
 			@toggle-settings="toggleSettings"
@@ -313,6 +326,10 @@
 	// #endif
 	import { flipCurrentLayerStyle, flipPrevLayerStyle, flipNextLayerStyle, flipCoverNextOpacity, flipCoverCurrentOpacity } from '@/utils/flipstyle.uts'
 	import { mpCapsuleRect, scheduleResizeReload, rpxToPx, navRowHeightPx } from '@/utils/layout.uts'
+	// #ifdef APP-ANDROID
+	// 原生翻页引擎（仅 Android：原生视图位移/补间 + Canvas 卷曲；其他端仍走 CSS 实现）
+	import { flipNativeBegin, flipNativeCancel, flipNativeFollow, flipNativeSettle, flipNativeReset, flipNativeDispose } from '@/utils/flipengine.uts'
+	// #endif
 	// #ifdef MP-WEIXIN
 	import { buildShareAppContent } from '@/utils/shareCover.uts'
 	// #endif
@@ -595,6 +612,8 @@
 	/** 左右滑动翻页手势（Stitch 设置面板"翻页"模式：左滑下一章、右滑上一章，水平位移阈值避免与纵向滚动冲突） */
 	let touchStartX = 0
 	let touchStartY = 0
+	/** 本次触摸是否已完成原生翻页准备（App 原生引擎：首个跟手帧取消旧补间并截取移动页；其他端不参与） */
+	let flipGesturePrepared = false
 	/** ===== 阅读时长结算（onShow 起算，onHide/onUnload 落库；书架统计卡展示；时钟收口 utils/books.uts） ===== */
 	const readingClock = createReadingClock('txt')
 	onShow(() => {
@@ -621,6 +640,7 @@
 	function handleGestureStart(x : number, y : number) : void {
 		pullSettling.value = false
 		flipSettling.value = false
+		flipGesturePrepared = false
 		touchStartX = x
 		touchStartY = y
 	}
@@ -880,9 +900,14 @@
 	})
 	const pageH = ref(0)
 	pageH.value = initWin.windowHeight
-	/** 正文区顶部起点（px）：小程序在胶囊下方，其他端在状态栏+导航行下方 */
+	/** 正文区顶部起点（px）：小程序在胶囊下方；App-Android 控制栏为浮层覆盖，正文只避让状态栏（整屏排版占满） */
 	const contentTopPx = ref(92)
+	// #ifdef APP-ANDROID
+	contentTopPx.value = navTop.value + 12
+	// #endif
+	// #ifndef APP-ANDROID
 	contentTopPx.value = navTop.value + navHeight.value + 8
+	// #endif
 	if (initCapsule != null) {
 		contentTopPx.value = initCapsule.top + initCapsule.height + 8
 	}
@@ -893,14 +918,83 @@
 	if (initSafeArea != null && initSafeArea.bottom > 0 && initSafeArea.bottom <= initWin.windowHeight) {
 		safeAreaBottomPx.value = Math.max(0, initWin.windowHeight - initSafeArea.bottom)
 	}
-	/** 正文区底部留白（px）：贴底信息栏文字行（ReaderFooterBar 同式：贴底内边距 max(4, 安全区-10) + 文字行高约 19px）
-	 *  之上保留约 12px 净空，使无控制框时正文尽量接近信息栏且不重叠；控制框呼出时为浮层覆盖正文、不占排版空间 */
+	/** 正文区底部留白（px）：小程序/H5 为贴底信息栏预留一行净空；App-Android 控制栏是浮层，
+	 *  页面底部应以「底部信息栏上沿 + 6px」为准（信息栏高 19px + 贴底内边距 max(4, 安全区-10)），
+	 *  即正文最后一行的底边停在信息栏上方一点点，控制框呼出时再覆盖在文字之上 */
+	// #ifdef APP-ANDROID
+	const contentBottomPx = computed(() : number => Math.max(4, safeAreaBottomPx.value - 10) + 19 + 6)
+	// #endif
+	// #ifndef APP-ANDROID
 	const contentBottomPx = computed(() : number => Math.max(safeAreaBottomPx.value - 10, 4) + 31)
+	// #endif
 	/** ===== 每行字数标定（渲染实测）：纯计算折行与真实渲染存在字距/标点禁则偏差，页尾空白据此累积；
 	 *  屏幕外标定节点（约 20 行字数）实测高度反推实际每行字数，标定前回退纯字宽估算 ===== */
 	const perLineExact = ref(0)
 	/** 翻页行程：页面全屏宽/高（px，与全屏翻页舞台容器宽一致，prev/next 屏外待命位移同源） */
 	const pageW = ref(0)
+	// #ifdef APP-ANDROID
+	/** App 原生翻页引擎 idle 复位（内容/模式变更后调用；延后一帧等 DOM 更新，使原生位移与静态 CSS 同值） */
+	function syncFlipIdle() : void {
+		setTimeout(() : void => {
+			flipNativeReset(pageW.value)
+		}, 0)
+	}
+	/**
+	 * 页面盒实测校准：基座冷启动首帧 uni.getWindowInfo().windowWidth 可能为 0（实测 LDPlayer），
+	 * 会使翻页行程 pageW=0（跟手位移/阈值/原生补间全部失效），故以页面根节点实测宽高为准。
+	 */
+	function measurePageBox() : void {
+		uni.createSelectorQuery().select('.page').boundingClientRect((res : any) : void => {
+			const rect = res == null ? null : (res as NodeInfo | null)
+			if (rect == null) {
+				return
+			}
+			const w = rect.width ?? 0
+			const h = rect.height ?? 0
+			if (w <= 0 || h <= 0 || (w == pageW.value && h == pageH.value)) {
+				return
+			}
+			pageW.value = w
+			pageH.value = h
+			// 冷启动/基座 windowWidth 可能恒为 0（实测 LDPlayer）：用实测页宽换算顶栏行高（80rpx 基准），
+			// 否则 navRowHeightPx 退化为 40px 下限、书名/章名行高不足被裁剪
+			const nh = Math.max(40, Math.round(w * 80 / 750))
+			if (nh != navHeight.value) {
+				navHeight.value = nh
+			}
+			// 阅读态整屏排版：正文只避让状态栏（控制栏为浮层覆盖，不占排版空间）
+			contentTopPx.value = navTop.value + 12
+			syncFlipIdle()
+		}).exec()
+	}
+	// #endif
+	/** 分页 rpx 换算基准宽（px）：App-Android 用实测页宽（与 CSS rpx 同口径，基座 windowWidth 不可靠会高估段距）；其他端 0=沿用 rpxToPx */
+	function paginationFrameW() : number {
+		// #ifdef APP-ANDROID
+		return pageW.value
+		// #endif
+		// #ifndef APP-ANDROID
+		return 0
+		// #endif
+	}
+	/** 正文左右内边距合计（px，124rpx）：App-Android 用实测页宽换算，保证排版实测宽与真实渲染宽一致；其他端沿用 rpxToPx */
+	function bodySidePaddingPx() : number {
+		// #ifdef APP-ANDROID
+		return pageW.value > 0 ? pageW.value * 124 / 750 : rpxToPx(124)
+		// #endif
+		// #ifndef APP-ANDROID
+		return rpxToPx(124)
+		// #endif
+	}
+	/** 正文字距（px，0.4rpx）：App-Android 用实测页宽换算（与 CSS 同口径）；其他端沿用 rpxToPx */
+	function bodyLetterSpacingPx() : number {
+		// #ifdef APP-ANDROID
+		return pageW.value > 0 ? pageW.value * 0.4 / 750 : rpxToPx(0.4)
+		// #endif
+		// #ifndef APP-ANDROID
+		return rpxToPx(0.4)
+		// #endif
+	}
 	/** 上一页层样式：常驻屏左外预渲染，回翻跟手/补间时作为目标层滑入 */
 	const prevLayerStyle = computed(() : string => flipPrevLayerStyle(pageW.value, flipDir.value, flipOffset.value, flipActive.value))
 	/** 下一页层样式：常驻屏右外预渲染，前翻跟手/补间时作为目标层滑入 */
@@ -913,11 +1007,13 @@
 	/** 正文排版宽度（px）：阅读页不限宽（2026-10-22 用户拍板），恒等于窗口宽，
 	 *  每行字数标定/分页/划词换算全部以它为准（与 content-inner/scroll-mode-inner 铺满布局同源） */
 	const bodyW = computed(() : number => pageW.value)
-	const calibWidth = computed(() : number => bodyW.value - rpxToPx(124))
+	const calibWidth = computed(() : number => bodyW.value - bodySidePaddingPx())
 	/** APP 端引擎级精确排版缓存（章 id → 行数+逐行末字符下标；StaticLayout 条件编译，其余端恒空） */
 	const paraLayoutCache = ref<Map<number, ParaLineLayout>>(new Map())
 	/** 校准得到的真实行高倍率（×字号；自适应端上行高实现差异） */
 	let staticLayoutAlpha = 1.7
+	/** 逐段行数实测校正入口（实现定义在分页钳制函数之后，经函数值转发避免前向引用） */
+	let scheduleLineCalibration : ((cid : number, epoch : number) => void) | null = null
 	/** 全书各章段落（章 id → 段落列表；切章/跨章预渲染按 id 取用） */
 	const chapterParas = ref<Paragraph[][]>([])
 	/** 想法/划线卡片列表（组装规则见 readerTypes.buildNoteRecords：划线派生卡片关联想法、无匹配想法独立成卡、按章/段/位置排序） */
@@ -1223,7 +1319,16 @@
 	/** 指定章章头占位高（px）：实测优先（探针块高+108rpx 下边距），未实测回退单行标题常量估算（294rpx） */
 	function headerHeightOf(cid : number) : number {
 		const h = chapterHeadHCache.value.get(cid)
-		return h != null && h > 0 ? h : rpxToPx(294)
+		if (h != null && h > 0) {
+			return h
+		}
+		// 未实测前按 294rpx 估算：App-Android 用实测页宽换算（与 CSS rpx 同口径），其他端沿用 rpxToPx
+		// #ifdef APP-ANDROID
+		return pageW.value > 0 ? Math.round(pageW.value * 294 / 750) : rpxToPx(294)
+		// #endif
+		// #ifndef APP-ANDROID
+		return rpxToPx(294)
+		// #endif
 	}
 	/** 滚动模式程序滚动位置（绑 :scroll-top，仅切章复位/置底时更新，避免与原生滚动形成反馈循环） */
 	const scrollModeTop = ref(0)
@@ -1495,7 +1600,7 @@
 			texts.push(paras[i].text)
 		}
 		const tailArr = tailCharsOf(cid, paras)
-		const breaks = computePageBreaksMeasured(texts, lines, tailArr, pageH.value, fontSize.value, contentTopPx.value, contentBottomPx.value, headerHeightOf(cid))
+		const breaks = computePageBreaksMeasured(texts, lines, tailArr, pageH.value, fontSize.value, contentTopPx.value, contentBottomPx.value, headerHeightOf(cid), paginationFrameW())
 		// 收集被切断且末行未知的段落（去重）；区间已收敛的直接落定
 		const probes : LayoutProbe[] = []
 		for (let pg = 0; pg < breaks.length; pg++) {
@@ -1655,7 +1760,7 @@
 			for (let i = 0; i < paras.length; i++) {
 				texts.push(paras[i].text)
 			}
-			const layout = buildParaLayout(texts, fontSize.value, fontFamily.value, rpxToPx(0.4), calibWidth.value)
+			const layout = buildParaLayout(texts, fontSize.value, fontFamily.value, bodyLetterSpacingPx(), calibWidth.value)
 			if (layout.lines.length != paras.length) {
 				resolve()
 				return
@@ -1714,6 +1819,10 @@
 						staticLayoutMode = 1
 						staticLayoutAlpha = alpha
 						storeLayout(cid, layout)
+						// 后台逐段行数实测校正（不阻塞展示）：静态断行与真实渲染行数不一致时，该章改走实测行数分页
+						if (scheduleLineCalibration != null) {
+							scheduleLineCalibration!(cid, epoch)
+						}
 						// 章头占位独立实测（resolve 前落定）
 						measureChapterHeader(cid, epoch).then(() : void => {
 							resolve()
@@ -1784,7 +1893,7 @@
 		return measureChain
 	}
 	const perLineEstimate = computed(() : number => {
-		return Math.max(1, Math.floor((bodyW.value - rpxToPx(124)) / fontSize.value))
+		return Math.max(1, Math.floor((bodyW.value - bodySidePaddingPx()) / fontSize.value))
 	})
 	/** 标定文本（约 20 行字数：行数累计放大偏差，ceil 反推可检出 ±1 字/行的差异） */
 	const calibText = computed(() : string => {
@@ -1811,6 +1920,9 @@
 		}).exec()
 	}
 	onReady(() => {
+		// #ifdef APP-ANDROID
+		measurePageBox()
+		// #endif
 		calibratePerLine()
 	})
 	const perLineEffective = computed(() : number => {
@@ -1819,7 +1931,7 @@
 	/** 划词排版度量（TextMetrics 见 utils/readerTypes.uts 共享层，气泡组件随 metrics props 使用同源参数）；perLine 用渲染标定值，与分页引擎同源 */
 	function layoutMetrics() : TextMetrics {
 		const charW = fontSize.value
-		const contentW = bodyW.value - rpxToPx(124)
+		const contentW = bodyW.value - bodySidePaddingPx()
 		const perLine = perLineEffective.value
 		return {
 			perLine: perLine,
@@ -1866,13 +1978,21 @@
 		const layout = paraLayoutCache.value.get(cid)
 		if (layout != null && layout.lines.length == paras.length) {
 			// APP 端引擎级断行（StaticLayout 条件编译）：切断位置即真实行边界
-			return computePageBreaksExact(texts, layout, pageH.value, fontSize.value, staticLayoutAlpha * fontSize.value, contentTopPx.value, contentBottomPx.value, headerHeightOf(cid))
+			// App-Android 正文行高由 CSS line-height:1.7 决定（渲染稳定），用字号×1.7 作为分页行高，
+			// 避免自校准 α 偏大时每页少排 1~3 行、页尾留白；其他端仍用校准值
+			// #ifdef APP-ANDROID
+			const exactLineH = fontSize.value * 1.7
+			// #endif
+			// #ifndef APP-ANDROID
+			const exactLineH = staticLayoutAlpha * fontSize.value
+			// #endif
+			return computePageBreaksExact(texts, layout, pageH.value, fontSize.value, exactLineH, contentTopPx.value, contentBottomPx.value, headerHeightOf(cid), paginationFrameW())
 		}
 		const lines = measuredLinesOf(cid)
 		if (lines != null) {
-			return computePageBreaksMeasured(texts, lines, tailCharsOf(cid, paras), pageH.value, fontSize.value, contentTopPx.value, contentBottomPx.value, headerHeightOf(cid))
+			return computePageBreaksMeasured(texts, lines, tailCharsOf(cid, paras), pageH.value, fontSize.value, contentTopPx.value, contentBottomPx.value, headerHeightOf(cid), paginationFrameW())
 		}
-		return computePageBreaks(texts, perLineEffective.value, pageH.value, fontSize.value, contentTopPx.value, contentBottomPx.value, headerHeightOf(cid))
+		return computePageBreaks(texts, perLineEffective.value, pageH.value, fontSize.value, contentTopPx.value, contentBottomPx.value, headerHeightOf(cid), paginationFrameW())
 	}
 	/** 上一页的章内页索引（章内相邻页；跨章取上一章末页） */
 	const prevPageIndex = computed(() : number => {
@@ -1937,6 +2057,57 @@
 		}
 	}
 	clampPageIndex()
+	/** 逐段行数校正应用：实测行数与静态断行行数一致 → 保留精确断行；不一致 → 丢弃该章静态断行缓存，
+	 *  分页自动改走「实测行数」路径（页尾按真实渲染行数装页，消除底部余白；只在本进程内发生一次重排） */
+	function applyLineCorrection(cid : number, layout : ParaLineLayout, measured : number[]) : void {
+		if (measured.length != layout.lines.length) {
+			return
+		}
+		let diverge = false
+		for (let i = 0; i < measured.length; i = i + 1) {
+			if (layout.lines[i] != measured[i]) {
+				diverge = true
+				break
+			}
+		}
+		if (!diverge) {
+			return
+		}
+		const next : Map<number, ParaLineLayout> = new Map()
+		paraLayoutCache.value.forEach((v : ParaLineLayout, k : number) => {
+			if (k != cid) {
+				next.set(k, v)
+			}
+		})
+		paraLayoutCache.value = next
+		clampPageIndex()
+	}
+	/** 逐段行数实测校正（APP 静态断行路径）：静态断行与 DOM 渲染可能相差 ±1 行/段，导致每页少排 1~3 行；
+	 *  开书/切章展示后后台离屏实测整章每段真实行数（已有缓存直接比对），不一致则该章转实测行数分页 */
+	function calibrateStaticLines(cid : number, epoch : number) : void {
+		const layout = paraLayoutCache.value.get(cid)
+		if (layout == null) {
+			return
+		}
+		const measured = paraLinesCache.value.get(cid)
+		if (measured != null) {
+			applyLineCorrection(cid, layout, measured)
+			return
+		}
+		measureChapterLines(cid, epoch).then(() : void => {
+			if (epoch != layoutEpoch) {
+				return
+			}
+			const m = paraLinesCache.value.get(cid)
+			const l = paraLayoutCache.value.get(cid)
+			if (m != null && l != null) {
+				applyLineCorrection(cid, l, m)
+			}
+		})
+	}
+	scheduleLineCalibration = (cid : number, epoch : number) : void => {
+		calibrateStaticLines(cid, epoch)
+	}
 	/** 注入真实书籍数据（章节目录 + 各章段落正文）并重置阅读位置：本地文件解析完成后调用一次，目录、分页、划线/想法/书签渲染全部基于注入后的数据重建 */
 	function loadBookContent(chs : Chapter[], allParas : string[][]) : void {
 		chapters.value = chs
@@ -1952,6 +2123,10 @@
 		clampPageIndex()
 		// 不在此处 saveProgress：openLocalBook 随后调 restoreProgress 恢复旧进度，
 		// 先写会把重置值 {0,0} 覆盖存储中的真实进度，导致每次打开都回到第一章
+		// #ifdef APP-ANDROID
+		measurePageBox()
+		syncFlipIdle()
+		// #endif
 	}
 	/** 排版失效（字号/字体变化）：实测缓存即时清除（分页先按估算渲染），随后重标定并重测当前章邻域、钳制页码 */
 	function invalidateLayoutMeasure() : void {
@@ -2108,6 +2283,15 @@
 			// #ifndef APP
 			const span = verticalMode ? pageH.value : pageW.value
 			flipOffset.value = Math.min(Math.abs(primary), span)
+			// #endif
+			// #ifdef APP-ANDROID
+			// 原生翻页：首个跟手帧取消上一轮补间并做移动页截取，之后逐帧直接写原生视图
+			if (!flipGesturePrepared) {
+				flipGesturePrepared = true
+				flipNativeCancel()
+				flipNativeBegin(pageTurn.value, dir, pageW.value)
+			}
+			flipNativeFollow(pageTurn.value, dir, flipOffset.value, pageW.value)
 			// #endif
 			return
 		}
@@ -2637,6 +2821,11 @@
 		if (s.theme != themeKey.value) {
 			applyReaderTheme(s.theme)
 		}
+		// #ifdef APP-ANDROID
+		// 翻页方式/字号变化后页层布局重建：页面盒复核 + 原生位移复位 idle（滚动模式下列表已卸载，复位为无操作）
+		measurePageBox()
+		syncFlipIdle()
+		// #endif
 	}
 	/** 应用切章（同步）：进入新章默认首页，回退上一章定位末页；滚动模式复位章节序列与滚动位置。
 	 *  侧层错峰填充 + 首帧渲染落地后收抽屉：切章首帧渲染过程被抽屉收起动画掩盖（见 holdSideLayers） */
@@ -2666,6 +2855,10 @@
 				drawerOpen.value = false
 			}, 50)
 		}
+		// #ifdef APP-ANDROID
+		// 切章后页层内容/存在性变化：原生位移统一复位 idle
+		syncFlipIdle()
+		// #endif
 	}
 	/** 跳转到书签所在章节页并关闭抽屉（ReaderControl 书签卡片点击上行；翻页模式先实测目标章再一次性按实测布局切换；滚动模式把书签页码换算为段落锚点定位视区） */
 	function goToBookmark(bm : Bookmark) : void {
@@ -2921,6 +3114,55 @@
 	function handleGestureEnd(x : number, y : number) : void {
 		const dx = x - touchStartX
 		const dy = y - touchStartY
+		// #ifdef APP-ANDROID
+		// 翻页跟手收尾（原生）：位移过阈值（或快速轻扫）且有目标页时，原生补间到满行程，
+		// 补间结束回调里再切换内容（提交与动画同刻完成，无竞态跳变）
+		if (flipActive.value) {
+			const done = flipOffset.value > pageW.value * 0.35 || Math.abs(dx) > 80
+			const d = flipDir.value
+			const commit = done && flipHasTarget.value
+			flipSettling.value = true
+			flipNativeSettle(pageTurn.value, d, flipOffset.value, pageW.value, commit, () : void => {
+				// 达阈值即翻页（章界无目标页时 flipPage 只给边界提示）；未达阈值仅回弹
+				if (done) {
+					flipPage(d)
+				}
+				flipActive.value = false
+				flipDir.value = 0
+				flipOffset.value = 0
+				flipSettling.value = false
+				flipNativeReset(pageW.value)
+			})
+			return
+		}
+		// 快速水平轻扫（未进入跟手态）：有目标页则走原生整页补间，章界直接提示
+		if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 2) {
+			const d = dx < 0 ? 1 : -1
+			const canFlip = d == 1 ? hasNextPage.value : hasPrevPage.value
+			if (!canFlip) {
+				flipPage(d)
+				settlePull()
+				return
+			}
+			flipActive.value = true
+			flipDir.value = d
+			flipOffset.value = 0
+			flipSettling.value = true
+			flipNativeCancel()
+			flipNativeBegin(pageTurn.value, d, pageW.value)
+			flipNativeSettle(pageTurn.value, d, 0, pageW.value, true, () : void => {
+				flipPage(d)
+				flipActive.value = false
+				flipDir.value = 0
+				flipOffset.value = 0
+				flipSettling.value = false
+				flipNativeReset(pageW.value)
+			})
+			settlePull()
+			return
+		}
+		// #endif
+		// #ifndef APP-ANDROID
 		// 翻页跟手收尾：位移过阈值（或快速轻扫）且有目标页时，先补间到满行程再切换内容；否则回弹归位
 		if (flipActive.value) {
 			const done = flipOffset.value > pageW.value * 0.35 || Math.abs(dx) > 80
@@ -2957,6 +3199,7 @@
 			settlePull()
 			return
 		}
+		// #endif
 		const vertical = dy > 40 && dy > Math.abs(dx) * 1.5
 		// 下拉态松手：仍拉起则落定（添加/移除书签，增删/持久化在控制框组件内），否则为取消——两者均回弹归位
 		if (pullState.value == 'adding') {
@@ -3100,6 +3343,10 @@
 		document.removeEventListener('visibilitychange', onWebVisibilityChange)
 		window.removeEventListener('pagehide', onWebPageHide)
 		// #endif
+		// #ifdef APP-ANDROID
+		// 原生翻页引擎释放（作废定时器/动画、恢复被隐藏页层、释放卷曲位图引用）
+		flipNativeDispose()
+		// #endif
 		saveProgress()
 		recordReadingSession()
 	})
@@ -3188,8 +3435,20 @@
 		transition: opacity 0.28s cubic-bezier(0.16, 1, 0.3, 1);
 	}
 
-	/* #ifdef APP */
-	/* 仿真卷曲（APP 端真实实现）：前缘卷起纸筒弧面，横跨页面全高，左右缘随翻页方向切换 */
+	/* #ifdef APP-ANDROID */
+	/* 仿真卷曲浮层：原生引擎在此写入位图背景（绝对铺满页堆叠、位于页层之上；无事件绑定故不拦截触摸） */
+	.flip-curl-overlay {
+		position: absolute;
+		left: 0;
+		right: 0;
+		top: 0;
+		bottom: 0;
+		z-index: 5;
+	}
+	/* #endif */
+
+	/* #ifdef APP-IOS || APP-HARMONY */
+	/* 仿真卷曲（iOS/Harmony 走 CSS 管线）：前缘卷起纸筒弧面，横跨页面全高，左右缘随翻页方向切换 */
 	.page-curl-roller {
 		position: absolute;
 		top: 0;

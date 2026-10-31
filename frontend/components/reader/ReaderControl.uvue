@@ -122,6 +122,8 @@
 		activeChapterId: number
 		/** 想法/划线记录卡片列表（宿主按划线/想法本地存储派生） */
 		notes: NoteRecord[]
+		/** 顶栏内容行高（px）：宿主按实测页宽换算后下行（基座 windowWidth 可能恒为 0，宿主实测值更可靠；0=组件自算） */
+		navRowPx: number
 	}>()
 
 	/** 当前章标题（由目录列表与当前章 id 派生，顶栏书名下方展示；未命中为空串不占位） */
@@ -158,10 +160,12 @@
 		return readerThemeIcon(name, nightMode.value)
 	}
 
-	/** 顶部导航内容行（px）：与小程序胶囊同行对齐（状态栏高度起；行高共用 navRowHeightPx——
-	 *  宽窗口下 rpx 书名/章名两行会超过固定 40px，越界被原生端裁剪） */
+	/** 顶部导航内容行（px）：与小程序胶囊同行对齐（状态栏高度起；行高优先取宿主实测值 navRowPx，
+	 *  基座 windowWidth 恒为 0 时组件自算的 navRowHeightPx 会退化为 40px 下限，rpx 书名/章名会被裁剪） */
 	const navTop = ref(44)
-	const navHeight = ref(navRowHeightPx())
+	const navHeight = computed(() : number => {
+		return props.navRowPx > 0 ? props.navRowPx : navRowHeightPx()
+	})
 	/** 目录抽屉高度（px）：固定为页面高度的三分之二（UTS script setup 顶层不支持裸块语句） */
 	const drawerPanelHeight = ref(500)
 	const winInfo = uni.getWindowInfo()

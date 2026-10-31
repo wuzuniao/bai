@@ -1,0 +1,614 @@
+/**
+ * 阅读页原生翻页引擎（仅 APP-ANDROID）
+ * --------------------------------------------------------------------------
+ * 背景：vdom 引擎下分页翻页依赖 CSS transform/transition，大字号重页面跟手/落定
+ * 掉帧，且用固定 300ms 定时器切换内容会与过渡竞态（跳变/漏翻/卡住）。
+ * 方案：按模板 id 取原生 ViewGroup（UniElement.getAndroidView，vdom Android 4.25+）：
+ * - 跟手/落定：直接 setTranslationX 或 ViewPropertyAnimator（原生属性动画）驱动；
+ *   定时器到点仅做状态提交，提交前以 token 防竞态（新手势/卸载即作废旧动画）；
+ * - 仿真：截取移动页位图（View.draw → Bitmap），用 Canvas 逐条带变形绘制卷曲 +
+ *   折缝阴影，经浮层 view 的原生 background(BitmapDrawable) 呈现；
+ * - 覆盖：原生 alpha 暗化「被覆盖的当前页」（前翻/回翻同口径）。
+ * 模板契约 id：flip-layer-current / flip-layer-prev / flip-layer-next /
+ * flip-cover-mask / flip-curl-overlay（改名须同步本文件与 reader 模板）。
+ * 其他端（小程序 / H5 / iOS）不导入本文件，保持原 CSS 实现不变。
+ */
+// #ifdef APP-ANDROID
+import View from 'android.view.View'
+import ViewGroup from 'android.view.ViewGroup'
+import Bitmap from 'android.graphics.Bitmap'
+import Canvas from 'android.graphics.Canvas'
+import Paint from 'android.graphics.Paint'
+import Rect from 'android.graphics.Rect'
+import RectF from 'android.graphics.RectF'
+import Color from 'android.graphics.Color'
+import DisplayMetrics from 'android.util.DisplayMetrics'
+import BitmapDrawable from 'android.graphics.drawable.BitmapDrawable'
+import PathInterpolator from 'android.view.animation.PathInterpolator'
+
+/** 翻页图层/遮罩/卷曲浮层的模板 id（模板改名须同步） */
+const LAYER_CURRENT_ID = 'flip-layer-current'
+const LAYER_PREV_ID = 'flip-layer-prev'
+const LAYER_NEXT_ID = 'flip-layer-next'
+const MASK_ID = 'flip-cover-mask'
+const OVERLAY_ID = 'flip-curl-overlay'
+
+/** 落定补间时长（ms）：与 CSS 版 0.28s 同节奏；状态提交定时器再多 20ms 余量 */
+const SETTLE_MS = 280
+const COMMIT_DELAY_MS = 300
+/** 卷曲圆柱半径（原生 px，按页宽比例兜底）与条带数 */
+const CURL_RADIUS_MIN = 24
+const CURL_RADIUS_RATIO = 0.075
+const CURL_SLICES = 20
+
+/** 回弹/落定补间曲线（对齐 CSS cubic-bezier(0.16,1,0.3,1)） */
+const SETTLE_CURVE = new PathInterpolator(0.16.toFloat(), 1.0.toFloat(), 0.3.toFloat(), 1.0.toFloat())
+
+/** 三个页层与浮层的原生视图（按调用时惰性解析；v-if 重建后自动取到新实例） */
+let curView : ViewGroup | null = null
+let prevView : ViewGroup | null = null
+let nextView : ViewGroup | null = null
+let overlayView : ViewGroup | null = null
+/** 卷曲期间被隐藏的真实移动页（浮层位图代替其显示） */
+let hiddenView : ViewGroup | null = null
+/** 卷曲位图与绘制资源（按页尺寸复用，尺寸变化时重建） */
+let srcBmp : Bitmap | null = null
+let dstBmp : Bitmap | null = null
+let srcCanvas : Canvas | null = null
+let dstCanvas : Canvas | null = null
+let bmpPaint : Paint | null = null
+let shadePaint : Paint | null = null
+let bmpW = 0
+let bmpH = 0
+/** 复用绘制矩形（避免逐帧分配） */
+const srcRect = new Rect(0, 0, 1, 1)
+const dstRect = new RectF()
+const shadeRect = new RectF()
+/** 卷曲状态与动画令牌（令牌变化即作废旧定时器回调） */
+let curlOn = false
+let curlDir = 1
+let token = 0
+let settleTimer = -1
+/** 回翻落定后浮层延迟隐藏（位图与新当前页同源，避免内容切换闪帧）；期间 reset 不得提前隐藏 */
+let holdOverlay = false
+
+/** 卷曲期间的纸面底色（取自源位图页边像素，背面折叠块用纯色纸面，避免镜像文字造成叠字观感） */
+let paperColor = 0
+
+/** 模板 id → 原生 ViewGroup（未挂载/非 view 组件返回 null） */
+function nativeViewById(id : string) : ViewGroup | null {
+	const el = uni.getElementById(id)
+	return el == null ? null : el.getAndroidView<ViewGroup>()
+}
+
+/** 解析当前三页层与浮层（每次调用重取，v-if 重建后仍指向最新实例） */
+function resolveLayers() : void {
+	curView = nativeViewById(LAYER_CURRENT_ID)
+	prevView = nativeViewById(LAYER_PREV_ID)
+	nextView = nativeViewById(LAYER_NEXT_ID)
+	overlayView = nativeViewById(OVERLAY_ID)
+}
+
+/** 页层原生宽度（px）：当前页优先，缺失时取相邻页层 */
+function layerWidth() : number {
+	const c = curView
+	if (c != null) {
+		const w = c.getWidth()
+		if (w > 0) {
+			return w
+		}
+	}
+	const n = nextView
+	if (n != null) {
+		const w = n.getWidth()
+		if (w > 0) {
+			return w
+		}
+	}
+	const p = prevView
+	if (p != null) {
+		const w = p.getWidth()
+		if (w > 0) {
+			return w
+		}
+	}
+	return 0
+}
+
+/** 设置原生水平位移（px） */
+function setTx(v : ViewGroup | null, x : number) : void {
+	if (v == null) {
+		return
+	}
+	v.setTranslationX(x.toFloat())
+}
+
+/** 原生属性动画补间到目标位移（不可用视图时静默跳过） */
+function animateTx(v : ViewGroup | null, x : number) : void {
+	if (v == null) {
+		return
+	}
+	v.animate().translationX(x.toFloat()).setDuration(SETTLE_MS.toLong()).setInterpolator(SETTLE_CURVE).start()
+}
+
+/** 覆盖遮罩透明度原生补间（落定/回弹均回零，遮罩随即随 flipDir 复位卸载） */
+function animateMask(alpha : number) : void {
+	const m = nativeViewById(MASK_ID)
+	if (m == null) {
+		return
+	}
+	m.animate().alpha(alpha.toFloat()).setDuration(SETTLE_MS.toLong()).setInterpolator(SETTLE_CURVE).start()
+}
+
+/** 覆盖模式跟手遮罩：暗化被覆盖的当前页，透明度=已覆盖比例 */
+function applyCoverMask(offN : number, w : number) : void {
+	const m = nativeViewById(MASK_ID)
+	if (m == null || w <= 0) {
+		return
+	}
+	m.setAlpha(Math.min(1.0, offN / w).toFloat())
+}
+
+/** 释放卷曲位图与绘制资源（模块单例持引用；置空后由 GC 回收原生内存） */
+function releaseBitmaps() : void {
+	srcBmp = null
+	dstBmp = null
+	srcCanvas = null
+	dstCanvas = null
+	bmpPaint = null
+	shadePaint = null
+	bmpW = 0
+	bmpH = 0
+}
+
+/** 按页尺寸准备位图（尺寸不变复用；返回是否可用） */
+function ensureBitmaps(w : number, h : number) : boolean {
+	if (srcBmp != null && dstBmp != null && bmpW == w && bmpH == h) {
+		return true
+	}
+	releaseBitmaps()
+	const src = Bitmap.createBitmap(w.toInt(), h.toInt(), Bitmap.Config.ARGB_8888)
+	const dst = Bitmap.createBitmap(w.toInt(), h.toInt(), Bitmap.Config.ARGB_8888)
+	if (src == null || dst == null) {
+		return false
+	}
+	srcBmp = src
+	dstBmp = dst
+	srcCanvas = new Canvas(src)
+	dstCanvas = new Canvas(dst)
+	const bp = new Paint()
+	bp.setAntiAlias(true)
+	bp.setFilterBitmap(true)
+	bmpPaint = bp
+	const sp = new Paint()
+	sp.setAntiAlias(true)
+	shadePaint = sp
+	bmpW = w
+	bmpH = h
+	return true
+}
+
+/** 恢复被卷曲隐藏的真实页层 */
+function restoreHidden() : void {
+	const v = hiddenView
+	if (v != null) {
+		v.setAlpha(1.0.toFloat())
+	}
+	hiddenView = null
+}
+
+/** 隐藏卷曲浮层（回翻落定后的保持期由 holdOverlay 拦截） */
+function hideOverlay() : void {
+	if (holdOverlay) {
+		return
+	}
+	const ov = overlayView
+	if (ov != null) {
+		ov.setVisibility(View.INVISIBLE)
+	}
+}
+
+/** 绘制单条卷曲带：源条带 → 屏幕投影（θ 越过 π/2 后镜像为纸张背面）+ 背光渐变 */
+function drawCurlSlice(canvas : Canvas, bmp : Bitmap, bp : Paint, sp : Paint, sx0 : number, sx1 : number, dx0 : number, dx1 : number, h : number, theta : number, thetaMax : number) : void {
+	const sl = Math.min(sx0, sx1)
+	const sr = Math.max(sx0, sx1)
+	if (sr - sl < 1.0) {
+		return
+	}
+	const dl = Math.min(dx0, dx1)
+	const dw = Math.abs(dx1 - dx0)
+	if (dw < 0.5) {
+		return
+	}
+	srcRect.set(Math.round(sl).toInt(), 0, Math.round(sr).toInt(), h.toInt())
+	dstRect.set(0.0.toFloat(), 0.0.toFloat(), dw.toFloat(), h.toFloat())
+	// 源条带与投影条带方向不一致时镜像绘制（纸张背面）
+	const mirror = (sx1 >= sx0) != (dx1 >= dx0)
+	canvas.save()
+	if (mirror) {
+		// 背面（θ 越过 π/2）：以纸面纯色填充卷曲带，不绘镜像正文（避免正反文字叠影）
+		dstRect.set(dl.toFloat(), 0.0.toFloat(), (dl + dw).toFloat(), h.toFloat())
+		sp.setColor(paperColor.toInt())
+		canvas.drawRect(dstRect, sp)
+	} else {
+		canvas.translate(dl.toFloat(), 0.0.toFloat())
+		dstRect.set(0.0.toFloat(), 0.0.toFloat(), dw.toFloat(), h.toFloat())
+		canvas.drawBitmap(bmp, srcRect, dstRect, bp)
+	}
+	canvas.restore()
+	// 背光：折缝处最深、向卷曲前缘变浅
+	const ratio = thetaMax > 0 ? Math.min(1.0, theta / thetaMax) : 0.0
+	const alpha = Math.round(80.0 * (1.0 - ratio)) + 10
+	shadeRect.set(dl.toFloat(), 0.0.toFloat(), (dl + dw).toFloat(), h.toFloat())
+	sp.setColor(Color.argb(Math.min(160, alpha).toInt(), 0, 0, 0))
+	canvas.drawRect(shadeRect, sp)
+}
+
+/** 绘制折缝投在静态底页上的暗带（三段递减） */
+function drawCurlShadow(canvas : Canvas, sp : Paint, fold : number, radius : number, h : number) : void {
+	for (let i = 0; i < 3; i = i + 1) {
+		const x0 = fold + radius * (i + 1) / 3.0
+		const x1 = fold + radius * (i + 2) / 3.0
+		shadeRect.set(x0.toFloat(), 0.0.toFloat(), x1.toFloat(), h.toFloat())
+		sp.setColor(Color.argb((40 - i * 12).toInt(), 0, 0, 0))
+		canvas.drawRect(shadeRect, sp)
+	}
+}
+
+/**
+ * 绘制当前卷曲帧：
+ * - 前翻：当前页右缘卷起，平铺源 [0,fold]、卷曲源 [fold,fold+Rθ]，露出下层下一页；
+ * - 回翻：上一页右段平铺（源 [w-fold,w] → 屏幕 [0,fold]），隐藏左段（源 [0,w-fold]）卷起。
+ */
+function renderCurl(dir : number, offset : number, pageW : number) : void {
+	const canvas = dstCanvas
+	const bmp = srcBmp
+	const dst = dstBmp
+	const bp = bmpPaint
+	const sp = shadePaint
+	if (!curlOn || canvas == null || bmp == null || dst == null || bp == null || sp == null || pageW <= 0 || bmpW <= 0) {
+		return
+	}
+	const wf = bmpW * 1.0
+	const h = bmpH
+	const offN = Math.min(wf, Math.max(0.0, offset * bmpW / pageW))
+	dst.eraseColor(Color.TRANSPARENT)
+	const radius = Math.max(CURL_RADIUS_MIN * 1.0, Math.round(bmpW * CURL_RADIUS_RATIO) * 1.0)
+	const fold = dir == 1 ? wf - offN : offN
+	const remain = wf - fold
+	const thetaMax = Math.min(Math.PI, remain / radius)
+	// 前翻折缝抵达左缘（翻页完成帧）：整页已翻出屏幕，保持浮层全透明（露出下层新页）。
+	// 若继续按条带绘制，θ 越过 π/2 的背面条带会在左缘残留一条纸色竖带，造成「页面未覆盖全屏」与落定跳变。
+	if (dir == 1 && fold < 1.0) {
+		return
+	}
+	// 平铺段
+	if (fold > 1.0) {
+		if (dir == 1) {
+			srcRect.set(0, 0, Math.round(fold).toInt(), h.toInt())
+			dstRect.set(0.0.toFloat(), 0.0.toFloat(), fold.toFloat(), h.toFloat())
+		} else {
+			srcRect.set(Math.round(wf - fold).toInt(), 0, bmpW.toInt(), h.toInt())
+			dstRect.set(0.0.toFloat(), 0.0.toFloat(), fold.toFloat(), h.toFloat())
+		}
+		canvas.drawBitmap(bmp, srcRect, dstRect, bp)
+	}
+	// 卷曲条带（前翻源自折缝向右、回翻源自折缝向左，均向折缝外卷起）；
+	// 前翻折缝贴近左缘时不再画背面条带：θ 越过 π/2 的纸色条带会残留在左缘，
+	// 观感上像「页面未覆盖左边缘」，提前一帧让位给下层新页更平滑
+	const stripsVisible = !(dir == 1 && fold < radius * 0.8)
+	if (stripsVisible) {
+		for (let j = 0; j < CURL_SLICES; j = j + 1) {
+			const t0 = thetaMax * j / CURL_SLICES
+			const t1 = thetaMax * (j + 1) / CURL_SLICES
+			const sx0 = dir == 1 ? fold + radius * t0 : wf - fold - radius * t0
+			const sx1 = dir == 1 ? fold + radius * t1 : wf - fold - radius * t1
+			const dx0 = fold + radius * Math.sin(t0)
+			const dx1 = fold + radius * Math.sin(t1)
+			drawCurlSlice(canvas, bmp, bp, sp, sx0, sx1, dx0, dx1, h, t0, thetaMax)
+		}
+		drawCurlShadow(canvas, sp, fold, radius, h)
+	}
+	const ov = overlayView
+	if (ov != null) {
+		ov.invalidate()
+	}
+}
+
+/** 提交帧快照：把目标页当前画面画入浮层位图，覆盖「内容切换 + 原生复位」之间的空档帧
+ *  （否则落定瞬间旧层/新层位移互换会出现一帧错位或旧页闪回，肉眼即跳变） */
+function snapshotTargetToOverlay(target : ViewGroup | null) : boolean {
+	const ov = overlayView
+	if (ov == null || target == null) {
+		return false
+	}
+	const w = target.getWidth()
+	const h = target.getHeight()
+	if (w <= 0 || h <= 0 || !ensureBitmaps(w, h)) {
+		return false
+	}
+	const dst = dstBmp
+	const canvas = dstCanvas
+	if (dst == null || canvas == null) {
+		return false
+	}
+	dst.eraseColor(Color.TRANSPARENT)
+	target.draw(canvas)
+	const dm = ov.getResources().getDisplayMetrics()
+	dst.setDensity(dm.densityDpi)
+	ov.setBackground(new BitmapDrawable(ov.getResources(), dst))
+	ov.setVisibility(View.VISIBLE)
+	return true
+}
+
+/** 提交保持：done 后浮层再保持一小段（覆盖 Vue 内容重建与原生 idle 复位），完成后才隐藏 */
+function commitWithHold(done : () => void) : void {
+	holdOverlay = true
+	done()
+	setTimeout(() : void => {
+		holdOverlay = false
+		hideOverlay()
+	}, 120)
+}
+
+/** 卷曲落定：提交时保持终帧位图（前翻终帧全透明，需用目标页快照补位），回翻终帧即整页上一页 */
+function finishCurl(commit : boolean, done : () => void) : void {
+	const reverse = curlDir == -1
+	curlOn = false
+	restoreHidden()
+	if (!commit) {
+		hideOverlay()
+		done()
+		return
+	}
+	if (!reverse) {
+		snapshotTargetToOverlay(nextView)
+	}
+	commitWithHold(done)
+}
+
+/** 卷曲补间单帧推进（模块级递归：UTS 局部函数不能被箭头回调引用，故提到模块层） */
+function runCurlTick(myToken : number, dir : number, from : number, to : number, pageW : number, start : number, commit : boolean, done : () => void) : void {
+	if (myToken != token) {
+		return
+	}
+	const t = Math.min(1.0, (Date.now() - start) / SETTLE_MS)
+	const e = 1.0 - (1.0 - t) * (1.0 - t) * (1.0 - t)
+	renderCurl(dir, from + (to - from) * e, pageW)
+	if (t < 1.0) {
+		settleTimer = setTimeout(() : void => {
+			runCurlTick(myToken, dir, from, to, pageW, start, commit, done)
+		}, 16)
+		return
+	}
+	settleTimer = -1
+	finishCurl(commit, done)
+}
+
+/** 卷曲结算补间：JS 步进驱动原生 Canvas 绘制（缓动 ease-out-cubic，token 防竞态） */
+function startCurlSettle(myToken : number, dir : number, from : number, pageW : number, commit : boolean, done : () => void) : void {
+	const to = commit ? pageW : 0
+	const start = Date.now()
+	runCurlTick(myToken, dir, from, to, pageW, start, commit, done)
+}
+
+/** 手势开始（仿真模式截取移动页并显示卷曲浮层；其他模式仅解析视图） */
+export function flipNativeBegin(mode : string, dir : number, pageW : number) : void {
+	if (mode != '仿真') {
+		return
+	}
+	resolveLayers()
+	const ov = overlayView
+	const moving = dir == 1 ? curView : prevView
+	if (ov == null || moving == null) {
+		curlOn = false
+		return
+	}
+	const w = moving.getWidth()
+	const h = moving.getHeight()
+	if (w <= 0 || h <= 0 || !ensureBitmaps(w, h)) {
+		curlOn = false
+		return
+	}
+	const dst = dstBmp
+	if (dst == null) {
+		curlOn = false
+		return
+	}
+	holdOverlay = false
+	restoreHidden()
+	// 静态底页（前翻=下一页 / 回翻=当前页）置于原位，卷曲部分露出
+	if (dir == 1) {
+		setTx(curView, 0)
+		setTx(nextView, 0)
+	} else {
+		setTx(curView, 0)
+	}
+	// 截取移动页整页位图（View.draw 不受自身 translation 影响）
+	const src = srcBmp
+	const sc = srcCanvas
+	if (src == null || sc == null) {
+		curlOn = false
+		return
+	}
+	// 位图密度与屏幕一致，BitmapDrawable 按 1:1 绘制（否则按资源密度缩放导致卷曲带错位/文字放大）
+	const dm = ov.getResources().getDisplayMetrics()
+	src.setDensity(dm.densityDpi)
+	dst.setDensity(dm.densityDpi)
+	src.eraseColor(Color.TRANSPARENT)
+	moving.draw(sc)
+	// 页边像素取纸面底色（背面折叠块纯色填充）
+	paperColor = src.getPixel(Math.max(1, w / 2).toInt(), 8)
+	// 真实移动页隐藏，由浮层位图代替显示
+	moving.setAlpha(0.0.toFloat())
+	hiddenView = moving
+	curlDir = dir
+	curlOn = true
+	ov.setBackground(new BitmapDrawable(ov.getResources(), dst))
+	ov.setVisibility(View.VISIBLE)
+	renderCurl(dir, 0, pageW)
+}
+
+/** 跟手：按模式直接写原生位移/遮罩/卷曲帧（不触发 Vue 重渲染） */
+export function flipNativeFollow(mode : string, dir : number, offset : number, pageW : number) : void {
+	resolveLayers()
+	const w = layerWidth()
+	if (w <= 0 || pageW <= 0) {
+		return
+	}
+	const wf = w * 1.0
+	const offN = Math.min(wf, Math.max(0.0, offset * wf / pageW))
+	if (mode == '仿真') {
+		if (curlOn) {
+			renderCurl(dir, offset, pageW)
+		} else {
+			// 位图不可用（无浮层/取视图失败）：回落覆盖式滑入，保证翻页可用
+			setTx(curView, 0)
+			if (dir == 1) {
+				setTx(nextView, wf - offN)
+			} else {
+				setTx(prevView, 0.0 - (wf - offN))
+			}
+		}
+		return
+	}
+	if (mode == '覆盖') {
+		// 当前页静置，目标页滑入覆盖；遮罩暗化被覆盖的当前页
+		setTx(curView, 0)
+		if (dir == 1) {
+			setTx(nextView, wf - offN)
+		} else {
+			setTx(prevView, 0.0 - (wf - offN))
+		}
+		applyCoverMask(offN, w)
+		return
+	}
+	// 平移：当前页与目标页同步滑动（窗口平移）
+	setTx(curView, dir == 1 ? 0.0 - offN : offN)
+	if (dir == 1) {
+		setTx(nextView, wf - offN)
+	} else {
+		setTx(prevView, 0.0 - (wf - offN))
+	}
+}
+
+/**
+ * 落定/回弹补间（原生）：commit=true 时目标页补间到原位、当前页退出；
+ * commit=false 时两者回弹归位。补间结束后回调宿主做内容切换与状态复位。
+ */
+export function flipNativeSettle(mode : string, dir : number, offset : number, pageW : number, commit : boolean, done : () => void) : void {
+	token = token + 1
+	const myToken = token
+	holdOverlay = false
+	resolveLayers()
+	if (mode == '仿真' && curlOn) {
+		startCurlSettle(myToken, dir, offset, pageW, commit, done)
+		return
+	}
+	const curlFallback = mode == '仿真' && !curlOn
+	flipNativeFollow(mode, dir, offset, pageW)
+	const w = layerWidth()
+	if (w <= 0) {
+		// 视图暂不可用（布局未就绪）：下一轮直接提交，保持交互可用
+		settleTimer = setTimeout(() : void => {
+			if (myToken != token) {
+				return
+			}
+			settleTimer = -1
+			done()
+		}, 0)
+		return
+	}
+	const incoming = dir == 1 ? nextView : prevView
+	const wf = w * 1.0
+	if (mode == '覆盖' || curlFallback) {
+		animateTx(incoming, commit ? 0.0 : (dir == 1 ? wf : 0.0 - wf))
+		animateTx(curView, 0.0)
+		animateMask(0.0)
+	} else {
+		animateTx(curView, commit ? (dir == 1 ? 0.0 - wf : wf) : 0.0)
+		animateTx(incoming, commit ? 0.0 : (dir == 1 ? wf : 0.0 - wf))
+	}
+	settleTimer = setTimeout(() : void => {
+		if (myToken != token) {
+			return
+		}
+		settleTimer = -1
+		if (commit) {
+			// 提交帧：先用目标页快照撑住，再切换内容与复位，避免落定瞬间错位/旧页闪回
+			snapshotTargetToOverlay(incoming)
+			commitWithHold(done)
+			return
+		}
+		done()
+	}, COMMIT_DELAY_MS)
+}
+
+/** 取消进行中的原生补间与定时器（新手势接管时调用） */
+export function flipNativeCancel() : void {
+	token = token + 1
+	if (settleTimer >= 0) {
+		clearTimeout(settleTimer)
+		settleTimer = -1
+	}
+	const seq = [curView, prevView, nextView]
+	for (let i = 0; i < seq.length; i = i + 1) {
+		const v = seq[i]
+		if (v != null) {
+			v.animate().cancel()
+		}
+	}
+}
+
+/** 复位为 idle 布局（原生位移与模板静态 CSS 位移同值；调用后原生状态为唯一真源） */
+export function flipNativeReset(pageW : number) : void {
+	token = token + 1
+	if (settleTimer >= 0) {
+		clearTimeout(settleTimer)
+		settleTimer = -1
+	}
+	curlOn = false
+	restoreHidden()
+	resolveLayers()
+	const w = layerWidth()
+	const idle = w > 0 ? w : pageW
+	// 进行中的属性动画先取消，再落到 idle 值
+	const seq = [curView, prevView, nextView]
+	for (let i = 0; i < seq.length; i = i + 1) {
+		const v = seq[i]
+		if (v != null) {
+			v.animate().cancel()
+		}
+	}
+	setTx(curView, 0)
+	setTx(prevView, -idle)
+	setTx(nextView, idle)
+	const m = nativeViewById(MASK_ID)
+	if (m != null) {
+		m.setAlpha(0.0.toFloat())
+	}
+	hideOverlay()
+}
+
+/** 页面卸载：作废定时器/动画、恢复被隐藏页层、释放位图引用（浮层随页面销毁不再绘制） */
+export function flipNativeDispose() : void {
+	token = token + 1
+	if (settleTimer >= 0) {
+		clearTimeout(settleTimer)
+		settleTimer = -1
+	}
+	holdOverlay = false
+	curlOn = false
+	restoreHidden()
+	resolveLayers()
+	const ov = overlayView
+	if (ov != null) {
+		ov.setVisibility(View.INVISIBLE)
+	}
+	releaseBitmaps()
+	curView = null
+	prevView = null
+	nextView = null
+	overlayView = null
+}
+// #endif
