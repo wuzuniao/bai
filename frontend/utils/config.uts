@@ -2,24 +2,56 @@
  * 环境配置常量（用户模块唯一取值处）
  *
  * 为什么不用 .env / import.meta.env：HBuilderX 内置编译器不加载 .env 文件，
- * 与 yao 项目同源原因，改用常量模块 + 条件编译区分开发与生产环境。
+ * 与 yao / jin 项目同源原因，改用常量模块 + 条件编译区分开发与生产环境。
  * 本文件提交 Git，不得写入密码、密钥等敏感信息（域名与 client_id 属公开信息）。
+ *
+ * App 端联调注意（与 jin 项目同口径）：模拟器内 localhost/127.0.0.1 指向模拟器自身，
+ * 连不到宿主机服务，故开发地址按平台分档：
+ * - APP-HARMONY（DevEco 模拟器）：用宿主机网关别名 10.0.2.2（华为模拟器网络口径）；
+ * - APP-ANDROID（雷电模拟器，VirtualBox 架构，实测网段 172.16.1.0/24）：用 172.16.1.2，
+ *   10.0.2.2 在雷电内不可达（实测 100% 丢包）；改用安卓 AVD 时须换回 10.0.2.2；
+ * - 其余端（H5 / 小程序 / iOS）走本机回环，localhost 可用。
+ * 真机联调时改为开发机局域网 IP（DCloud 标准基座放行明文 HTTP，自定义基座/正式包禁明文须走 HTTPS）。
  */
 
 // auth 统一认证服务基础地址（登录/注册/资料等用户接口直连此域名，本项目后端不转发）。
-// 发行（production）走生产 HTTPS 域名；开发（运行）连本地认证服务。
+// 发行（production）走生产 HTTPS 域名；开发（运行）按平台连本地认证服务（11000）。
+// #ifdef APP-ANDROID
+export const AUTH_BASE_URL: string = process.env.NODE_ENV === 'production'
+	? 'https://auth.wuzuniao.com'
+	: 'http://172.16.1.2:11000'
+// #endif
+// #ifdef APP-HARMONY
+export const AUTH_BASE_URL: string = process.env.NODE_ENV === 'production'
+	? 'https://auth.wuzuniao.com'
+	: 'http://10.0.2.2:11000'
+// #endif
+// #ifndef APP-ANDROID || APP-HARMONY
 export const AUTH_BASE_URL: string = process.env.NODE_ENV === 'production'
 	? 'https://auth.wuzuniao.com'
 	: 'http://localhost:11000'
+// #endif
 
 // OIDC 接入方 client_id（本应用在 auth 服务 oauth_clients 表注册的公共 client）
 export const AUTH_CLIENT_ID: string = 'bai'
 
 // 本项目业务后端基础地址（书架/阅读元数据/偏好直连此域名，需携带登录令牌）。
-// 发行（production）走生产 HTTPS 域名；开发（运行）连本地后端（11001）。
+// 发行（production）走生产 HTTPS 域名；开发（运行）按平台连本地后端（11001）。
+// #ifdef APP-ANDROID
+export const API_BASE_URL: string = process.env.NODE_ENV === 'production'
+	? 'https://bai.wuzuniao.com'
+	: 'http://172.16.1.2:11001'
+// #endif
+// #ifdef APP-HARMONY
+export const API_BASE_URL: string = process.env.NODE_ENV === 'production'
+	? 'https://bai.wuzuniao.com'
+	: 'http://10.0.2.2:11001'
+// #endif
+// #ifndef APP-ANDROID || APP-HARMONY
 export const API_BASE_URL: string = process.env.NODE_ENV === 'production'
 	? 'https://bai.wuzuniao.com'
 	: 'http://localhost:11001'
+// #endif
 
 // 微信小程序 appid（与 manifest.json mp-weixin.appid 一致；appid 为公开信息）
 // 微信一键登录 wx.login() 的 code 与本 appid 绑定，请求认证服务时须显式携带，
