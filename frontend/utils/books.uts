@@ -330,14 +330,16 @@ export function saveBookProgress(bookId : number, p : BookProgress) : void {
 	if (i < 0) {
 		return
 	}
+	// 原生 scroll-view 的 scrollTop 可为小数（Android 实测 1514.6666），云端进度字段为整型，本地与云端统一取整防上行 422
+	const top = Math.round(p.scrollTop)
 	list[i].lastChapter = p.chapterId
 	list[i].lastPageIndex = p.pageIndex
-	list[i].lastScrollTop = p.scrollTop
+	list[i].lastScrollTop = top
 	saveBooks(list)
 	const fields = {} as UTSJSONObject
 	fields['last_chapter'] = p.chapterId
 	fields['last_page_index'] = p.pageIndex
-	fields['last_scroll_top'] = p.scrollTop
+	fields['last_scroll_top'] = top
 	syncQuiet(updateBookProgress(bookId, fields))
 }
 

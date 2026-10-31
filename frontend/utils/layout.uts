@@ -32,6 +32,22 @@ export function rpxToPx(rpx : number) : number {
 	return rpx * Math.min(win.windowWidth, 750) / 750
 }
 
+/**
+ * 阅读页顶栏内容行高（px）：80rpx（750 基准下即设计值 40px）与 40px 下限取大。
+ * 书名/章名两行文字随屏宽用 rpx 放大，宽窗口（如平板/大屏模拟器）下固定 40px 行高装不下，
+ * 子元素越界会被 App/小程序原生端裁剪（章名底部被截断），故行高需与 rpx 同口径缩放。
+ * ReaderControl 顶栏与 reader 页内容顶偏移共用本值（跨文件口径只此处定义）。
+ * Web 端不裁剪越界文本，维持既有 40px 行高，避免改变 H5 顶栏视觉。
+ */
+export function navRowHeightPx() : number {
+	// #ifdef WEB
+	return 40
+	// #endif
+	// #ifndef WEB
+	return Math.max(40, rpxToPx(80))
+	// #endif
+}
+
 // 共享类型抽离到 layout.ts：UTS 编译器对 type-only 导入会改写为 *.ts 路径（HBuilderX 5.33），
 // 类型留在 .uts 会报“未导出”。本文件导入供内部使用并再导出给调用方。
 import type { CapsuleRect } from './layoutDefs.ts'

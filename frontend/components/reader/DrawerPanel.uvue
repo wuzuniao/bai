@@ -6,7 +6,7 @@
 		<view class="drawer-header">
 			<view class="drawer-tab-gap" :class="drawerTab === 'catalog' ? 'drawer-tab-active' : ''" @click="switchDrawerTab('catalog')">
 				<text :class="drawerTab === 'catalog' ? 'drawer-tab-title' : 'drawer-tab-plain'">{{ t('readercomp.tabCatalog') }}</text>
-				<text v-if="drawerTab === 'catalog'" class="drawer-tab-sort" @click="onSortTap">{{ orderDesc ? '↓↑' : '⇅' }}</text>
+				<text v-if="drawerTab === 'catalog'" class="drawer-tab-sort" @click="onSortTap">{{ orderDesc ? '↓' : '↑' }}</text>
 			</view>
 			<view class="drawer-tab-gap" :class="drawerTab === 'note' ? 'drawer-tab-active' : ''" @click="switchDrawerTab('note')">
 				<text :class="drawerTab === 'note' ? 'drawer-tab-title' : 'drawer-tab-plain'">{{ t('readercomp.tabNotes') }}</text>
@@ -120,7 +120,7 @@
 		}, 300)
 	}
 
-	/** 目录正/倒序展示（Stitch: ⇅/↓↑ 切换；当前阅读章节蓝色高亮由 activeChapterId 驱动） */
+	/** 目录正/倒序展示（排序指示用单个 ↑/↓（不用 ⇅/⇵ 等合体双箭头字形：两端均只显示一个箭头、宽度恒定，全端一致）；当前阅读章节蓝色高亮由 activeChapterId 驱动） */
 	const displayChapters = computed<Chapter[]>(() : Chapter[] => {
 		const marked = props.chapters.map((c : Chapter) : Chapter => {
 			return { id: c.id, title: spacedChapterTitle(c.title), label: c.label, contentTitle: c.contentTitle, active: c.id == props.activeChapterId } as Chapter

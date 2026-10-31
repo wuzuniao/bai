@@ -312,7 +312,7 @@
 	import { buildParaLayout } from '@/utils/textlayout.uts'
 	// #endif
 	import { flipCurrentLayerStyle, flipPrevLayerStyle, flipNextLayerStyle, flipCoverNextOpacity, flipCoverCurrentOpacity } from '@/utils/flipstyle.uts'
-	import { mpCapsuleRect, scheduleResizeReload, rpxToPx } from '@/utils/layout.uts'
+	import { mpCapsuleRect, scheduleResizeReload, rpxToPx, navRowHeightPx } from '@/utils/layout.uts'
 	// #ifdef MP-WEIXIN
 	import { buildShareAppContent } from '@/utils/shareCover.uts'
 	// #endif
@@ -445,9 +445,10 @@
 
 
 
-	/** 顶部导航内容行（px）：与小程序胶囊同行对齐（同子页 BackButton 口径：状态栏高度起、行高 40px） */
+	/** 顶部导航内容行（px）：与小程序胶囊同行对齐（同子页 BackButton 口径：状态栏高度起；行高共用
+	 *  navRowHeightPx，与 ReaderControl 顶栏一致——宽窗口下固定 40px 会裁掉书名/章名两行） */
 	const navTop = ref(44)
-	const navHeight = ref(40)
+	const navHeight = ref(navRowHeightPx())
 	// 初始化窗口与安全区（UTS script setup 顶层不支持裸块语句，原块内变量提升并改名避免遮蔽）
 	const initWin = uni.getWindowInfo()
 	if (initWin.statusBarHeight > 0) {

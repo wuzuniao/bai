@@ -25,13 +25,29 @@ export function spacedChapterTitle(title : string) : string {
 	return title
 }
 
-/** 字体选项表（默认思源黑体，未安装时经回退链落到系统黑体） */
+/**
+ * 字体选项表（默认思源黑体，未安装时经回退链落到系统黑体）
+ * App 原生端差异（官方 font-family 文档）：只接受「系统中已存在的单个字体名」，
+ * 不支持 Web 的逗号回退栈——整串无法解析时静默回落默认黑体，表现为切换字体无变化。
+ * Android 内置中文字族仅 Noto Sans CJK（sans-serif，即思源黑体字形）与 Noto Serif CJK（serif，
+ * 宋体字形），楷体无内置实现，沿用设计回退链落到 serif（与宋体同字形，属平台能力上限）。
+ */
+// #ifdef APP-ANDROID
+export const FONT_OPTIONS : FontOption[] = [
+	{ key: 'sourcehan', label: '思源黑体', family: 'sans-serif' } as FontOption,
+	{ key: 'system', label: '系统黑体', family: 'sans-serif' } as FontOption,
+	{ key: 'songti', label: '宋体', family: 'serif' } as FontOption,
+	{ key: 'kaiti', label: '楷体', family: 'serif' } as FontOption
+]
+// #endif
+// #ifndef APP-ANDROID
 export const FONT_OPTIONS : FontOption[] = [
 	{ key: 'sourcehan', label: '思源黑体', family: "'Source Han Sans SC', 'Noto Sans SC', sans-serif" } as FontOption,
 	{ key: 'system', label: '系统黑体', family: 'sans-serif' } as FontOption,
 	{ key: 'songti', label: '宋体', family: "'Source Han Serif SC', 'SimSun', serif" } as FontOption,
 	{ key: 'kaiti', label: '楷体', family: 'KaiTi, STKaiti, serif' } as FontOption
 ]
+// #endif
 
 /** 按 key 取字体选项（未命中回退默认项） */
 export function fontOptionOf(key : string) : FontOption {
