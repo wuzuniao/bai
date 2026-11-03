@@ -33,8 +33,15 @@ export function tierTotalReward(base: number, bonus: number) : number {
  */
 export function fmtRemainMinutes(mins: number) : string {
 	const total = Math.max(0, Math.ceil(mins))
+	// #ifdef APP-ANDROID
 	const h = Math.floor(total / 60).toInt()
 	const r = (total % 60).toInt()
+	// #endif
+	// #ifndef APP-ANDROID
+	// JS 运行时（H5/小程序）无 number.toInt 扩展；Math.floor/取模结果已是整数，直接使用
+	const h = Math.floor(total / 60)
+	const r = total % 60
+	// #endif
 	if (h > 0 && r > 0) {
 		return h + ' ' + t('rewards.hour') + ' ' + r + ' ' + t('rewards.minute')
 	}
@@ -50,5 +57,10 @@ export function fmtRemainMinutes(mins: number) : string {
  * 与 fmtRemainMinutes 的剩余时长向上取整口径区分
  */
 export function fmtMinuteCount(mins: number) : string {
+	// #ifdef APP-ANDROID
 	return Math.floor(mins).toInt().toString()
+	// #endif
+	// #ifndef APP-ANDROID
+	return Math.floor(mins).toString()
+	// #endif
 }

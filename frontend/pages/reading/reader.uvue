@@ -687,7 +687,12 @@
 				if (i + 1 < text.length && SENTENCE_CLOSERS.indexOf(text.charAt(i + 1)) >= 0) {
 					continue
 				}
+				// #ifdef APP-ANDROID
 				end = i.toInt()
+				// #endif
+				// #ifndef APP-ANDROID
+				end = i
+				// #endif
 				break
 			}
 		}

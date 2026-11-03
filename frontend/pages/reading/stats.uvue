@@ -270,8 +270,15 @@
 	/** 分钟数 → 「X小时Y分钟 / X小时 / Y分钟」（i18n）；分钟单位不计小数（先取整并转 Int 再拆分） */
 	function fmtMinutes(mins : number) : string {
 		const total = Math.floor(mins)
+		// #ifdef APP-ANDROID
 		const h = Math.floor(total / 60).toInt()
 		const r = (total % 60).toInt()
+		// #endif
+		// #ifndef APP-ANDROID
+		// JS 运行时（H5/小程序）无 number.toInt 扩展；Math.floor/取模结果已是整数，直接使用
+		const h = Math.floor(total / 60)
+		const r = total % 60
+		// #endif
 		if (h > 0 && r > 0) {
 			return tf('stats.fmtHM', [h.toString(), r.toString()])
 		}
@@ -729,7 +736,12 @@
 			const h = Math.round(v / 6) / 10
 			return (h % 1 == 0 ? '' + Math.round(h) : '' + h) + 'h'
 		}
+		// #ifdef APP-ANDROID
 		return Math.round(v).toInt().toString() + 'm'
+		// #endif
+		// #ifndef APP-ANDROID
+		return Math.round(v).toString() + 'm'
+		// #endif
 	}
 
 	/** 纵坐标刻度（顶=最大值，四等分；不展示 0，底部留空位保持刻度与柱高对位；本期无时长全空）。
