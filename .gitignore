@@ -45,6 +45,9 @@ venv/
 # JWKS 公钥磁盘缓存（auth 服务公钥，运行时生成）
 backend/.jwks_cache.json
 
+# 封面图片（运行时生成/上传，不入库）
+backend/share_covers/
+
 # 日志文件
 logs/
 *.log
