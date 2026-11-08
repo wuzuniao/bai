@@ -55,7 +55,7 @@
 											:key="si"
 											:id="seg.anchor == 1 ? anchorStartId : (seg.anchor == 2 ? anchorEndId : '')"
 											:class="segClass(seg)"
-											:style="'font-size:' + fontSize + 'px;color:' + bodyColor + ';font-family:' + fontFamily"
+											:style="'font-size:' + fontSize + 'px;line-height:1.7;color:' + bodyColor + ';font-family:' + fontFamily"
 										>{{ seg.text }}</text>
 									</text>
 								</view>
@@ -95,7 +95,7 @@
 										:key="si"
 										:id="seg.anchor == 1 ? anchorStartId : (seg.anchor == 2 ? anchorEndId : '')"
 										:class="segClass(seg)"
-										:style="'font-size:' + fontSize + 'px;color:' + bodyColor + ';font-family:' + fontFamily"
+										:style="'font-size:' + fontSize + 'px;line-height:1.7;color:' + bodyColor + ';font-family:' + fontFamily"
 									>{{ seg.text }}</text>
 								</text>
 							</view>
@@ -139,7 +139,7 @@
 										:key="si"
 										:id="seg.anchor == 1 ? 'psel-anchor-start' : (seg.anchor == 2 ? 'psel-anchor-end' : '')"
 										:class="segClass(seg)"
-										:style="'font-size:' + fontSize + 'px;color:' + bodyColor + ';font-family:' + fontFamily"
+										:style="'font-size:' + fontSize + 'px;line-height:1.7;color:' + bodyColor + ';font-family:' + fontFamily"
 									>{{ seg.text }}</text>
 								</text>
 							</view>
@@ -175,7 +175,7 @@
 										:key="si"
 										:id="seg.anchor == 1 ? 'nsel-anchor-start' : (seg.anchor == 2 ? 'nsel-anchor-end' : '')"
 										:class="segClass(seg)"
-										:style="'font-size:' + fontSize + 'px;color:' + bodyColor + ';font-family:' + fontFamily"
+										:style="'font-size:' + fontSize + 'px;line-height:1.7;color:' + bodyColor + ';font-family:' + fontFamily"
 									>{{ seg.text }}</text>
 								</text>
 							</view>
@@ -865,7 +865,7 @@
 	const bookFinished = ref(false)
 	/** 测量串行链：多章/多次请求排队执行，避免离屏节点交叉渲染 */
 	let measureChain : Promise<void> = Promise.resolve()
-	/** StaticLayout 与真实渲染一致性：0=未校验 1=可信（免 DOM 校验）2=禁用（回退 DOM 探测管线） */
+	/** StaticLayout 与真实渲染一致性：0=未校验 1=可信（免重复一致性判定，仍逐章校正行数）2=禁用（回退 DOM 探测管线） */
 	let staticLayoutMode = 0
 	/** 在测章 id（含末行探测）：门控调用需等待在测章完成，避免提前放行造成可见换算 */
 	let measuringCids : number[] = []
@@ -941,31 +941,38 @@
 	}
 	/**
 	 * 页面盒实测校准：基座冷启动首帧 uni.getWindowInfo().windowWidth 可能为 0（实测 LDPlayer），
-	 * 会使翻页行程 pageW=0（跟手位移/阈值/原生补间全部失效），故以页面根节点实测宽高为准。
+	 * 会使翻页行程 pageW=0（跟手位移/阈值/原生补间全部失效），故以正文内容区实测宽高为准。
+	 * 返回 Promise 供开书分页等待，避免 StaticLayout 在实测前用错误的窗口宽高生成并缓存断行。
 	 */
-	function measurePageBox() : void {
-		uni.createSelectorQuery().select('.page').boundingClientRect((res : any) : void => {
-			const rect = res == null ? null : (res as NodeInfo | null)
-			if (rect == null) {
-				return
-			}
-			const w = rect.width ?? 0
-			const h = rect.height ?? 0
-			if (w <= 0 || h <= 0 || (w == pageW.value && h == pageH.value)) {
-				return
-			}
-			pageW.value = w
-			pageH.value = h
-			// 冷启动/基座 windowWidth 可能恒为 0（实测 LDPlayer）：用实测页宽换算顶栏行高（80rpx 基准），
-			// 否则 navRowHeightPx 退化为 40px 下限、书名/章名行高不足被裁剪
-			const nh = Math.max(40, Math.round(w * 80 / 750))
-			if (nh != navHeight.value) {
-				navHeight.value = nh
-			}
-			// 阅读态整屏排版：正文只避让状态栏（控制栏为浮层覆盖，不占排版空间）
-			contentTopPx.value = navTop.value + 12
-			syncFlipIdle()
-		}).exec()
+	function measurePageBox() : Promise<void> {
+		return new Promise<void>((resolve : (v : void) => void) => {
+			// .content 同时是分页舞台与底部信息栏的定位容器，分页高度必须与它同源
+			uni.createSelectorQuery().select('.content').boundingClientRect((res : any) : void => {
+				const rect = res == null ? null : (res as NodeInfo | null)
+				if (rect == null) {
+					resolve()
+					return
+				}
+				const w = rect.width ?? 0
+				const h = rect.height ?? 0
+				if (w <= 0 || h <= 0 || (w == pageW.value && h == pageH.value)) {
+					resolve()
+					return
+				}
+				pageW.value = w
+				pageH.value = h
+				// 冷启动/基座 windowWidth 可能恒为 0（实测 LDPlayer）：用实测页宽换算顶栏行高（80rpx 基准），
+				// 否则 navRowHeightPx 退化为 40px 下限、书名/章名行高不足被裁剪
+				const nh = Math.max(40, Math.round(w * 80 / 750))
+				if (nh != navHeight.value) {
+					navHeight.value = nh
+				}
+				// 阅读态整屏排版：正文只避让状态栏（控制栏为浮层覆盖，不占排版空间）
+				contentTopPx.value = navTop.value + 12
+				syncFlipIdle()
+				resolve()
+			}).exec()
+		})
 	}
 	// #endif
 	/** 分页 rpx 换算基准宽（px）：App-Android 用实测页宽（与 CSS rpx 同口径，基座 windowWidth 不可靠会高估段距）；其他端 0=沿用 rpxToPx */
@@ -1747,8 +1754,8 @@
 	function storeLayout(cid : number, layout : ParaLineLayout) : void {
 		paraLayoutCache.value = mapWithEntry(paraLayoutCache.value, cid, layout)
 	}
-	/** APP 端测量：StaticLayout 引擎直读断行（引擎级精确，无 DOM 探测）。会话首章做一次同参一致性校验
-	 *  （离屏 DOM 块高 vs 预测行数的行高比例 α 一致性），通过后本会话后续章免 DOM 校验；校验失败回退 DOM 探测管线 */
+	/** APP 端测量：StaticLayout 引擎直读断行。会话首章做一次同参一致性校验
+	 *  （离屏 DOM 块高 vs 预测行数的行高比例 α 一致性），后续章免重复判定但仍逐章校正真实行数；校验失败回退 DOM 探测管线 */
 	function measureChapterAuto(cid : number, epoch : number) : Promise<void> {
 		return new Promise<void>((resolve) => {
 			const paras = paragraphsOf(cid)
@@ -1766,8 +1773,11 @@
 				return
 			}
 			if (staticLayoutMode == 1) {
-				// 已验证可信：免 DOM 校验，直接采用引擎断行；章头占位独立实测（resolve 前落定，保证切换前章首页预算就绪）
+				// 免重复做引擎一致性判定，但每章仍须校正真实行数；否则后续章高估行数会提前封页、页尾留出数行空白
 				storeLayout(cid, layout)
+				if (scheduleLineCalibration != null) {
+					scheduleLineCalibration!(cid, epoch)
+				}
 				measureChapterHeader(cid, epoch).then(() : void => {
 					resolve()
 				})
@@ -1978,8 +1988,7 @@
 		const layout = paraLayoutCache.value.get(cid)
 		if (layout != null && layout.lines.length == paras.length) {
 			// APP 端引擎级断行（StaticLayout 条件编译）：切断位置即真实行边界
-			// App-Android 正文行高由 CSS line-height:1.7 决定（渲染稳定），用字号×1.7 作为分页行高，
-			// 避免自校准 α 偏大时每页少排 1~3 行、页尾留白；其他端仍用校准值
+			// Android 内层分段文本与离屏测量均显式使用 1.7 行高，分页必须同值，不能混用未统一的 DOM 校准值
 			// #ifdef APP-ANDROID
 			const exactLineH = fontSize.value * 1.7
 			// #endif
@@ -2124,7 +2133,6 @@
 		// 不在此处 saveProgress：openLocalBook 随后调 restoreProgress 恢复旧进度，
 		// 先写会把重置值 {0,0} 覆盖存储中的真实进度，导致每次打开都回到第一章
 		// #ifdef APP-ANDROID
-		measurePageBox()
 		syncFlipIdle()
 		// #endif
 	}
@@ -3061,6 +3069,10 @@
 			})
 			loadBookContent(chs, chaptersParsed.map((c) : string[] => c.paragraphs))
 			restoreProgress(book.id)
+			// #ifdef APP-ANDROID
+			// 雷电冷启动的 windowWidth/windowHeight 不可靠：先等到正文容器实测值，再生成首章与邻章分页
+			await measurePageBox()
+			// #endif
 			if (pageTurn.value != '滚动') {
 				// 翻页模式：首屏页在 loading 遮罩内完成实测，展示即最终布局（邻章后台预取供跨章预渲染）
 				const cid = currentChapterId.value
