@@ -44,18 +44,18 @@
 									v-for="(item, vi) in chapterParagraphItems(cid)"
 									:key="cid + '-' + item.origin"
 									class="novel-paragraph para-scroll"
-									:class="vi > 0 ? 'novel-paragraph-gap' : ''"
+									:style="vi > 0 ? paragraphGapStyle : ''"
 									:id="'scroll-para-' + cid + '-' + item.origin"
 									@longpress="onLongPress(item.origin, cid, $event, item.from, item.to)"
 									@click="onParaTap($event, item.origin, cid, item.from, item.to)"
 								>
-									<text class="novel-text">
+									<text class="novel-text" :style="novelTextStyle">
 										<text
 											v-for="(seg, si) in paragraphSegments(item, cid)"
 											:key="si"
 											:id="seg.anchor == 1 ? anchorStartId : (seg.anchor == 2 ? anchorEndId : '')"
 											:class="segClass(seg)"
-											:style="'font-size:' + fontSize + 'px;line-height:1.7;color:' + bodyColor + ';font-family:' + fontFamily"
+											:style="'font-size:' + fontSize + 'px;color:' + bodyColor + ';font-family:' + fontFamily"
 										>{{ seg.text }}</text>
 									</text>
 								</view>
@@ -84,18 +84,18 @@
 								v-for="(item, vi) in currentPageItems"
 									:key="item.origin"
 									class="novel-paragraph para-page"
-									:class="vi > 0 ? 'novel-paragraph-gap' : ''"
+									:style="vi > 0 ? paragraphGapStyle : ''"
 									:id="'ppara-' + item.origin"
 									@longpress="onLongPress(item.origin, -1, $event, item.from, item.to)"
 									@click="onParaTap($event, item.origin, -1, item.from, item.to)"
 								>
-								<text class="novel-text">
+								<text class="novel-text" :style="novelTextStyle">
 									<text
 										v-for="(seg, si) in paragraphSegments(item, currentChapterId)"
 										:key="si"
 										:id="seg.anchor == 1 ? anchorStartId : (seg.anchor == 2 ? anchorEndId : '')"
 										:class="segClass(seg)"
-										:style="'font-size:' + fontSize + 'px;line-height:1.7;color:' + bodyColor + ';font-family:' + fontFamily"
+										:style="'font-size:' + fontSize + 'px;color:' + bodyColor + ';font-family:' + fontFamily"
 									>{{ seg.text }}</text>
 								</text>
 							</view>
@@ -131,15 +131,15 @@
 								v-for="(item, vi) in prevPageItems"
 								:key="item.origin"
 								class="novel-paragraph"
-								:class="vi > 0 ? 'novel-paragraph-gap' : ''"
+								:style="vi > 0 ? paragraphGapStyle : ''"
 							>
-								<text class="novel-text">
+								<text class="novel-text" :style="novelTextStyle">
 									<text
 										v-for="(seg, si) in paragraphSegments(item, prevPageChapterId)"
 										:key="si"
 										:id="seg.anchor == 1 ? 'psel-anchor-start' : (seg.anchor == 2 ? 'psel-anchor-end' : '')"
 										:class="segClass(seg)"
-										:style="'font-size:' + fontSize + 'px;line-height:1.7;color:' + bodyColor + ';font-family:' + fontFamily"
+										:style="'font-size:' + fontSize + 'px;color:' + bodyColor + ';font-family:' + fontFamily"
 									>{{ seg.text }}</text>
 								</text>
 							</view>
@@ -167,15 +167,15 @@
 								v-for="(item, vi) in nextPageItems"
 								:key="item.origin"
 								class="novel-paragraph"
-								:class="vi > 0 ? 'novel-paragraph-gap' : ''"
+								:style="vi > 0 ? paragraphGapStyle : ''"
 							>
-								<text class="novel-text">
+								<text class="novel-text" :style="novelTextStyle">
 									<text
 										v-for="(seg, si) in paragraphSegments(item, nextPageChapterId)"
 										:key="si"
 										:id="seg.anchor == 1 ? 'nsel-anchor-start' : (seg.anchor == 2 ? 'nsel-anchor-end' : '')"
 										:class="segClass(seg)"
-										:style="'font-size:' + fontSize + 'px;line-height:1.7;color:' + bodyColor + ';font-family:' + fontFamily"
+										:style="'font-size:' + fontSize + 'px;color:' + bodyColor + ';font-family:' + fontFamily"
 									>{{ seg.text }}</text>
 								</text>
 							</view>
@@ -274,7 +274,7 @@
 
 		<!-- 每行字数标定节点（屏幕外不可见：与正文同款式渲染约 20 行文字，实测高度反推实际每行字数） -->
 		<view class="calib-box" :style="'left:-9999px;top:0;width:' + calibWidth + 'px'">
-			<text class="calib-text" :style="'font-size:' + fontSize + 'px;font-family:' + fontFamily">{{ calibText }}</text>
+			<text class="calib-text" :style="novelTextStyle">{{ calibText }}</text>
 		</view>
 		<!-- 离屏排版测量区（透明、屏外、即测即卸）：整章段落与被切断段落前缀探针按正文同参渲染，实测行数/末行字符驱动分页 -->
 		<view class="measure-box" :style="'left:-9999px;top:0;width:' + calibWidth + 'px'">
@@ -296,7 +296,7 @@
 					:class="'measure-para-' + mcid"
 				>
 					<!-- App 原生端字号/字体只能落在 text 上，否则测量节点按默认字体排版，行数实测失真 -->
-					<text class="measure-text" :style="'font-size:' + fontSize + 'px;font-family:' + fontFamily">　　{{ mp.text }}</text>
+					<text class="measure-text" :style="novelTextStyle">　　{{ mp.text }}</text>
 				</view>
 			</view>
 			<view
@@ -304,7 +304,7 @@
 				:key="'pr' + pri + '-' + probe.cid + '-' + probe.pi"
 				class="measure-probe"
 			>
-				<text class="measure-text" :style="'font-size:' + fontSize + 'px;font-family:' + fontFamily">　　{{ probePrefixText(probe) }}</text>
+				<text class="measure-text" :style="novelTextStyle">　　{{ probePrefixText(probe) }}</text>
 			</view>
 		</view>
 	</view>
@@ -320,7 +320,7 @@
 	import type { Chapter, Paragraph, Bookmark, Thought, UnderlineEntry, NoteRecord, ShareQuoteCtx, SelSpan, SpanSeg, TextMetrics, ParaRect, ReaderSettings } from '@/utils/readerTypesDefs.ts'
 	import { fontOptionOf, loadStoredFontKey, setActiveBookId, loadUnderlines, loadThoughts, findUnderlineEntry, loadBookmarks, loadSettings, buildNoteRecords, buildShareQuoteCtx, fetchNotesToCache, fetchBookmarksToCache, VIRTUAL_BOOK_ID, SENTENCE_END_CHARS, thoughtAt, spanOfThought, buildSpanSegs } from '@/utils/readerTypes.uts'
 	import type { PageSlice, ParaLineLayout } from '@/utils/paginationDefs.ts'
-	import { computePageBreaks, computePageBreaksMeasured, computePageBreaksExact } from '@/utils/pagination.uts'
+	import { computePageBreaks, computePageBreaksMeasured, computePageBreaksExact, readerLineHeightPx, readerParagraphGapPx } from '@/utils/pagination.uts'
 	// #ifdef APP-ANDROID
 	import { buildParaLayout } from '@/utils/textlayout.uts'
 	// #endif
@@ -984,6 +984,15 @@
 		return 0
 		// #endif
 	}
+	/** 章头下边距与页宽同口径：雷电冷启动的 windowWidth 不可靠时仍以实测页宽换算 */
+	function chapterHeaderMarginPx() : number {
+		// #ifdef APP-ANDROID
+		return pageW.value > 0 ? pageW.value * 108 / 750 : rpxToPx(108)
+		// #endif
+		// #ifndef APP-ANDROID
+		return rpxToPx(108)
+		// #endif
+	}
 	/** 正文左右内边距合计（px，124rpx）：App-Android 用实测页宽换算，保证排版实测宽与真实渲染宽一致；其他端沿用 rpxToPx */
 	function bodySidePaddingPx() : number {
 		// #ifdef APP-ANDROID
@@ -1295,7 +1304,7 @@
 				}
 				if (rects != null && rects.length == 1 && (rects[0].height ?? 0) > 0) {
 					// 写时复制落缓存（触发分页重算），卸载探针节点（NodeInfo 字段可空，Kotlin 侧禁可空算术，?? 0 兜底）
-					chapterHeadHCache.value = mapWithEntry(chapterHeadHCache.value, cid, (rects[0].height ?? 0) + rpxToPx(108))
+					chapterHeadHCache.value = mapWithEntry(chapterHeadHCache.value, cid, (rects[0].height ?? 0) + chapterHeaderMarginPx())
 					measureHeaders.value = [] as number[]
 					resolve()
 					return
@@ -1558,12 +1567,20 @@
 	/** 阅读设置镜像（真源在 ReaderControl 组件：调节/持久化内聚，change 事件同步镜像驱动排版与主题渲染） */
 	const fontSize = ref(18)
 	fontSize.value = restoredSettings.fontSize
+	/** 外层 text 才控制 App 嵌套文本的行盒；显式 px 行高避免按外层默认字号计算 */
+	const novelTextStyle = computed(() : string => {
+		return 'font-size:' + fontSize.value + 'px;line-height:' + readerLineHeightPx(fontSize.value) + 'px;font-family:' + fontFamily.value
+	})
+	/** 段距与分页预算同源：默认 18px 保持 40rpx，其余字号等比缩放 */
+	const paragraphGapStyle = computed(() : string => {
+		return 'margin-top:' + readerParagraphGapPx(fontSize.value, paginationFrameW()) + 'px'
+	})
 	/** 末行探测轮次重入（环断链）：probeTailChars↔probeTailQuery↔applyProbeResults 互递归经两个函数值间接层，赋值在定义后（UTS 顶层无函数提升，直调后置定义报「找不到名称」） */
 	let probeTailQueryEntry : ((cid : number, probes : LayoutProbe[], lines : number[], search : Map<number, TailSearch>, found : Map<number, number>, epoch : number, round : number, resolve : (v : void) => void, attempt : number) => void) | null = null
 	let probeTailRestart : ((cid : number, epoch : number, search : Map<number, TailSearch>, found : Map<number, number>, round : number, resolve : (v : void) => void) => void) | null = null
 	/** 探针结果判定：前缀行数 ≤ 行数-1 ⟺ 候选 rc ≥ 末行字符数，据此收缩各段区间；收敛即落定并进入下一轮 */
 	function applyProbeResults(cid : number, probes : LayoutProbe[], rects : NodeInfo[], lines : number[], search : Map<number, TailSearch>, found : Map<number, number>, epoch : number, round : number, resolve : (v : void) => void) : void {
-		const lineH = fontSize.value * 1.7
+		const lineH = readerLineHeightPx(fontSize.value)
 		for (let i = 0; i < probes.length; i++) {
 			const probe = probes[i]
 			const paras = paragraphsOf(probe.cid)
@@ -1715,7 +1732,7 @@
 					}
 					return
 				}
-				const lineH = fontSize.value * 1.7
+				const lineH = readerLineHeightPx(fontSize.value)
 				const lines : number[] = []
 				for (let i = 0; i < paras.length; i++) {
 					const len = paras[i].text.length
@@ -1916,17 +1933,20 @@
 	})
 	/** ===== 每行字数标定（fontSize/字体变化后重跑；标定节点渲染完成约需一帧，延时后实测） ===== */
 	function calibratePerLine() : void {
-		if (calibText.value.length == 0 || fontSize.value <= 0) {
+		const epoch = layoutEpoch
+		const fontPx = fontSize.value
+		const text = calibText.value
+		if (text.length == 0 || fontPx <= 0) {
 			return
 		}
 		uni.createSelectorQuery().select('.calib-text').boundingClientRect((res : any) : void => {
 			const r = res == null ? null : (res as NodeInfo | null)
-			if (r == null || (r.height ?? 0) <= 0) {
+			if (epoch != layoutEpoch || fontPx != fontSize.value || r == null || (r.height ?? 0) <= 0) {
 				return
 			}
-			const lineH = fontSize.value * 1.7
+			const lineH = readerLineHeightPx(fontPx)
 			const n = Math.max(1, Math.round((r.height ?? 0) / lineH))
-			perLineExact.value = Math.max(1, Math.ceil(calibText.value.length / n))
+			perLineExact.value = Math.max(1, Math.ceil(text.length / n))
 		}).exec()
 	}
 	onReady(() => {
@@ -1945,7 +1965,7 @@
 		const perLine = perLineEffective.value
 		return {
 			perLine: perLine,
-			lineH: fontSize.value * 1.7,
+			lineH: readerLineHeightPx(fontSize.value),
 			charW: charW,
 			fullCharW: contentW / perLine,
 			indentPx: fontSize.value * 2
@@ -1988,9 +2008,9 @@
 		const layout = paraLayoutCache.value.get(cid)
 		if (layout != null && layout.lines.length == paras.length) {
 			// APP 端引擎级断行（StaticLayout 条件编译）：切断位置即真实行边界
-			// Android 内层分段文本与离屏测量均显式使用 1.7 行高，分页必须同值，不能混用未统一的 DOM 校准值
+			// Android 外层正文与离屏测量均使用共享像素行高，分页必须同值，不能混用未统一的 DOM 校准值
 			// #ifdef APP-ANDROID
-			const exactLineH = fontSize.value * 1.7
+			const exactLineH = readerLineHeightPx(fontSize.value)
 			// #endif
 			// #ifndef APP-ANDROID
 			const exactLineH = staticLayoutAlpha * fontSize.value
@@ -2142,6 +2162,8 @@
 		paraLinesCache.value = new Map()
 		paraTailCache.value = new Map()
 		paraLayoutCache.value = new Map()
+		// 旧字号的每行字数不得参与新字号的首轮回退分页
+		perLineExact.value = 0
 		// 排版参数变化后 StaticLayout 同参一致性需重新校验（字体族映射可能随字体变化）
 		staticLayoutMode = 0
 		if (relayoutTimer >= 0) {
@@ -2424,7 +2446,7 @@
 				return
 			}
 			// 段内偏移行 → 段内目标字符（行容量近似，缩进 2 字误差可接受）
-			const lineH = fontSize.value * 1.7
+			const lineH = readerLineHeightPx(fontSize.value)
 			const offsetRows = Math.max(0, Math.round((viewTop - (rects[hit].top ?? 0)) / lineH))
 			applyScrollToPage(cid, origin, offsetRows * perLineEffective.value)
 		}).exec()
@@ -3536,9 +3558,8 @@
 		opacity: 0.9;
 	}
 
-	/* 正文（行距 1.7 对齐主流阅读器 1.5-1.8 区间、首行缩进 2em、字距 0.02em、两端对齐、段落间距 21px）。
-	   App 原生端 gap 不生效（规范 3.4）：段距改首段之后逐段 margin-top（与分页算法 paraGap=40rpx 同口径，
-	   续页首切片无段距） */
+	/* 正文字号/像素行高由 novelTextStyle 注入；段距由 paragraphGapStyle 注入并与分页同源，
+	   续页首切片无段距。首行缩进 2em、字距 0.4rpx。 */
 	.novel-body {
 		flex-direction: column;
 	}
@@ -3547,12 +3568,7 @@
 		position: relative;
 	}
 
-	.novel-paragraph-gap {
-		margin-top: 40rpx;
-	}
-
 	.novel-text {
-		line-height: 1.7;
 		letter-spacing: 0.4rpx;
 		/* App 的 text-align 仅支持 left/center/right，两端对齐在 App 回落默认左对齐 */
 		/* #ifndef APP */
@@ -3566,7 +3582,6 @@
 	}
 
 	.calib-text {
-		line-height: 1.7;
 		letter-spacing: 0.4rpx;
 		color: rgba(0, 0, 0, 0);
 	}
@@ -3577,7 +3592,6 @@
 	}
 
 	.measure-text {
-		line-height: 1.7;
 		letter-spacing: 0.4rpx;
 		color: rgba(0, 0, 0, 0);
 	}

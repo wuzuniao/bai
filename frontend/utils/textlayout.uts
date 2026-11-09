@@ -1,5 +1,6 @@
 // #ifdef APP-ANDROID
 import type { ParaLineLayout } from '@/utils/paginationDefs.ts'
+import { readerLineHeightPx } from '@/utils/pagination.uts'
 import StaticLayout from 'android.text.StaticLayout'
 import TextPaint from 'android.text.TextPaint'
 import Typeface from 'android.graphics.Typeface'
@@ -52,9 +53,9 @@ export function buildParaLayout(texts : string[], fontSize : number, fontFamily 
 		paint.setLetterSpacing((letterSpacingPx / fontSize).toFloat())
 	}
 	const w = Math.max(1, Math.round(widthPx))
-	// 行距对齐正文 line-height 1.7（仅影响高度校验口径，不影响断行位置）
+	// 行距与正文共享像素行高（仅影响高度校验口径，不影响断行位置）
 	const fm = paint.getFontMetrics()
-	const lineAdd = fontSize * 1.7 - (fm.descent - fm.ascent)
+	const lineAdd = readerLineHeightPx(fontSize) - (fm.descent - fm.ascent)
 	const lines : number[] = []
 	const lineEnds : number[][] = []
 	for (let i = 0; i < texts.length; i++) {
