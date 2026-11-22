@@ -1,6 +1,11 @@
 <template>
-	<view class="notice-button" :style="{ top: noticeTop }" @tap="handleTap">
-		<image class="notice-button__icon" :src="iconSrc" mode="aspectFit" />
+	<!-- 实高占位层（同 BackButton 方案）：原「零高锚定层 + absolute 越界」在 vdom 原生渲染下
+		 绘制与触摸同时失效（App 真机点击站内信无效的根因，规范 3.4-17），改 margin-top 撑位
+		 无越界即无裁剪。层宽与主内容列同口径限宽（Web 480 / 其余 750），铃铛对齐内容列左缘 -->
+	<view class="notice-button">
+		<view class="notice-button__inner" :style="'margin-top:' + topPx + 'px'" @tap="handleTap">
+			<image class="notice-button__icon" :src="iconSrc" mode="aspectFit" />
+		</view>
 	</view>
 </template>
 
@@ -8,7 +13,7 @@
 	/**
 	 * NoticeButton —— 左上角站内信通知按钮（通知组件抽象，2026-10-02）
 	 * --------------------------------------------------------------------------
-	 * - 位置规范：与原设置页内嵌铃铛一致（左上角绝对定位，避让状态栏）
+	 * - 位置规范：左上角实高占位（margin-top 撑开状态栏高度，避让状态栏；见规范 3.4-17）
 	 * - 两态图标：无消息 notice.svg（墨色铃铛）、有消息 notice-unread.svg（铃铛 + 红点角标）
 	 * - 未读状态组件内驱动：挂载时与 refresh() 调用时直连 auth 查询公告未读数
 	 *   （公告管理迁移 auth，未读按用户+项目独立维护）；未登录/请求失败静默降级为无消息态
@@ -21,7 +26,7 @@
 
 	const hasUnread = ref(false)
 
-	const noticeTop = ref('45px')
+	const topPx = ref(45)
 
 	// 图标两态切换（显示尺寸 46rpx）
 	const iconSrc = computed((): string => {
@@ -29,16 +34,21 @@
 	})
 
 	/** 顶部留白：statusBarHeight - 5px 基础偏移 + 约 0.6vh 相对增量，各机型视觉比例一致
-	 * （与 member-pay 页返回键顶部定位同款算法，改动需两处同步核对真机） */
+	 * （与 member-pay 页返回键顶部定位同款算法，改动需两处同步核对真机）；
+	 * statusBarHeight 为 0（Web 无状态栏）回退 45px——margin-top 为负会使按钮上移越出容器触发裁剪 */
 	function computeTop(): void {
 		try {
 			const win = uni.getWindowInfo()
-			const statusBarHeight = win.statusBarHeight != null ? win.statusBarHeight : 44
-			const extra = win.windowHeight * 0.006
-			noticeTop.value = (statusBarHeight - 5 + extra).toString() + 'px'
+			const statusBarHeight = win.statusBarHeight != null ? win.statusBarHeight : 0
+			if (statusBarHeight > 0) {
+				const extra = win.windowHeight * 0.006
+				topPx.value = statusBarHeight - 5 + extra
+				return
+			}
 		} catch (e) {
-			noticeTop.value = '45px'
+			// 异常走回退值
 		}
+		topPx.value = 45
 	}
 
 	/** 查询公告未读数驱动图标（未登录/失败静默降级为无消息态） */
@@ -78,9 +88,20 @@
 
 <style lang="scss">
 	.notice-button {
-		position: absolute;
-		left: 48rpx;
-		z-index: 10;
+		width: 100%;
+		/* #ifdef WEB */
+		max-width: 480px;
+		/* #endif */
+		/* #ifndef WEB */
+		max-width: 750px;
+		/* #endif */
+		margin-left: auto;
+		margin-right: auto;
+	}
+
+	.notice-button__inner {
+		/* 左缘 48rpx 对齐内容列（原 absolute left:48rpx）；热区 80rpx 与 BackButton 同款 */
+		margin-left: 48rpx;
 		width: 80rpx;
 		height: 80rpx;
 		display: flex;

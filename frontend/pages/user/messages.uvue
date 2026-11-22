@@ -214,6 +214,9 @@
 
 <style lang="scss">
 	.messages-page {
+		/* flex: 1 撑满视口撑住背景：App 端不支持 min-height: 100vh（规范 3.4-20），
+		 * 仅靠原 100vh 时背景只覆盖内容高度，内容不足一屏下半屏露窗口白底 */
+		flex: 1;
 		/* #ifndef APP */
 		min-height: 100vh;
 		/* #endif */
