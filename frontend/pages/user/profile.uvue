@@ -644,19 +644,19 @@
 						biometricToggling.value = false
 						uni.hideLoading()
 						uni.showToast({ title: t('profile.biometricEnabled'), icon: 'success' })
-					}, (e) => {
+					}, (e: Error | null) => {
 						biometricToggling.value = false
 						uni.hideLoading()
 						console.warn('指纹凭证加密存储失败', e)
 						uni.showToast({ title: t('profile.biometricIssueFail'), icon: 'none' })
 					})
-				}, (e) => {
+				}, (e: Error | null) => {
 					biometricToggling.value = false
 					uni.hideLoading()
 					console.warn('签发指纹登录凭证失败', e)
 					uni.showToast({ title: t('profile.biometricIssueFail'), icon: 'none' })
 				})
-			}, (_e) => {
+			}, (_e: Error | null) => {
 				// 用户取消/验证失败：不开启，静默
 				biometricToggling.value = false
 				uni.hideLoading()
@@ -666,7 +666,7 @@
 			// + 清除本地凭证（Android 密文/鸿蒙明文），重新开启经指纹验证重新签发
 			biometricRevoke(getDeviceId()).then((_res: ApiResponse) => {
 				// 服务端撤销成功
-			}, (_e) => {
+			}, (_e: Error | null) => {
 				console.warn('撤销指纹登录凭证失败', _e)
 			})
 			clearBiometricToken()

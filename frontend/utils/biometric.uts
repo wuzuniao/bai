@@ -194,7 +194,7 @@ export function requestBiometricToken(title: string): Promise<string> {
 				return
 			}
 			resolve(token)
-		}, (err) => {
+		}, (err: Error | null) => {
 			reject(err)
 		})
 	})
@@ -224,7 +224,7 @@ export function storeBiometricToken(token: string): Promise<void> {
 		}
 		encryptAndStore(token).then(() => {
 			resolve()
-		}, (e) => {
+		}, (e: Error | null) => {
 			reject(e)
 		})
 	})
