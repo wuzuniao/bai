@@ -5,11 +5,13 @@
 import { registerDict } from '../i18n'
 
 const zh = new Map<string, string>([
-	['biometric.authContent', '请验证指纹以登录']
+	['biometric.authContent', '请验证指纹以登录'],
+	['biometric.authContentIssue', '请验证指纹以开启指纹登录']
 ])
 
 const en = new Map<string, string>([
-	['biometric.authContent', 'Verify your fingerprint to sign in']
+	['biometric.authContent', 'Verify your fingerprint to sign in'],
+	['biometric.authContentIssue', 'Verify your fingerprint to enable fingerprint sign-in']
 ])
 
 registerDict(zh, en)

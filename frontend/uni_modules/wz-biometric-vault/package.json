@@ -1,0 +1,68 @@
+{
+	"id": "wz-biometric-vault",
+	"displayName": "指纹凭证保险箱",
+	"version": "1.0.0",
+	"description": "指纹登录凭证密码学保险箱（安卓/鸿蒙双端）：biometric_token 经平台密钥加密存储、明文不落任何存储，解密须经系统指纹认证——指纹不过密文解不开，凭证与指纹密码学绑定。安卓为 Keystore RSA-OAEP（私钥 setUserAuthenticationRequired）；鸿蒙为 HUKS 细粒度访问控制 AES-GCM（加密免认证、解密须指纹，新录指纹密钥自动失效）。",
+	"keywords": [
+		"指纹",
+		"Keystore",
+		"BiometricPrompt",
+		"CryptoObject",
+		"加密存储"
+	],
+	"repository": "",
+	"engines": {
+		"HBuilderX": "^4.0",
+		"uni-app-x": "^4.87"
+	},
+	"dcloudext": {
+		"type": "uts",
+		"sale": {
+			"regular": {
+				"price": "0.00"
+			},
+			"sourcecode": {
+				"price": "0.00"
+			}
+		},
+		"contact": {
+			"qq": ""
+		},
+		"declaration": {
+			"ads": "无",
+			"data": "凭证密文仅存本应用私有目录（安卓 SharedPreferences/鸿蒙沙箱文件），不采集不上传任何数据",
+			"permissions": "USE_BIOMETRIC, USE_FINGERPRINT, ACCESS_BIOMETRIC"
+		},
+		"npmurl": "",
+		"darkmode": "√",
+		"i18n": "√",
+		"widescreen": "√"
+	},
+	"uni_modules": {
+		"dependencies": [],
+		"encrypt": [],
+		"platforms": {
+			"cloud": {
+				"tcb": "x",
+				"aliyun": "x",
+				"alipay": "x"
+			},
+			"client": {
+				"uni-app-x": {
+					"app": {
+						"android": {
+							"extVersion": "1.0.0",
+							"minVersion": "21"
+						},
+						"ios": "-",
+						"harmony": {
+							"extVersion": "1.0.0"
+						}
+					}
+				},
+				"web": "-",
+				"mp": "-"
+			}
+		}
+	}
+}

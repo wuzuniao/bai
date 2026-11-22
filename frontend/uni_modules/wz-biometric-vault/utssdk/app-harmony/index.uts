@@ -1,0 +1,452 @@
+/**
+ * wz-biometric-vault — 指纹凭证保险箱（仅 App-Harmony）
+ * --------------------------------------------------------------------------
+ * 目标与安卓端同构：指纹登录凭证（auth 服务下发的 biometric_token）与用户指纹
+ * 密码学绑定——提取密文/篡改调用方均无法绕过指纹，明文不落任何存储。
+ *
+ * 机制（HUKS 细粒度用户身份认证访问控制，官方文档场景即「加密免认证、解密须指纹」）：
+ *   1. HUKS 生成 AES-256-GCM 密钥，KEY_AUTH_PURPOSE=DECRYPT（细粒度控制仅约束解密
+ *      用途，加密走普通会话无须指纹——账密登录下发/开启开关后均可静默落盘）；
+ *      USER_AUTH_TYPE=FINGERPRINT + KEY_AUTH_ACCESS_TYPE=INVALID_NEW_BIO_ENROLL
+ *      （新录指纹/人脸后密钥永久失效，对齐安卓 setUserAuthenticationRequired）；
+ *      CHALLENGE_TYPE=NORMAL（解密 initSession 返回挑战值供 userAuth 认证）。
+ *   2. encryptAndStore：随机 nonce（cryptoFramework 密码学随机），HUKS 加密，
+ *      payload = base64(nonce ++ 密文+GCM tag) 落应用沙箱 filesDir 文件；
+ *      密钥已失效（如指纹重录）时删除重建重试一次（旧密文本就不可用，旧密文作废）。
+ *   3. decryptWithBiometric：initSession(DECRYPT) 取挑战值 → userAuth 指纹认证
+ *      （ATL1，系统认证框）→ authToken → finishSession(handle, options, token)
+ *      解密——指纹即钥匙；认证取消/失败路径 abortSession 兜底防会话泄漏
+ *      （HUKS 会话上限 15，泄漏累积致 12000010）。
+ *
+ * 与安卓端 API 契约完全一致：hasVaultToken/clearVault 同步，encryptAndStore/
+ * decryptWithBiometric 异步，错误 message 前缀三件套（invalidated/empty/cancel），
+ * biometric.uts 按平台分档调用同签名函数。
+ *
+ * 平台约束：
+ *   - 需 module.json5 声明 ohos.permission.ACCESS_BIOMETRIC（normal/system_grant，
+ *     无须 reason；userAuth 认证与 uni Soter 接口均依赖）。
+ *   - HUKS_TAG_KEY_AUTH_PURPOSE/HUKS_TAG_CHALLENGE_TYPE/HuksAuthAccessType 为较新
+ *     tag（细粒度访问控制）；基座 SDK 过低时编译报 unresolved——以 HBuilderX 自带
+ *     HarmonyOS SDK 的 js-apis-huks .d.ts 为准核对枚举名（官方 2025-03 指南为
+ *     HUKS_AUTH_ACCESS_INVALID_NEW_BIO_ENROLL）。
+ *   - 指纹硬件/录入检测走 uni Soter 接口（biometric.uts isBiometricAvailable），
+ *     本插件不重复检测；DevEco 模拟器无指纹录入能力，全链路验证须真机。
+ *   - 跨桥契约（沿用安卓端实测教训）：返回值均为顶层类型（boolean/void/Promise）。
+ *   - token 为 auth 服务下发的 hex ASCII 串，strToBytes/bytesToStr 按 UTF-16 码元
+ *     单字节往返；若 token 格式变更含非 ASCII，两端须同步改 UTF-8 编解码。
+ */
+import { huks } from '@kit.UniversalKeystoreKit'
+import { userAuth } from '@kit.UserAuthenticationKit'
+import { cryptoFramework } from '@kit.CryptoArchitectureKit'
+import { util } from '@kit.ArkTS'
+import { BusinessError } from '@kit.BasicServicesKit'
+import { fileIo as fs } from '@kit.CoreFileKit'
+
+/** HUKS 密钥别名（失效清理后由下次加密重建；同名无跨端影响，平台各自隔离） */
+const KEY_ALIAS = 'wz_biometric_vault_key'
+/** 密文落盘文件名（应用沙箱 filesDir 下，base64 单段，与安卓 SP 对应） */
+const PAYLOAD_FILE = 'wz_biometric_vault_payload.txt'
+/** 诊断日志文件名（filesDir 下追加写；对齐安卓端 debugLog 取证机制） */
+const DEBUG_FILE = 'wz_biometric_vault_debug.txt'
+/** GCM nonce 长度（12 字节标准值） */
+const GCM_NONCE_LEN = 12
+/** userAuth 认证结果码：用户取消（系统认证框点取消/负按钮） */
+const AUTH_RESULT_CODE_CANCEL = 12800003
+/** HUKS 错误码：密钥已失效（新录生物特征/清除锁屏密码，官方 errorcode-huks 列明场景） */
+const HUKS_ERR_KEY_INVALID = 12000012
+/** HUKS 错误码：密钥已被删除（有密文无密钥 → 密文作废） */
+const HUKS_ERR_KEY_DELETED = 12000006
+
+// 错误 message 前缀三件套（与 utils/biometric.uts 的 ERR_MSG_* 双份同步，字符串本体不得改动）。
+// 仅供插件内部构造错误使用，禁止 export：vdom 模式插件 proxy 生成器对导出的字符串常量
+// 丢失引号致云打包编译失败（详见 app-android/index.uts 同位置注释）。
+/** 错误 message 前缀：密钥/密文永久失效（指纹重录、密文损坏），密文已清须重新账密登录 */
+const ERR_INVALIDATED = 'wz_biometric_vault:invalidated'
+/** 错误 message 前缀：本地无加密凭证 */
+const ERR_EMPTY = 'wz_biometric_vault:empty'
+/** 错误 message 前缀：用户取消指纹认证 */
+const ERR_CANCEL = 'wz_biometric_vault:cancel'
+
+/** 密文文件路径（context 获取失败返回 null，调用方按无凭证处理） */
+function payloadPath(): string | null {
+	try {
+		return UTSHarmony.getUIAbilityContext().filesDir + '/' + PAYLOAD_FILE
+	} catch (e) {
+		return null
+	}
+}
+
+/**
+ * 诊断日志追加写沙箱文件（uni-app x 插件内 console 不落 hdc hilog 可靠可见的独立
+ * tag；指纹登录静默失败时经 hdc file recv 拉取该文件取证，与安卓端同性质）。
+ */
+function debugLog(msg: string): void {
+	try {
+		const dir = UTSHarmony.getUIAbilityContext().filesDir
+		fs.appendSync(dir + '/' + DEBUG_FILE, Date.now().toString() + ' ' + msg + '\n')
+	} catch (e) {
+		// 诊断写盘失败不影响主流程
+	}
+}
+
+/** 平台异常取 HUKS/userAuth 错误码（普通 Error 无 code 属性时返回 -1） */
+function errCode(e: any | null): number {
+	if (e == null) {
+		return -1
+	}
+	const be = e as BusinessError
+	if (typeof be.code == 'number') {
+		return be.code
+	}
+	return -1
+}
+
+/** 是否密钥级失效（有密文但密钥已不可用：新录生物特征/清锁屏密码/密钥被删） */
+function isKeyInvalidated(e: any | null): boolean {
+	const code = errCode(e)
+	return code == HUKS_ERR_KEY_INVALID || code == HUKS_ERR_KEY_DELETED
+}
+
+/**
+ * 字符串转字节（token 为 hex ASCII 单字节，charCodeAt 码元直取无歧义；
+ * 非 ASCII 前提约束见文件头注释）。
+ */
+function strToBytes(s: string): Uint8Array {
+	const arr: number[] = []
+	for (let i = 0; i < s.length; i++) {
+		arr.push(s.charCodeAt(i))
+	}
+	return new Uint8Array(arr)
+}
+
+/** 字节转字符串（与 strToBytes 对称单字节往返） */
+function bytesToStr(bytes: Uint8Array): string {
+	let s = ''
+	for (let i = 0; i < bytes.length; i++) {
+		s += String.fromCharCode(bytes[i])
+	}
+	return s
+}
+
+/** 读取密文 payload（base64 单段；文件不存在/读失败返回空串） */
+function readPayload(): string {
+	const path = payloadPath()
+	if (path == null) {
+		return ''
+	}
+	try {
+		if (!fs.accessSync(path)) {
+			return ''
+		}
+		return fs.readTextSync(path)
+	} catch (e) {
+		return ''
+	}
+}
+
+/** 写密文 payload（返回是否成功；加密链路落盘失败须 reject 不留假象） */
+function writePayload(payload: string): boolean {
+	const path = payloadPath()
+	if (path == null) {
+		return false
+	}
+	let fd = -1
+	try {
+		fd = fs.openSync(path, fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC).fd
+		fs.writeSync(fd, payload)
+		return true
+	} catch (e) {
+		return false
+	} finally {
+		if (fd >= 0) {
+			try { fs.closeSync(fd) } catch (e) { /* 关闭失败不影响结果 */ }
+		}
+	}
+}
+
+/** 清除密文文件（clearVault 导出口径：密钥保留下次加密复用，对齐安卓端） */
+function removePayloadFile(): void {
+	const path = payloadPath()
+	if (path != null) {
+		try { fs.unlinkSync(path) } catch (e) {
+			// 文件不存在/删除失败静默（无凭证状态自然成立）
+		}
+	}
+}
+
+/**
+ * 失效清理：删 HUKS 密钥 + 清密文（旧密文随密钥作废，下次启用重新生成，
+ * 新凭证由重新账密登录下发）。删密钥须等完成再生成（encrypt 重建重试路径）。
+ */
+async function wipe(): Promise<void> {
+	try {
+		await huks.deleteKeyItem(KEY_ALIAS, emptyOptions())
+	} catch (e) {
+		// 密钥不存在/删除失败不阻断（密文清掉后旧密文本就不可达）
+	}
+	removePayloadFile()
+}
+
+/** 空参数集（isKeyItemExist/deleteKeyItem/abortSession 只需 alias） */
+function emptyOptions(): huks.HuksOptions {
+	return { properties: [], inData: new Uint8Array([]) }
+}
+
+/** GCM 会话参数（加解密两端 nonce 必须一致；purpose 按会话用途传入） */
+function gcmOptions(nonce: Uint8Array, purpose: huks.HuksKeyPurpose, inData: Uint8Array): huks.HuksOptions {
+	const props: huks.HuksParam[] = [
+		{ tag: huks.HuksTag.HUKS_TAG_ALGORITHM, value: huks.HuksKeyAlg.HUKS_ALG_AES },
+		{ tag: huks.HuksTag.HUKS_TAG_PURPOSE, value: purpose },
+		{ tag: huks.HuksTag.HUKS_TAG_KEY_SIZE, value: huks.HuksKeySize.HUKS_AES_KEY_SIZE_256 },
+		{ tag: huks.HuksTag.HUKS_TAG_PADDING, value: huks.HuksKeyPadding.HUKS_PADDING_NONE },
+		{ tag: huks.HuksTag.HUKS_TAG_BLOCK_MODE, value: huks.HuksCipherMode.HUKS_MODE_GCM },
+		{ tag: huks.HuksTag.HUKS_TAG_NONCE, value: nonce }
+	]
+	return { properties: props, inData: inData }
+}
+
+/** 密钥生成参数（细粒度访问控制核心配置，官方细粒度指南同构） */
+function genOptions(): huks.HuksOptions {
+	const props: huks.HuksParam[] = [
+		{ tag: huks.HuksTag.HUKS_TAG_ALGORITHM, value: huks.HuksKeyAlg.HUKS_ALG_AES },
+		{ tag: huks.HuksTag.HUKS_TAG_PURPOSE, value: huks.HuksKeyPurpose.HUKS_KEY_PURPOSE_ENCRYPT | huks.HuksKeyPurpose.HUKS_KEY_PURPOSE_DECRYPT },
+		{ tag: huks.HuksTag.HUKS_TAG_KEY_SIZE, value: huks.HuksKeySize.HUKS_AES_KEY_SIZE_256 },
+		{ tag: huks.HuksTag.HUKS_TAG_PADDING, value: huks.HuksKeyPadding.HUKS_PADDING_NONE },
+		{ tag: huks.HuksTag.HUKS_TAG_BLOCK_MODE, value: huks.HuksCipherMode.HUKS_MODE_GCM },
+		{ tag: huks.HuksTag.HUKS_TAG_USER_AUTH_TYPE, value: huks.HuksUserAuthType.HUKS_USER_AUTH_TYPE_FINGERPRINT },
+		{ tag: huks.HuksTag.HUKS_TAG_KEY_AUTH_ACCESS_TYPE, value: huks.HuksAuthAccessType.HUKS_AUTH_ACCESS_INVALID_NEW_BIO_ENROLL },
+		{ tag: huks.HuksTag.HUKS_TAG_CHALLENGE_TYPE, value: huks.HuksChallengeType.HUKS_CHALLENGE_TYPE_NORMAL },
+		{ tag: huks.HuksTag.HUKS_TAG_KEY_AUTH_PURPOSE, value: huks.HuksKeyPurpose.HUKS_KEY_PURPOSE_DECRYPT }
+	]
+	return { properties: props, inData: new Uint8Array([]) }
+}
+
+/** 确保密钥存在（存在直接复用——删除重建会使既有密文作废，仅在显式 wipe 后重建） */
+async function ensureKey(): Promise<void> {
+	let exists = false
+	try {
+		exists = await huks.isKeyItemExist(KEY_ALIAS, emptyOptions())
+	} catch (e) {
+		debugLog('isKeyItemExist fail: ' + ('' + e))
+		exists = false
+	}
+	if (exists) {
+		return
+	}
+	await huks.generateKeyItem(KEY_ALIAS, genOptions())
+}
+
+/**
+ * 指纹认证（系统认证框）拿 authToken：challenge 为解密会话 initSession 下发挑战值，
+ * 认证通过后 token 交回 finishSession 完成解密。单次识别失败系统自动允许重试，
+ * 取消/锁定经 onResult 非 0 结果码收尾。
+ */
+function userAuthFinger(challenge: Uint8Array, title: string): Promise<Uint8Array> {
+	return new Promise<Uint8Array>((resolve, reject) => {
+		const authParam: userAuth.AuthParam = {
+			challenge: challenge,
+			authType: [userAuth.UserAuthType.FINGERPRINT],
+			authTrustLevel: userAuth.AuthTrustLevel.ATL1
+		}
+		const widgetParam: userAuth.WidgetParam = { title: title }
+		let auth: userAuth.UserAuthInstance
+		try {
+			auth = userAuth.getUserAuthInstance(authParam, widgetParam)
+		} catch (e) {
+			reject(new Error('wz_biometric_vault:auth init fail'))
+			return
+		}
+		let finished = false
+		auth.on('result', {
+			onResult: (result: userAuth.AuthResult) => {
+				if (finished) {
+					return
+				}
+				finished = true
+				if (result.code == 0 && result.token != null) {
+					resolve(result.token as Uint8Array)
+				} else if (result.code == AUTH_RESULT_CODE_CANCEL) {
+					reject(new Error(ERR_CANCEL + ' [' + result.code.toString() + ']'))
+				} else {
+					reject(new Error('wz_biometric_vault:auth fail [' + result.code.toString() + ']'))
+				}
+			}
+		})
+		try {
+			auth.start()
+		} catch (e) {
+			if (!finished) {
+				finished = true
+				reject(new Error('wz_biometric_vault:auth start fail'))
+			}
+		}
+	})
+}
+
+/** 解密会话兜底中止（认证取消/解密失败路径防会话泄漏；已终结会话报错静默） */
+async function abortQuiet(handle: number): Promise<void> {
+	if (handle == 0) {
+		return
+	}
+	try {
+		await huks.abortSession(handle, emptyOptions())
+	} catch (e) {
+		// 会话已终结/无效时 abort 报错，静默
+	}
+}
+
+/** 单次加密尝试：随机 nonce → init(空) → finish(明文) → base64(nonce++密文+tag) 落盘 */
+async function doEncryptOnce(plainToken: string): Promise<void> {
+	const nonce = cryptoFramework.createRand().generateRandSync(GCM_NONCE_LEN)
+	const session = await huks.initSession(KEY_ALIAS, gcmOptions(nonce, huks.HuksKeyPurpose.HUKS_KEY_PURPOSE_ENCRYPT, new Uint8Array([])))
+	const result = await huks.finishSession(session.handle, gcmOptions(nonce, huks.HuksKeyPurpose.HUKS_KEY_PURPOSE_ENCRYPT, strToBytes(plainToken)))
+	const out = result.outData
+	if (out == null || out.length == 0) {
+		throw new Error('wz_biometric_vault:encrypt fail')
+	}
+	const raw = new Uint8Array(GCM_NONCE_LEN + out.length)
+	raw.set(nonce, 0)
+	raw.set(out, GCM_NONCE_LEN)
+	const payload = new util.Base64Helper().encodeToStringSync(raw, util.Type.BASIC)
+	if (!writePayload(payload)) {
+		throw new Error('wz_biometric_vault:encrypt fail')
+	}
+	debugLog('encrypt ok payloadLen=' + payload.length)
+}
+
+async function doEncrypt(plainToken: string): Promise<void> {
+	if (plainToken.length == 0) {
+		return
+	}
+	debugLog('encrypt entry tokenLen=' + plainToken.length)
+	await ensureKey()
+	try {
+		return await doEncryptOnce(plainToken)
+	} catch (e) {
+		if (isKeyInvalidated(e)) {
+			// 密钥失效（如指纹重录）：删除重建后重试一次（旧密文本就不可用，旧密文作废
+			// 由服务端重新下发覆盖）
+			debugLog('encrypt key invalidated, rebuild: ' + ('' + e))
+			await wipe()
+			await huks.generateKeyItem(KEY_ALIAS, genOptions())
+			return await doEncryptOnce(plainToken)
+		}
+		throw e
+	}
+}
+
+/**
+ * 本地是否存有加密凭证（同步）。密文存在不代表可解密——指纹重录后密文待解密时作废。
+ */
+export function hasVaultToken(): boolean {
+	return readPayload().length > 0
+}
+
+/** 清除加密凭证（密钥保留：下次加密复用，对齐安卓端语义） */
+export function clearVault(): void {
+	removePayloadFile()
+}
+
+/**
+ * 加密存储凭证（账密登录成功下发 biometric_token / 开启开关签发后调用）
+ * - HUKS 加密无须指纹（细粒度控制仅约束解密用途），明文 token 不落任何存储
+ * - 密钥失效时自动删除重建重试（旧密文作废，须重新启用/登录下发新 token）
+ */
+export function encryptAndStore(plainToken: string): Promise<void> {
+	return new Promise<void>((resolve, reject) => {
+		doEncrypt(plainToken).then(() => {
+			resolve()
+		}, (e: Error) => {
+			reject(e)
+		})
+	})
+}
+
+async function doDecrypt(title: string): Promise<string> {
+	const payload = readPayload()
+	if (payload.length == 0) {
+		throw new Error(ERR_EMPTY)
+	}
+	let decoded: Uint8Array
+	try {
+		decoded = new util.Base64Helper().decodeSync(payload)
+	} catch (e) {
+		await wipe()
+		throw new Error(ERR_INVALIDATED)
+	}
+	if (decoded.length <= GCM_NONCE_LEN) {
+		await wipe()
+		throw new Error(ERR_INVALIDATED)
+	}
+	const nonce = decoded.slice(0, GCM_NONCE_LEN)
+	const cipherData = decoded.slice(GCM_NONCE_LEN)
+	debugLog('decrypt entry payloadLen=' + payload.length + ' ctLen=' + cipherData.length)
+
+	// 解密会话初始化拿挑战值（密钥失效/缺失在此暴露）
+	let handle = 0
+	let challenge: Uint8Array | null = null
+	try {
+		const session = await huks.initSession(KEY_ALIAS, gcmOptions(nonce, huks.HuksKeyPurpose.HUKS_KEY_PURPOSE_DECRYPT, new Uint8Array([])))
+		handle = session.handle
+		if (session.challenge != null) {
+			// 可选属性收窄（undefined 不通约 Uint8Array | null，显式判空后取值）
+			challenge = session.challenge as Uint8Array
+		}
+	} catch (e) {
+		debugLog('decrypt initSession fail: ' + ('' + e))
+		if (isKeyInvalidated(e)) {
+			await wipe()
+			throw new Error(ERR_INVALIDATED)
+		}
+		throw new Error('wz_biometric_vault:decrypt fail')
+	}
+	if (challenge == null) {
+		await abortQuiet(handle)
+		throw new Error('wz_biometric_vault:decrypt fail')
+	}
+
+	// 指纹认证（系统认证框）：取消/失败/锁定均在认证结果码中收尾
+	let authToken: Uint8Array
+	try {
+		authToken = await userAuthFinger(challenge, title)
+	} catch (e) {
+		await abortQuiet(handle)
+		throw e as Error
+	}
+
+	try {
+		const result = await huks.finishSession(handle, gcmOptions(nonce, huks.HuksKeyPurpose.HUKS_KEY_PURPOSE_DECRYPT, cipherData), authToken)
+		const out = result.outData
+		if (out == null || out.length == 0) {
+			await abortQuiet(handle)
+			throw new Error('wz_biometric_vault:decrypt fail')
+		}
+		debugLog('decrypt ok plainLen=' + out.length)
+		return bytesToStr(out)
+	} catch (e) {
+		await abortQuiet(handle)
+		if (isKeyInvalidated(e)) {
+			await wipe()
+			throw new Error(ERR_INVALIDATED)
+		}
+		throw new Error('wz_biometric_vault:decrypt fail')
+	}
+}
+
+/**
+ * 指纹授权解密凭证（指纹登录流程使用）
+ * - 弹系统生物认证框（userAuth + HUKS 挑战值绑定），指纹通过才允许 finishSession
+ *   解密，未授权解密直接失败——指纹即钥匙
+ * - resolve：明文 token
+ * - reject：message 以 ERR_INVALIDATED 开头表示密钥/密文永久失效（密文已清，
+ *   须重新账密登录下发新凭证）；ERR_CANCEL 开头为用户取消/系统锁定；其余为一般失败
+ */
+export function decryptWithBiometric(title: string): Promise<string> {
+	return new Promise<string>((resolve, reject) => {
+		doDecrypt(title).then((token: string) => {
+			resolve(token)
+		}, (e: Error) => {
+			reject(e)
+		})
+	})
+}

@@ -100,8 +100,8 @@
 	// #endif
 
 	// #ifdef APP
-	import { getDeviceId, storeBiometricToken, getBiometricToken, isBiometricAvailable, isBiometricEnabled, authenticate } from '@/utils/biometric.uts'
-	import { biometricLogin } from './api/user.uts'
+	import { getDeviceId, storeBiometricToken, hasBiometricCredential, isBiometricAvailable, isBiometricEnabled, setBiometricEnabled, requestBiometricToken, authenticate, ERR_MSG_INVALIDATED, ERR_MSG_EMPTY } from '@/utils/biometric.uts'
+	import { biometricLogin, biometricIssue } from './api/user.uts'
 	// #endif
 
 	const userStore = useUserStore()
@@ -147,9 +147,20 @@
 			if (biometricModeDecided || urlForcedNormal) {
 				return
 			}
-			biometricModeDecided = true
-			biometricVisible.value = ok && getBiometricToken().length > 0 && isBiometricEnabled()
-			loginMode.value = biometricVisible.value ? 'fingerprint' : 'normal'
+			if (!ok || !isBiometricEnabled()) {
+				biometricModeDecided = true
+				biometricVisible.value = false
+				loginMode.value = 'normal'
+				return
+			}
+			hasBiometricCredential().then((hasCred: boolean) => {
+				if (biometricModeDecided || urlForcedNormal) {
+					return
+				}
+				biometricModeDecided = true
+				biometricVisible.value = hasCred
+				loginMode.value = hasCred ? 'fingerprint' : 'normal'
+			})
 		})
 		// #endif
 	})
@@ -227,11 +238,24 @@
 				// #ifdef APP
 				const biometricToken = d.getString('biometric_token')
 				if (biometricToken != null && biometricToken.length > 0) {
-					storeBiometricToken(biometricToken)
+					// Android：Keystore 加密存储（明文不落盘）；鸿蒙/iOS：本地沙箱明文。
+					// 加密失败不阻断登录——指纹入口以密文存在为准自然不展示
+					storeBiometricToken(biometricToken).then(() => {
+						// 加密存储成功
+					}, (e) => {
+						console.warn('指纹凭证加密存储失败', e)
+					})
 				}
 				// #endif
 			}
+			// #ifdef APP
+			// App 端：满足条件时先弹一次"是否开启指纹登录"询问框，选择后跳转设置页
+			uni.showToast({ title: t('login.success'), icon: 'success' })
+			promptBiometricAfterLogin()
+			// #endif
+			// #ifndef APP
 			toastGo(t('login.success'), '/pages/user/settings')
+			// #endif
 		}).catch((e) => {
 			const err = e as Error
 			uni.showToast({ title: err.message, icon: 'none' })
@@ -250,7 +274,7 @@
 	}
 
 	// #ifdef APP
-	/** 指纹一键登录（仅 App 端）：隐私勾选确认 → 系统指纹验证 → 本地凭证调 auth 指纹登录 → 跳转 */
+	/** 指纹一键登录（仅 App 端）：隐私勾选确认 → 指纹授权取回凭证 → 调 auth 指纹登录 → 跳转 */
 	async function handleFingerprintLogin() : Promise<void> {
 		if (submitting.value) {
 			return
@@ -260,18 +284,13 @@
 			confirmAgreement(t('login.agreeContent'), fingerprintAgree, () : void => { handleFingerprintLogin() })
 			return
 		}
-		const token = getBiometricToken()
-		if (token.length == 0) {
-			// 本地凭证缺失（如清缓存），回退账号密码登录
-			loginMode.value = 'normal'
-			return
-		}
 		submitting.value = true
 		uni.showLoading({ title: t('login.fingerprintVerifying'), mask: true })
 		try {
-			// 1. 系统级指纹验证（未通过不会返回成功）
-			await authenticate()
-			// 2. 本地凭证 + 设备标识调用 auth 指纹登录
+			// 系统级指纹验证与凭证获取一体（Android: CryptoObject 指纹授权解密 Keystore 密文，
+			// 指纹即钥匙；鸿蒙/iOS: Soter 指纹验证通过后读本地凭证）
+			const token = await requestBiometricToken(t('biometric.authContent'))
+			// 本地凭证 + 设备标识调用 auth 指纹登录
 			const res = await biometricLogin(token, getDeviceId())
 			uni.hideLoading()
 			const d = res.data
@@ -281,17 +300,120 @@
 			toastGo(t('login.success'), '/pages/user/settings')
 		} catch (e) {
 			uni.hideLoading()
-			// 用户取消指纹验证不提示错误，其余提示
+			// 错误分类：凭证失效/缺失 → 回退账号密码登录；用户取消/系统锁定 → 静默（系统弹框已呈现原因）；其余提示
 			setTimeout(() => {
-				const err = e as UniError
-				const msg = err.errMsg != null ? err.errMsg : ''
-				if (!msg.includes('cancel') && !msg.includes('authenticate fail')) {
+				const msg = bioErrorMessage(e)
+				if (msg.includes(ERR_MSG_INVALIDATED)) {
+					biometricVisible.value = false
+					loginMode.value = 'normal'
+					uni.showToast({ title: t('login.fingerprintInvalidated'), icon: 'none' })
+				} else if (msg.includes(ERR_MSG_EMPTY)) {
+					biometricVisible.value = false
+					loginMode.value = 'normal'
+				} else if (!msg.includes('cancel') && !msg.includes('authenticate fail')) {
 					uni.showToast({ title: t('login.fingerprintFail'), icon: 'none' })
 				}
 			}, 200)
 		} finally {
 			submitting.value = false
 		}
+	}
+
+	/** 指纹链路错误信息提取：UTS 插件/系统 API 错误兼容 UniError.errMsg 与 Error.message */
+	function bioErrorMessage(e: any | null): string {
+		if (e == null) {
+			return ''
+		}
+		const uniErr = e as UniError
+		if (uniErr.errMsg != null && uniErr.errMsg.length > 0) {
+			return uniErr.errMsg
+		}
+		return (e as Error).message
+	}
+
+	/** 账密登录成功后提示一次是否开启指纹登录：设备支持指纹 + 开关未开启才提示（不检查本地凭证——
+	 *  登录响应凭证异步加密落盘存在竞态，首次登录必竞态失败致弹窗永不出现）；确认开启后经系统指纹验证 →
+	 *  auth 签发凭证 → 加密落盘后开启开关（与个人信息页开启链路同口径），验证通过或取消后均跳转设置页 */
+	function promptBiometricAfterLogin(): void {
+		isBiometricAvailable().then((ok: boolean) => {
+			if (!ok || isBiometricEnabled()) {
+				// 不满足提示条件：按原时序跳转（toast 自动关闭后 1500ms）
+				setTimeout(() : void => {
+					uni.redirectTo({ url: '/pages/user/settings' })
+				}, 1500)
+				return
+			}
+			// toast 自动关闭（1500ms）后再弹询问框，避免 toast 与弹框转场并发（鸿蒙端实测崩溃风险）
+			setTimeout(() : void => {
+				uni.showModal({
+					title: t('login.biometricPromptTitle'),
+					content: t('login.biometricPromptContent'),
+					confirmText: t('login.biometricPromptConfirm'),
+					cancelText: t('login.biometricPromptCancel'),
+					success: (res) => {
+						if (res.confirm) {
+							enableBiometricWithAuth()
+						} else {
+							uni.redirectTo({ url: '/pages/user/settings' })
+						}
+					}
+				})
+			}, 1500)
+		})
+	}
+
+	/** 弹窗确认开启后的指纹验证链（与个人信息页开启开关同口径）：系统指纹验证 → auth 凭登录态签发凭证 →
+	 *  加密落盘 → 开启开关；验证取消/失败静默跳转，签发/落盘失败提示后跳转 */
+	function enableBiometricWithAuth(): void {
+		uni.showLoading({ title: t('login.fingerprintVerifying'), mask: true })
+		authenticate(t('biometric.authContentIssue')).then(() => {
+			biometricIssue(getDeviceId()).then((res: ApiResponse) => {
+				if (res.code != 0 || res.data == null) {
+					uni.hideLoading()
+					uni.showToast({ title: t('login.biometricIssueFail'), icon: 'none' })
+					setTimeout(() : void => {
+						uni.redirectTo({ url: '/pages/user/settings' })
+					}, 1500)
+					return
+				}
+				const token = res.data.getString('biometric_token')
+				if (token == null || token.length == 0) {
+					uni.hideLoading()
+					uni.showToast({ title: t('login.biometricIssueFail'), icon: 'none' })
+					setTimeout(() : void => {
+						uni.redirectTo({ url: '/pages/user/settings' })
+					}, 1500)
+					return
+				}
+				// Android：Keystore 加密存储（明文不落盘）；鸿蒙/iOS：本地沙箱明文
+				storeBiometricToken(token).then(() => {
+					uni.hideLoading()
+					setBiometricEnabled(true)
+					uni.showToast({ title: t('login.biometricEnabled'), icon: 'success' })
+					setTimeout(() : void => {
+						uni.redirectTo({ url: '/pages/user/settings' })
+					}, 1500)
+				}, (e) => {
+					uni.hideLoading()
+					console.warn('指纹凭证加密存储失败', e)
+					uni.showToast({ title: t('login.biometricIssueFail'), icon: 'none' })
+					setTimeout(() : void => {
+						uni.redirectTo({ url: '/pages/user/settings' })
+					}, 1500)
+				})
+			}, (_e) => {
+				uni.hideLoading()
+				console.warn('签发指纹登录凭证失败', _e)
+				uni.showToast({ title: t('login.biometricIssueFail'), icon: 'none' })
+				setTimeout(() : void => {
+					uni.redirectTo({ url: '/pages/user/settings' })
+				}, 1500)
+			})
+		}, (_e) => {
+			// 用户取消/指纹验证失败：不开启，静默（系统指纹框已呈现原因），直接跳转设置页
+			uni.hideLoading()
+			uni.redirectTo({ url: '/pages/user/settings' })
+		})
 	}
 	// #endif
 

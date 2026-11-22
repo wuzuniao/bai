@@ -2,18 +2,41 @@
 /**
  * 生物识别（指纹）登录工具（仅 App 端）
  * --------------------------------------------------------------------------
- * 与 yao 项目 useBiometric.js 同构：基于系统 Soter 三接口实现能力检测与指纹验证，
- * 凭证（biometric_token）由 auth 后端在账号密码登录时下发（高熵随机串 + device_id 绑定），
- * 直接存本地沙箱；开关状态独立持久化，关闭开关不清理凭证（重新开启无需重新登录）。
- * - Android 端需在 manifest.json 勾选指纹权限；鸿蒙端 HBuilderX 4.31+ 原生支持
+ * 与 jin 项目 biometric.uts 同构：基于系统 Soter 三接口实现能力检测与指纹验证，
+ * 凭证（biometric_token）由 auth 后端在账号密码登录时下发（高熵随机串 + device_id 绑定）；
+ * 开关状态独立持久化。
+ *
+ * 凭证安全分档（安卓/鸿蒙均为「指纹即钥匙」保险箱，iOS 维持明文现状）：
+ * - Android：凭证经 wz-biometric-vault 插件以 Keystore RSA 公钥加密存 SharedPreferences
+ *   （公钥软件加密无须授权；私钥 setUserAuthenticationRequired=true，解密须经
+ *   BiometricPrompt/FingerprintManager CryptoObject 指纹授权），明文不落任何存储。
+ * - 鸿蒙：凭证经 wz-biometric-vault 插件以 HUKS 细粒度访问控制 AES-GCM 密钥加密存
+ *   沙箱文件（KEY_AUTH_PURPOSE=DECRYPT——加密无须指纹、解密须经 userAuth 指纹认证，
+ *   新录指纹密钥自动失效），明文不落任何存储；需 manifest 声明
+ *   ohos.permission.ACCESS_BIOMETRIC（harmony-configs module.json5）。
+ * - iOS：维持系统 Soter 指纹验证（authenticate）+ 凭证明文存本地沙箱
+ *   （uni storage，TOKEN_KEY）——无 Keystore 等价物接入，安防强度同 yao 现状。
+ * - 开关开启场景（个人信息页/登录后询问框）：authenticate 纯本地验证通过后调 auth
+ *   /biometric-issue 凭登录态重新签发凭证（无需账密重登），storeBiometricToken 加密落盘。
+ * - Android/鸿蒙端旧版明文凭证在 storeBiometricToken/clearBiometricToken 时迁移清理。
+ * - 鸿蒙端 HBuilderX 4.31+ 原生支持 Soter 三接口（能力检测/本地验证）。
  */
+// #ifdef APP-ANDROID || APP-HARMONY
+import { hasVaultToken, encryptAndStore, decryptWithBiometric, clearVault } from '@/uni_modules/wz-biometric-vault'
+// #endif
 import { t } from './i18n'
 // 词典注册（指纹验证提示文案）
 import './locales/biometric.uts'
 
 const DEVICE_ID_KEY = 'biometricDeviceId'
+/** 凭证存储键：仅 iOS 明文；Android/鸿蒙端不再写入，仅作旧版明文迁移清理 */
 const TOKEN_KEY = 'biometricToken'
 const BIO_ENABLED_KEY = 'biometricEnabled'
+
+/** 插件错误 message 的失效标记（指纹重录/密文损坏，凭证已清须重新账密登录），供调用方匹配判断 */
+export const ERR_MSG_INVALIDATED = 'wz_biometric_vault:invalidated'
+/** 插件错误 message 的空凭证标记（本地无凭证），供调用方匹配判断 */
+export const ERR_MSG_EMPTY = 'wz_biometric_vault:empty'
 
 /** 生成或读取本地设备 UUID（首次调用时生成并持久化，登录/指纹登录时传给后端做绑定校验） */
 export function getDeviceId(): string {
@@ -88,13 +111,20 @@ export function isBiometricAvailable(): Promise<boolean> {
 	})
 }
 
-/** 发起系统级指纹验证（仅 App 端登录页指纹一键使用；用户取消/验证失败时 reject） */
-export function authenticate(): Promise<void> {
+// #ifdef APP
+/**
+ * 发起系统级指纹验证（App 全端）
+ * - 用于无需取回凭证的本地验证场景（个人信息页开启指纹登录开关：验证通过后才向 auth 签发凭证）
+ * - 指纹登录场景不走本函数：Android 端由插件 CryptoObject 指纹授权解密内含验证，
+ *   鸿蒙端由插件 userAuth 指纹认证解密内含验证，仅 iOS 端经 requestBiometricToken 内部调用
+ */
+export function authenticate(content: string): Promise<void> {
 	return new Promise<void>((resolve, reject) => {
 		uni.startSoterAuthentication({
 			requestAuthModes: ['fingerPrint'],
-			challenge: Date.now().toString(),
-			authContent: t('biometric.authContent'),
+			// challenge（Soter 挑战因子）不传：本工具仅做本地验证，硬件签名结果无人消费；
+			// 传值会被 vivo 等安卓系统指纹弹窗原样显示为一串无意义数字
+			authContent: content,
 			success: (_res) => {
 				resolve()
 			},
@@ -104,6 +134,7 @@ export function authenticate(): Promise<void> {
 		})
 	})
 }
+// #endif
 
 /** 读取指纹登录开关状态（默认关闭） */
 export function isBiometricEnabled(): boolean {
@@ -123,20 +154,112 @@ export function setBiometricEnabled(v: boolean): void {
 	}
 }
 
-/** 存储后端下发的 biometric_token（登录成功响应中携带时调用） */
-export function storeBiometricToken(token: string): void {
+/**
+ * 本地是否存在可用指纹凭证（登录页指纹卡片/个人信息页开关的展示与开启前提）
+ * - Android/鸿蒙：密文存在即视为有凭证（可解密性待指纹授权时判定，失效时引导重新登录）
+ * - iOS：本地明文凭证存在
+ */
+export function hasBiometricCredential(): Promise<boolean> {
+	// #ifdef APP-ANDROID || APP-HARMONY
+	return new Promise<boolean>((resolve) => {
+		resolve(hasVaultToken())
+	})
+	// #endif
+	// #ifdef APP-IOS
+	return new Promise<boolean>((resolve) => {
+		resolve(getLegacyPlainToken() != '')
+	})
+	// #endif
+}
+
+/**
+ * 发起指纹验证并取回登录凭证（指纹登录流程唯一入口）
+ * - Android：插件 decryptWithBiometric——弹系统生物认证框（CryptoObject 绑定解密密钥），
+ *   指纹通过才解密返回；reject 的 message 含 ERR_MSG_INVALIDATED 表示凭证已失效
+ *   （指纹重录/密文损坏，密文已清），调用方引导重新账密登录
+ * - 鸿蒙：插件 decryptWithBiometric——解密会话挑战值经 userAuth 指纹认证（系统认证框），
+ *   认证通过才 finishSession 解密返回；错误前缀语义与 Android 一致
+ * - iOS：先系统 Soter 指纹验证，通过后读本地明文凭证
+ */
+export function requestBiometricToken(title: string): Promise<string> {
+	// #ifdef APP-ANDROID || APP-HARMONY
+	return decryptWithBiometric(title)
+	// #endif
+	// #ifdef APP-IOS
+	return new Promise<string>((resolve, reject) => {
+		authenticate(t('biometric.authContent')).then(() => {
+			const token = getLegacyPlainToken()
+			if (token == '') {
+				reject(new Error(ERR_MSG_EMPTY))
+				return
+			}
+			resolve(token)
+		}, (err) => {
+			reject(err)
+		})
+	})
+	// #endif
+}
+
+/**
+ * 存储后端下发的 biometric_token（登录成功响应中携带时调用）
+ * - Android：清旧版明文残留后经插件 Keystore 加密存储（明文不落存储）；加密失败 reject
+ *   （调用方可提示，不影响登录本身）
+ * - 鸿蒙：经插件 HUKS 加密存储（加密无须指纹，明文不落存储）；加密失败 reject
+ * - iOS：明文存本地沙箱（现状）
+ */
+export function storeBiometricToken(token: string): Promise<void> {
 	if (token.length == 0) {
-		return
+		return new Promise<void>((resolve) => {
+			resolve()
+		})
 	}
+	// #ifdef APP-ANDROID || APP-HARMONY
+	return new Promise<void>((resolve, reject) => {
+		// 旧版明文凭证迁移清理：密文化后明文不再保留
+		try {
+			uni.removeStorageSync(TOKEN_KEY)
+		} catch (e) {
+			// 清理失败不影响加密存储主流程
+		}
+		encryptAndStore(token).then(() => {
+			resolve()
+		}, (e) => {
+			reject(e)
+		})
+	})
+	// #endif
+	// #ifdef APP-IOS
+	return new Promise<void>((resolve) => {
+		try {
+			uni.setStorageSync(TOKEN_KEY, token)
+		} catch (e) {
+			console.warn('存储生物识别凭证失败', e)
+		}
+		resolve()
+	})
+	// #endif
+}
+
+/**
+ * 清除本地指纹凭证（关闭指纹登录/撤销凭证时调用）
+ * - Android：清插件密文 + 旧版明文残留
+ * - 鸿蒙：清插件密文文件（HUKS 密钥保留，下次加密复用）
+ * - iOS：清明文凭证
+ */
+export function clearBiometricToken(): void {
+	// #ifdef APP-ANDROID || APP-HARMONY
+	clearVault()
+	// #endif
 	try {
-		uni.setStorageSync(TOKEN_KEY, token)
+		uni.removeStorageSync(TOKEN_KEY)
 	} catch (e) {
-		console.warn('存储生物识别凭证失败', e)
+		console.warn('清除生物识别凭证失败', e)
 	}
 }
 
-/** 读取本地 biometric_token（无则返回空串） */
-export function getBiometricToken(): string {
+/** 读取本地明文凭证（仅 iOS 存储路径；Android/鸿蒙端恒空串，勿用于业务判断） */
+function getLegacyPlainToken(): string {
 	try {
 		const v = uni.getStorageSync(TOKEN_KEY)
 		if (v == null) {

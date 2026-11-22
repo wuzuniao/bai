@@ -1,0 +1,510 @@
+/**
+ * wz-biometric-vault — 指纹凭证保险箱（仅 App-Android）
+ * --------------------------------------------------------------------------
+ * 目标：指纹登录凭证（auth 服务下发的 biometric_token）与用户指纹密码学绑定，
+ * 而非「明文落 storage + 指纹仅作 UI 门禁」——提取密文/篡改调用方均无法绕过指纹。
+ *
+ * 机制（RSA 公私钥分体：加密无须授权、解密指纹即钥匙）：
+ *   1. Keystore 生成 RSA-2048 密钥对，私钥 setUserAuthenticationRequired(true)：
+ *      解密授权需生物认证（CryptoObject）；指纹重录/锁屏凭据变更后私钥永久失效
+ *      （KeyPermanentlyInvalidatedException，此时清密文+删密钥，用户重新启用）。
+ *   2. encryptAndStore：取 Keystore 证书公钥在 Keystore 之外软件加密 token（公钥为
+ *      公开材质，无须生物认证授权——账密登录下发/开启开关后均可静默落盘），密文
+ *      base64 落 SharedPreferences——无指纹时密文只是随机字节，泄漏无用。
+ *      历史教训：旧版对称 AES-GCM 加解密同钥，per-op 授权对加密同样生效，
+ *      普通 Cipher doFinal 必抛 UserNotAuthenticatedException，加密落盘恒失败
+ *      （真机实测表现为「指纹登录凭证生成失败」）——改 RSA 分体根治。
+ *   3. decryptWithBiometric：Cipher.init(DECRYPT_MODE) 后以
+ *      BiometricPrompt.CryptoObject（API 28+）/ FingerprintManager.CryptoObject
+ *      （API 23-27）发起指纹认证，onAuthenticationSucceeded 后才允许 doFinal
+ *      解密——指纹即钥匙。
+ *
+ * UTS 编译约束（沿用 wz-quick-screenshot 云打包实测教训 + 本插件云打包实测）：
+ *   - 数值常量喂平台 Int 参数须显式 Int/Long 标注；
+ *   - 禁用 Kotlin 扩展（String.toByteArray()/readBytes() 等），纯 Java API 可用；
+ *   - **K2 下 CharSequence 经 java.lang 引用（import 或全限定）会使覆写参数解析为原始
+ *     Java 类符号，与父类 (Int, CharSequence!) 不通约报 overrides nothing**（本地 kotlinc
+ *     对照实测：kotlin.CharSequence 引用必过、java.lang 引用必挂）——覆写参数经
+ *     `kotlin.CharSequence` 引入（见 import 处注释）；覆写对象参数仍须显式 `X | null`
+ *     （与编译器 uts-types 对父类引用参数的可空声明一致，生成 X? 同 Bundle?/Intent?
+ *     已验证形态；`string | null` 收窄为 String? 不合法）；
+ *   - **new JavaString(...) 构造结果传 string? 形参报 actual java.lang.String**（同因：
+ *     java.lang 映射类型不通约；仅作接收者调方法不受影响，encryptAndStore 保留此用法）
+ *     ——字节转串改走 Charset.decode 纯 Java 方法链（方法返回的平台 String 可赋给
+ *     string?，同 Base64.encodeToString 实测口径）；
+ *   - 框架版 BiometricPrompt.Builder（android.hardware.biometrics）无
+ *     setNegativeButtonText（androidx 专属），须三参 setNegativeButton(text, executor,
+ *     listener)——负按钮点击由系统回调 onAuthenticationError(ERROR_NEGATIVE_BUTTON) 统一收尾；
+ *   - 异常类型以类名字符串判定（不 import 低频平台异常类，规避云打包 unresolved）；
+ *   - Int 位运算用 .or() infix 方法；
+ *   - extends 平台类的回调须具名类 + 显式 constructor(){ super() }，覆写参数/返回值
+ *     用平台类型。
+ */
+import Build from 'android.os.Build'
+import Context from 'android.content.Context'
+import Activity from 'android.app.Activity'
+import SharedPreferences from 'android.content.SharedPreferences'
+import CancellationSignal from 'android.os.CancellationSignal'
+import KeyStore from 'java.security.KeyStore'
+import KeyPairGenerator from 'java.security.KeyPairGenerator'
+import PrivateKey from 'java.security.PrivateKey'
+import Certificate from 'java.security.cert.Certificate'
+import Cipher from 'javax.crypto.Cipher'
+// 注意：覆写参数 CharSequence 必须经 kotlin.CharSequence 引入（生成 import kotlin.CharSequence）。
+// 经 java.lang.CharSequence 引入时云打包 K2 将覆写参数解析为原始 Java 类符号，
+// 与父类 (Int, CharSequence!) 不通约，报 overrides nothing（本地 kotlinc 复现实测）
+import CharSequence from 'kotlin.CharSequence'
+import DialogInterface from 'android.content.DialogInterface'
+import KeyGenParameterSpec from 'android.security.keystore.KeyGenParameterSpec'
+import KeyProperties from 'android.security.keystore.KeyProperties'
+import BiometricPrompt from 'android.hardware.biometrics.BiometricPrompt'
+import FingerprintManager from 'android.hardware.fingerprint.FingerprintManager'
+import Base64 from 'android.util.Base64'
+import Log from 'android.util.Log'
+import File from 'java.io.File'
+import FileOutputStream from 'java.io.FileOutputStream'
+import System from 'java.lang.System'
+import Charset from 'java.nio.charset.Charset'
+import ByteBuffer from 'java.nio.ByteBuffer'
+import OAEPParameterSpec from 'javax.crypto.spec.OAEPParameterSpec'
+import MGF1ParameterSpec from 'java.security.spec.MGF1ParameterSpec'
+import PSource from 'javax.crypto.spec.PSource'
+import JavaString from 'java.lang.String'
+import Locale from 'java.util.Locale'
+import Executor from 'java.util.concurrent.Executor'
+import { UTSAndroid } from 'io.dcloud.uts'
+
+/** Keystore 密钥别名（失效重建以同名覆盖删除重建） */
+const KEY_ALIAS = 'wz_biometric_vault_key'
+/** 密文落盘的 SharedPreferences 名与键 */
+const SP_NAME = 'wz_biometric_vault'
+const SP_KEY = 'vault_payload'
+/** 遗留 AES 时代载荷分隔符（base64(iv):base64(ct)）；新载荷为单段 base64，此符仅用于识别并清除遗留格式 */
+const SEPARATOR = ':'
+/** RSA-OAEP 加解密 transformation（OAEP 摘要与 MGF1 摘要须经 OAEPParameterSpec 两端显式钉死一致） */
+const OAEP_TRANSFORMATION = 'RSA/ECB/OAEPWithSHA-256AndMGF1Padding'
+/**
+ * 两端共用的 OAEP 参数：主摘要 SHA-256 + MGF1-SHA1。
+ * 真机实测（vivo V2266A，Android 16）：MGF1-SHA256 在本机 KeyMint 上不支持（doFinal 报
+ * IllegalBlockSizeException，诊断文件实证密文/密钥/摘要均正确），MGF1-SHA1 可用；
+ * 同时加解密两端必须显式指定同一 spec——缺省时加密侧兜底 provider 与 Keystore 侧
+ * 的 MGF1 各取各的默认值，必然失配。
+ */
+function oaepSpec(): OAEPParameterSpec {
+	return new OAEPParameterSpec('SHA-256', 'MGF1', MGF1ParameterSpec.SHA1, PSource.PSpecified.DEFAULT)
+}
+const RSA_KEY_BITS: Int = 2048
+/** FingerprintManager.authenticate 的 flags 参数恒 0 */
+const FP_FLAGS: Int = 0
+
+// 错误 message 前缀三件套（与 utils/biometric.uts 的 ERR_MSG_* 双份同步，字符串本体不得改动）。
+// 仅供插件内部构造错误使用，禁止 export：HBuilderX 5.34 vdom 模式下插件 proxy 生成器
+// 对导出的字符串常量丢失引号（genInitCode 直接返回字面量值），云打包本地编译即报
+// Expected a semicolon；调用方按前缀匹配 message，不 import 本符号。
+/** 错误 message 前缀：密钥/密文永久失效（指纹重录、密文损坏），密文已清须重新账密登录 */
+const ERR_INVALIDATED = 'wz_biometric_vault:invalidated'
+/** 错误 message 前缀：本地无加密凭证 */
+const ERR_EMPTY = 'wz_biometric_vault:empty'
+/** 错误 message 前缀：用户取消指纹认证 */
+const ERR_CANCEL = 'wz_biometric_vault:cancel'
+
+/** 异常类名含下列片段判定为「密钥永久失效」（指纹重录/锁屏凭据变更），须 wipe 重建 */
+const INVALIDATED_MARKERS = ['Invalidated', 'UnrecoverableKeyException', 'KeyStoreException']
+
+function getActivity(): Activity | null {
+	return UTSAndroid.getUniActivity()
+}
+
+function vaultSp(): SharedPreferences | null {
+	const ctx = UTSAndroid.getAppContext()
+	if (ctx == null) {
+		return null
+	}
+	return ctx.getSharedPreferences(SP_NAME, Context.MODE_PRIVATE)
+}
+
+function readPayload(): string {
+	const sp = vaultSp()
+	if (sp == null) {
+		return ''
+	}
+	const v = sp.getString(SP_KEY, '')
+	return v != null ? v : ''
+}
+
+function writePayload(payload: string): void {
+	const sp = vaultSp()
+	if (sp == null) {
+		return
+	}
+	sp.edit().putString(SP_KEY, payload).apply()
+}
+
+/** 原生日志 tag（console 不落 logcat，失败诊断走 Log.e） */
+const LOG_TAG = 'wz-biometric-vault'
+
+/**
+ * 诊断日志追加写入应用外部目录（getExternalFilesDir/wz_biometric_debug.txt）：
+ * vivo 等 ROM 过滤第三方应用 logcat（实测本应用 Log 完全不可见），adb 可直接拉取该文件取证。
+ * 诊断写盘失败静默，不影响主流程。
+ */
+function debugLog(msg: string): void {
+	try {
+		const ctx = UTSAndroid.getAppContext()
+		if (ctx == null) {
+			return
+		}
+		const dir = ctx.getExternalFilesDir(null)
+		if (dir == null) {
+			return
+		}
+		const f = new File(dir.getAbsolutePath(), 'wz_biometric_debug.txt')
+		const fos = new FileOutputStream(f, true)
+		const line = System.currentTimeMillis().toString() + ' ' + msg + '\n'
+		fos.write(new JavaString(line).getBytes('UTF-8'))
+		fos.close()
+	} catch (e) {
+		// 诊断写盘失败不影响主流程
+	}
+}
+
+/** 异常是否为密钥永久失效（凭证无法再解密，须清密文删密钥走重新账密登录） */
+function isInvalidated(e: any | null): boolean {
+	if (e == null) {
+		return false
+	}
+	// 平台 Java 异常不是 UTS Error（`as Error` 强转会 ClassCastException 致进程崩溃，
+	// 真机实测 IllegalBlockSizeException 触发过）；异常 toString 以「类名: 消息」开头，
+	// 直接以字符串形式取类名判定
+	const name = '' + e
+	for (let i = 0; i < INVALIDATED_MARKERS.length; i++) {
+		if (name.indexOf(INVALIDATED_MARKERS[i]) >= 0) {
+			return true
+		}
+	}
+	return false
+}
+
+/** 删除 Keystore 密钥（失效重建用；不存在时静默） */
+function deleteKey(): void {
+	try {
+		const ks = KeyStore.getInstance('AndroidKeyStore')
+		ks.load(null)
+		if (ks.containsAlias(KEY_ALIAS)) {
+			ks.deleteEntry(KEY_ALIAS)
+		}
+	} catch (e) {
+		// Keystore 环境异常：删除失败不阻断主流程（重建时 generateKey 会覆盖）
+	}
+}
+
+/** 取现有 RSA 私钥；无（或旧版 AES 遗留）则生成（setUserAuthenticationRequired：解密须生物认证授权） */
+function loadOrCreateKey(): PrivateKey {
+	const ks = KeyStore.getInstance('AndroidKeyStore')
+	ks.load(null)
+	const existing = ks.getKey(KEY_ALIAS, null)
+	if (existing != null) {
+		try {
+			return existing as PrivateKey
+		} catch (e) {
+			// 旧版遗留 AES 密钥（该历史版本加密链路从未成功、无有效密文依赖）：删除重建为 RSA
+			deleteKey()
+		}
+	}
+	const generator = KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_RSA, 'AndroidKeyStore')
+	const purposes: Int = KeyProperties.PURPOSE_DECRYPT
+	generator.initialize(
+		new KeyGenParameterSpec.Builder(KEY_ALIAS, purposes)
+			.setKeySize(RSA_KEY_BITS)
+			.setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_RSA_OAEP)
+			.setDigests(KeyProperties.DIGEST_SHA256)
+			.setUserAuthenticationRequired(true)
+			.build()
+	)
+	generator.generateKeyPair()
+	// 重新加载 Keystore 再取私钥（防同实例读不到生成器写入的新条目）
+	const ksReloaded = KeyStore.getInstance('AndroidKeyStore')
+	ksReloaded.load(null)
+	return ksReloaded.getKey(KEY_ALIAS, null) as PrivateKey
+}
+
+/** 密钥失效时删除重建（旧密文同批作废由调用方处理） */
+function loadKeyRebuildIfInvalid(): PrivateKey {
+	try {
+		return loadOrCreateKey()
+	} catch (e) {
+		if (isInvalidated(e)) {
+			deleteKey()
+			return loadOrCreateKey()
+		}
+		throw e
+	}
+}
+
+function isZhLocale(): boolean {
+	return Locale.getDefault().getLanguage().indexOf('zh') >= 0
+}
+
+function cancelText(): string {
+	return isZhLocale() ? '取消' : 'Cancel'
+}
+
+/**
+ * 解密收尾：认证回调线程执行（RSA-OAEP 单段数据量，耗时毫秒级，无需切线程）。
+ * 解密失败/密钥失效 → 清密文删密钥并报 invalidated。
+ * 字节转字符串走 Charset.decode 纯 Java 方法链（java.lang.String 构造结果传
+ * string? 形参云打包 K2 不通约，见文件头注释「UTS 编译约束」）。
+ */
+function doFinalDecrypt(cipher: Cipher, encrypted: ByteArray, onFinish: (err: Error | null, token: string | null) => void): void {
+	try {
+		const plain = cipher.doFinal(encrypted)
+		debugLog('doFinal ok plainLen=' + plain.size)
+		// JavaString 构造结果传 string? 形参云打包报 actual java.lang.String（见头注释），
+		// 字节转串走 Charset.decode 纯 Java 方法链，方法返回的平台 String 可赋 string?
+		onFinish(null, Charset.forName('UTF-8').decode(ByteBuffer.wrap(plain)).toString())
+	} catch (e) {
+		debugLog('doFinal fail: ' + ('' + e))
+		Log.e(LOG_TAG, 'decrypt doFinal fail ctLen=' + encrypted.size + ': ' + ('' + e))
+		if (isInvalidated(e)) {
+			deleteKey()
+			writePayload('')
+			onFinish(new Error(ERR_INVALIDATED), null)
+		} else {
+			onFinish(new Error('wz_biometric_vault:decrypt fail'), null)
+		}
+	}
+}
+
+/**
+ * API 28+ BiometricPrompt.CryptoObject 指纹认证回调。
+ * 仅 onAuthenticationSucceeded / onAuthenticationError 收尾；onAuthenticationFailed
+ * 为单次识别失败，系统自动允许重试，不打断。
+ */
+class VaultBiometricPromptCallback extends BiometricPrompt.AuthenticationCallback {
+	private onFinish: (err: Error | null, token: string | null) => void
+	private encrypted: ByteArray
+
+	constructor(encrypted: ByteArray, onFinish: (err: Error | null, token: string | null) => void) {
+		super()
+		this.onFinish = onFinish
+		this.encrypted = encrypted
+	}
+
+	override onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult | null) {
+		debugLog('prompt authSucceeded')
+		const cryptoObj = result != null ? result.getCryptoObject() : null
+		if (cryptoObj == null) {
+			this.onFinish(new Error('wz_biometric_vault:decrypt fail'), null)
+			return
+		}
+		const cryptoCipher = cryptoObj.getCipher()
+		if (cryptoCipher == null) {
+			this.onFinish(new Error('wz_biometric_vault:decrypt fail'), null)
+			return
+		}
+		doFinalDecrypt(cryptoCipher!, this.encrypted, this.onFinish)
+	}
+
+	override onAuthenticationError(code: Int, errString: CharSequence | null) {
+		debugLog('prompt authError code=' + code.toString() + ' msg=' + (errString != null ? errString.toString() : ''))
+		this.onFinish(new Error(ERR_CANCEL + ' [' + code.toString() + ']'), null)
+	}
+}
+
+/**
+ * API 23-27 FingerprintManager.CryptoObject 指纹认证回调（低版本兼容分支）。
+ * onAuthenticationFailed 为单次识别失败（系统自动重试至锁定），不收尾；
+ * onAuthenticationError 含最终失败/取消/锁定。
+ */
+class VaultFingerprintCallback extends FingerprintManager.AuthenticationCallback {
+	private onFinish: (err: Error | null, token: string | null) => void
+	private encrypted: ByteArray
+
+	constructor(encrypted: ByteArray, onFinish: (err: Error | null, token: string | null) => void) {
+		super()
+		this.onFinish = onFinish
+		this.encrypted = encrypted
+	}
+
+	override onAuthenticationSucceeded(result: FingerprintManager.AuthenticationResult | null) {
+		const cryptoObj = result != null ? result.getCryptoObject() : null
+		if (cryptoObj == null) {
+			this.onFinish(new Error('wz_biometric_vault:decrypt fail'), null)
+			return
+		}
+		const cryptoCipher = cryptoObj.getCipher()
+		if (cryptoCipher == null) {
+			this.onFinish(new Error('wz_biometric_vault:decrypt fail'), null)
+			return
+		}
+		doFinalDecrypt(cryptoCipher!, this.encrypted, this.onFinish)
+	}
+
+	override onAuthenticationError(code: Int, errString: CharSequence | null) {
+		this.onFinish(new Error(ERR_CANCEL + ' [' + code.toString() + ']'), null)
+	}
+}
+
+/**
+ * 本地是否存有加密凭证（同步）。密文存在不代表可解密——指纹重录后密文待解密时作废。
+ */
+export function hasVaultToken(): boolean {
+	return readPayload().length > 0
+}
+
+/** 清除加密凭证（Keystore 密钥保留：下次加密复用） */
+export function clearVault(): void {
+	writePayload('')
+}
+
+/**
+ * 加密存储凭证（账密登录成功下发 biometric_token / 开启开关签发后调用）
+ * - Keystore 证书公钥软件加密（无须生物认证授权），密文 base64 落 SharedPreferences；
+ *   明文 token 不落任何存储
+ * - 密钥失效时自动删除重建（旧密文已不可解，须重新启用/登录下发新 token）
+ */
+export function encryptAndStore(plainToken: string): Promise<void> {
+	return new Promise<void>((resolve, reject) => {
+		try {
+			if (plainToken.length == 0) {
+				resolve()
+				return
+			}
+			debugLog('encrypt entry tokenLen=' + plainToken.length)
+			// 确保密钥对存在且未失效（失效重建：旧密文本就不可解，由解密侧引导重新启用）
+			loadKeyRebuildIfInvalid()
+			const ks = KeyStore.getInstance('AndroidKeyStore')
+			ks.load(null)
+			const cert = ks.getCertificate(KEY_ALIAS)
+			if (cert == null) {
+				throw new Error('wz_biometric_vault:keypair missing')
+			}
+			// 公钥为公开材质：Keystore 之外软件加密，无须生物认证授权（解密才需要）。
+			// OAEP 参数与解密端共用同一 spec（oaepSpec 注释）
+			const cipher = Cipher.getInstance(OAEP_TRANSFORMATION)
+			cipher.init(Cipher.ENCRYPT_MODE, cert.getPublicKey(), oaepSpec())
+			// UTS string 经 java.lang.String 中转取字节（kotlin.String 无 getBytes，
+			// JavaString 构造器与 getBytes(String) 均为纯 Java API；token 为 hex ASCII，
+			// UTF-8 单字节编码无歧义）
+			const encrypted = cipher.doFinal(new JavaString(plainToken).getBytes('UTF-8'))
+			debugLog('encrypt ok ctLen=' + encrypted.size)
+			Log.i(LOG_TAG, 'encrypt ok ctLen=' + encrypted.size)
+			writePayload(Base64.encodeToString(encrypted, Base64.NO_WRAP))
+			resolve()
+		} catch (e) {
+			// 加密链路异常（Keystore 环境损坏等）：不留半截密文
+			debugLog('encrypt fail: ' + ('' + e))
+			Log.e(LOG_TAG, 'encrypt fail: ' + ('' + e))
+			writePayload('')
+			reject(new Error('wz_biometric_vault:encrypt fail'))
+		}
+	})
+}
+
+/**
+ * 指纹授权解密凭证（指纹登录流程使用）
+ * - 弹系统生物认证框（BiometricPrompt API 28+ / FingerprintManager API 23-27），
+ *   CryptoObject 绑定解密 Cipher——指纹通过后才允许 doFinal，未授权 doFinal 直接抛异常
+ * - resolve：明文 token
+ * - reject：message 以 ERR_INVALIDATED 开头表示密钥/密文永久失效（密文已清，
+ *   须重新账密登录下发新凭证）；ERR_CANCEL 开头为用户取消/系统锁定；其余为一般失败
+ */
+export function decryptWithBiometric(title: string): Promise<string> {
+	return new Promise<string>((resolve, reject) => {
+		const payload = readPayload()
+		if (payload.length == 0) {
+			debugLog('decrypt entry EMPTY')
+			reject(new Error(ERR_EMPTY))
+			return
+		}
+		const activity = getActivity()
+		if (activity == null) {
+			reject(new Error('wz_biometric_vault:activity unavailable'))
+			return
+		}
+		// 遗留 AES 时代载荷（base64(iv):base64(ct)，该版本加密链路从未成功，纯防御清除）
+		if (payload.indexOf(SEPARATOR) >= 0) {
+			writePayload('')
+			reject(new Error(ERR_INVALIDATED))
+			return
+		}
+		let encrypted: ByteArray
+		try {
+			encrypted = Base64.decode(payload, Base64.NO_WRAP)
+			debugLog('decrypt entry payloadLen=' + payload.length + ' ctLen=' + encrypted.size)
+			Log.i(LOG_TAG, 'decrypt init payloadLen=' + payload.length + ' ctLen=' + encrypted.size)
+		} catch (e) {
+			debugLog('decrypt base64 fail: ' + ('' + e))
+			writePayload('')
+			reject(new Error(ERR_INVALIDATED))
+			return
+		}
+
+		let cipher: Cipher
+		try {
+			const key = loadOrCreateKey()
+			cipher = Cipher.getInstance(OAEP_TRANSFORMATION)
+			// 解密端与加密端共用同一 spec（oaepSpec 注释），否则两端 MGF1 缺省值失配
+			// 导致 OAEP 解码失败（真机实测表现为 IllegalBlockSizeException）
+			cipher.init(Cipher.DECRYPT_MODE, key, oaepSpec())
+			debugLog('cipher init ok algo=' + cipher.getAlgorithm() + ' key=' + ('' + (key != null ? key.javaClass.getName() : '')))
+		} catch (e) {
+			debugLog('cipher init fail: ' + ('' + e))
+			// 密钥失效/缺失：密文永远解不开，清密文删密钥，引导重新账密登录
+			deleteKey()
+			writePayload('')
+			reject(new Error(ERR_INVALIDATED))
+			return
+		}
+
+		let finished = false
+		const onFinish = (err: Error | null, token: string | null): void => {
+			if (finished) {
+				return
+			}
+			finished = true
+			if (err != null) {
+				reject(err)
+			} else {
+				resolve(token as string)
+			}
+		}
+
+		const signal = new CancellationSignal()
+		if (Build.VERSION.SDK_INT >= 28) {
+			const executor = activity.getMainExecutor() as Executor
+			// 框架版 Builder 无 setNegativeButtonText（androidx 专属），须三参
+			// setNegativeButton；负按钮点击由系统回调 onAuthenticationError
+			// （ERROR_NEGATIVE_BUTTON）统一走 ERR_CANCEL 收尾，监听器无需做事
+			const prompt = new BiometricPrompt.Builder(activity as Context)
+				.setTitle(title)
+				.setNegativeButton(cancelText(), executor, (dialog: DialogInterface, which: Int): void => {})
+				.build()
+			prompt.authenticate(
+				new BiometricPrompt.CryptoObject(cipher),
+				signal,
+				executor,
+				new VaultBiometricPromptCallback(encrypted, onFinish)
+			)
+			return
+		}
+
+		// API 23-27：FingerprintManager CryptoObject 兼容分支
+		const fingerprintManager = activity.getSystemService(Context.FINGERPRINT_SERVICE) as FingerprintManager | null
+		if (fingerprintManager == null || !fingerprintManager.isHardwareDetected()) {
+			reject(new Error('wz_biometric_vault:hardware unavailable'))
+			return
+		}
+		if (!fingerprintManager.hasEnrolledFingerprints()) {
+			reject(new Error('wz_biometric_vault:not enrolled'))
+			return
+		}
+		fingerprintManager.authenticate(
+			new FingerprintManager.CryptoObject(cipher),
+			signal,
+			FP_FLAGS,
+			new VaultFingerprintCallback(encrypted, onFinish),
+			null
+		)
+	})
+}

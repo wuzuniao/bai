@@ -66,6 +66,20 @@ export function biometricLogin(token: string, deviceId: string) : Promise<ApiRes
 	return request(opts('/api/v1/users/biometric-login', 'POST', data, false))
 }
 
+/** 撤销当前设备生物识别登录凭证（仅 App 端：个人信息页关闭指纹登录时调用，立即作废服务端凭证） */
+export function biometricRevoke(deviceId: string) : Promise<ApiResponse> {
+	const data = {} as UTSJSONObject
+	data['device_id'] = deviceId
+	return request(opts('/api/v1/users/biometric-revoke', 'POST', data))
+}
+
+/** 已登录状态下签发当前设备生物识别登录凭证（仅 App 端：个人信息页开启指纹登录时调用，响应 data.biometric_token 为明文凭证，前端加密存储） */
+export function biometricIssue(deviceId: string) : Promise<ApiResponse> {
+	const data = {} as UTSJSONObject
+	data['device_id'] = deviceId
+	return request(opts('/api/v1/users/biometric-issue', 'POST', data))
+}
+
 /** 重置密码（成功响应 data 含新令牌，直接写入登录态） */
 export function resetPassword(email: string, code: string, newPassword: string) : Promise<ApiResponse> {
 	const data = {} as UTSJSONObject
