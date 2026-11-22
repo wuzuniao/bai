@@ -1,5 +1,8 @@
-# 前端 uni-app x / HBuilderX
-unpackage/
+# 前端 uni-app x / HBuilderX（unpackage 仅例外保留应用图标入库，构建产物/缓存不入库）
+frontend/unpackage/*
+!frontend/unpackage/res
+frontend/unpackage/res/*
+!frontend/unpackage/res/icons
 .hbuilderx/
 node_modules/
 # CLI 构建产物（deploy.sh / npm run build:h5 生成，可再生成）
