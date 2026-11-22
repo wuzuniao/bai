@@ -101,9 +101,6 @@ export function normalizeSpan(s : SelSpan) : SelSpan {
 	return s
 }
 
-/** 句末标点集（句号/叹号/问号结句，逗号不结句；阅读页句界扫描与首页诗行间句界共用） */
-export const SENTENCE_END_CHARS : string = '。！？!?…'
-
 /** 判定想法覆盖某章某段落的某字符（位置字典序落在 [from, to] 闭区间内；跨段跨章，章 id 升序即阅读顺序） */
 export function thoughtCovers(t : Thought, cid : number, origin : number, charIdx : number) : boolean {
 	return comparePos(t.fromCid, t.fromOrigin, t.fromStart, cid, origin, charIdx) <= 0

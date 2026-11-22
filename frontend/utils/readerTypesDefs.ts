@@ -130,6 +130,8 @@ export type ParaRect = {
 	left : number
 	top : number
 	bottom : number
+	/** 右界（px）：逐字拖动的末字符右缘收敛用（首页诗行尾标点区窄于字格步进，避免手柄悬出文本） */
+	right : number
 	len : number
 	/** 本 rect 文本切片在整段中的起始字符（流式分页段落跨页时非 0；换算原段坐标需加此偏移） */
 	from : number
@@ -137,4 +139,19 @@ export type ParaRect = {
 	firstLen : number
 	/** 合并行后段所属段 origin（宽屏合并行=前段 origin+1；-1=无合并） */
 	secondOrigin : number
+	/** 段落逐字符左缘（px，段落坐标含缩进：charX[k]=第 k 字左界、charX[段长]=末字右界；
+	 *  App 端 StaticLayout 逐字缓存下发，首页诗/其余端为 null——null 时拖动退回均匀字格口径） */
+	charX : number[] | null
+	/** 段落逐行末字符下标（段落坐标，与 charX 配合做触点→字符逆映射）；null=无精确数据 */
+	lineEnds : number[] | null
+	/** 段落逐行真实右缘（px，段落坐标；行末字符的右界必须取它——charX[行末+1] 是下一行首字 x=0） */
+	lineRights : number[] | null
+}
+
+/** 段落想法/划线的行底线条带（App 端按 charX 逐行渲染；非 App 端线条由 text-decoration 着色，不产生带） */
+export type ParaBand = {
+	/** 内联定位样式（left/top/width/height，px；坐标系=所在段落视图） */
+	style : string
+	/** true=想法线条（正蓝）；false=划线线条（弱灰） */
+	thought : boolean
 }

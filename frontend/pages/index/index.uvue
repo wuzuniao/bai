@@ -65,6 +65,7 @@
 			:thought-card-max-w="thoughtCardMaxW"
 			:page-h="pageH"
 			:metrics="poemMetrics"
+			:anchors-from-view="true"
 			:segs="selSegs"
 			:text="selText"
 			:share-ctx="shareCtx"
@@ -93,7 +94,7 @@
 	import { READER_THEME_LIGHT } from '@/utils/theme.uts'
 	import { useUserStore, avatarSrcOf } from '@/stores/user.uts'
 	import type { SelSpan, SpanSeg, TextMetrics, ParaRect, ShareQuoteCtx, Thought, UnderlineEntry, Paragraph } from '@/utils/readerTypesDefs.ts'
-	import { normalizeSpan, setActiveBookId, loadUnderlines, loadThoughts, fetchNotesToCache, VIRTUAL_BOOK_ID, SENTENCE_END_CHARS, thoughtAt, spanOfThought, thoughtTextOfSpan, buildSpanSegs } from '@/utils/readerTypes.uts'
+	import { normalizeSpan, setActiveBookId, loadUnderlines, loadThoughts, fetchNotesToCache, VIRTUAL_BOOK_ID, thoughtAt, spanOfThought, thoughtTextOfSpan, buildSpanSegs } from '@/utils/readerTypes.uts'
 	import type { PoemLine } from '@/utils/poemDefs.ts'
 	import { POEM_LINES } from '@/utils/poem.uts'
 	import { scheduleResizeReload } from '@/utils/layout.uts'
@@ -530,25 +531,6 @@
 
 	/** ===== 划词协议（选区状态在气泡组件，锚点实测与拖动行矩形由本页查询回传） ===== */
 
-	/** 行尾标点是否句末（句号/叹号/问号结句，逗号不结句；句末集合与阅读页句间扫描同口径） */
-	function isSentenceEnd(li : number) : boolean {
-		const line = poemLines.value[li]
-		return line != null && SENTENCE_END_CHARS.indexOf(line.punct) >= 0
-	}
-
-	/** 长按行的句覆盖范围 [句首行, 句末行]：向前找句首（前行结句即到句首）、向后找句末（结句行停，末行钳制） */
-	function sentenceRangeOf(li : number) : number[] {
-		let start = li
-		while (start > 0 && !isSentenceEnd(start - 1)) {
-			start--
-		}
-		let end = li
-		while (!isSentenceEnd(end) && end < poemLines.value.length - 1) {
-			end++
-		}
-		return [start, end]
-	}
-
 	/** 行矩形 → 拖动映射缓存项（行间 margin 空隙以上一行下界补齐消除死区）。
 	 *  宽屏合并行：一个渲染行并置两个笔记段——len=16、firstLen=8、secondOrigin=后段行号，
 	 *  气泡组件触点字符索引超前段长度时切分到后段（无合并时两字段为 -1，行为不变） */
@@ -560,6 +542,7 @@
 			const rLeft = rects[ri].left ?? 0
 			const rTop = rects[ri].top ?? 0
 			const rBottom = rects[ri].bottom ?? 0
+			const rRight = rects[ri].right ?? 0
 			if (isWide.value && units.length > LINE_CHAR_COUNT) {
 				dragRects.push({
 					cid: 0,
@@ -567,10 +550,14 @@
 					left: rLeft,
 					top: rTop,
 					bottom: rBottom,
+					right: rRight,
 					len: units.length,
 					from: 0,
 					firstLen: LINE_CHAR_COUNT,
-					secondOrigin: units[units.length - 1].origin
+					secondOrigin: units[units.length - 1].origin,
+					charX: null,
+					lineEnds: null,
+					lineRights: null
 				} as ParaRect)
 			} else {
 				dragRects.push({
@@ -579,10 +566,14 @@
 					left: rLeft,
 					top: rTop,
 					bottom: rBottom,
+					right: rRight,
 					len: LINE_CHAR_COUNT,
 					from: 0,
 					firstLen: -1,
-					secondOrigin: -1
+					secondOrigin: -1,
+					charX: null,
+					lineEnds: null,
+					lineRights: null
 				} as ParaRect)
 			}
 		}
@@ -602,27 +593,24 @@
 				return
 			}
 			popoverRef.value?.$callMethod('setDragRects', buildDragRects(rects))
-			// 长按字符单元命中想法区间时恢复该想法的完整选区（含划线区域，默认高亮想法选区，
-			// 与阅读页「句间吸附前判定想法」同语义）；否则按句选取——句号结尾的才是一句，
-			// 逗号行与句号行构成一联一起选中（与阅读页句间吸附同语义）
+			// 长按字符单元命中想法区间时恢复该想法的完整选区（含划线区域，默认高亮想法选区）；
+			// 否则选中触点所在字符（单字起选，左右手柄可逐字拖动扩展/收缩，与阅读页同口径）
 			const units = renderLines.value[ri].units
 			const ci = Math.max(0, Math.min(Math.floor((clientX - (rects[ri].left ?? 0)) / poemMetrics.value.charW), units.length - 1))
 			const unit = units[ci]
-			const range = sentenceRangeOf(unit.origin)
 			let span : SelSpan
 			const hit = thoughtAt(thoughts.value, 0, unit.origin, unit.col)
 			if (hit != null) {
-				// 长按列命中想法区间：恢复该想法的完整选区（含划线区域，与阅读页「句间吸附前判定想法」同语义）
+				// 长按列命中想法区间：恢复该想法的完整选区（含划线区域）
 				span = spanOfThought(hit)
 			} else {
-				// 按句选取：句号结尾的才是一句，逗号行与句号行构成一联一起选中（与阅读页句间吸附同语义）
 				span = {
 					fromCid: 0,
-					fromOrigin: range[0],
-					fromStart: 0,
+					fromOrigin: unit.origin,
+					fromStart: unit.col,
 					toCid: 0,
-					toOrigin: range[1],
-					toEnd: LINE_CHAR_COUNT - 1
+					toOrigin: unit.origin,
+					toEnd: unit.col
 				} as SelSpan
 			}
 			// 起点段矩形按选区起点行取（跨行想法的估算基准落在起点行；锚点实测以端点动态查询为准）
@@ -632,7 +620,7 @@
 		}).exec()
 	}
 
-	/** 长按诗行：整行选中（窄屏诗行即句、宽屏合并行即一句，对齐阅读页句间吸附语义），选区在气泡组件内建立；
+	/** 长按诗行：选中触点所在字符单元（与阅读页单字起选同口径，手柄可逐字拖动），选区在气泡组件内建立；
 	 *  同批次预查全部行矩形回传拖动映射缓存——拖动开始事件里的异步查询回来前 touchmove
 	 *  会因映射为空被丢弃（表现为主柄拖不动），长按时预查使拖动首帧即跟手 */
 	function onLineLongPress(ri : number, e : any) : void {
@@ -666,7 +654,11 @@
 				if (arr[0] == null || arr[1] == null) {
 					return
 				}
-				popoverRef.value?.$callMethod('setAnchors', n, arr[0]!, arr[1]!, arr[2]!, arr[3]!, 0, 0)
+				// 终点字符的视觉右界经 toRights 下发（与 selBandStyleOf 右缘同公式）：字符单元=步进边界
+				//（单元盒 54rpx + 右距 15rpx），行尾标点单元=内容右缘 510rpx——组件 view 锚点模式优先采用，
+				// 使松手落定与拖动预览/高亮条右缘同源（锚点 right=单元盒右缘，比视觉右界少 15rpx 右距）
+				const endRightPx = (n.toEnd >= LINE_CHAR_COUNT - 1 ? LINE_TEXT_W_RPX : (n.toEnd + 1) * 69) * rpxF.value
+				popoverRef.value?.$callMethod('setAnchors', n, arr[0]!, arr[1]!, arr[2]!, arr[3]!, 0, 0, null, null, [endRightPx], null, null)
 			})
 	}
 
@@ -976,11 +968,11 @@
 		font-family: $bai-font-ui;
 	}
 
-	/* 划词选区高亮条（对齐阅读页 para-highlight：正蓝 14% 背景微圆角；行内绝对定位连续条带，
+	/* 划词选区高亮条（对齐阅读页 para-highlight：灰 16% 背景微圆角；行内绝对定位连续条带，
 	 * 纵向只盖汉字行盒——拼音区不着色；几何由 lineSelStyle 按字符步进精确计算） */
 	.poem-sel-band {
 		position: absolute;
-		background-color: rgba($bai-positive, 0.14);
+		background-color: rgba($bai-mute, 0.16);
 		border-radius: 4rpx;
 	}
 

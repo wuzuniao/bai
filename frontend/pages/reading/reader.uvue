@@ -48,7 +48,7 @@
 									:id="'scroll-para-' + cid + '-' + item.origin"
 									@longpress="onLongPress(item.origin, cid, $event, item.from, item.to)"
 									@click="onParaTap($event, item.origin, cid, item.from, item.to)"
-								>
+									>
 									<text class="novel-text" :style="novelTextStyle">
 										<text
 											v-for="(seg, si) in paragraphSegments(item, cid)"
@@ -58,7 +58,14 @@
 											:style="'font-size:' + fontSize + 'px;color:' + bodyColor + ';font-family:' + fontFamily"
 										>{{ seg.text }}</text>
 									</text>
-								</view>
+									<view
+										v-for="(band, bi) in paraBands(item, cid)"
+										:key="'nb' + item.origin + '-' + bi"
+										class="para-note-band"
+										:class="band.thought ? 'para-note-band-thought' : ''"
+										:style="band.style"
+									></view>
+									</view>
 							</view>
 						</view>
 					</view>
@@ -88,16 +95,23 @@
 									:id="'ppara-' + item.origin"
 									@longpress="onLongPress(item.origin, -1, $event, item.from, item.to)"
 									@click="onParaTap($event, item.origin, -1, item.from, item.to)"
-								>
-								<text class="novel-text" :style="novelTextStyle">
-									<text
-										v-for="(seg, si) in paragraphSegments(item, currentChapterId)"
+									>
+									<text class="novel-text" :style="novelTextStyle">
+										<text
+											v-for="(seg, si) in paragraphSegments(item, currentChapterId)"
 										:key="si"
 										:id="seg.anchor == 1 ? anchorStartId : (seg.anchor == 2 ? anchorEndId : '')"
 										:class="segClass(seg)"
 										:style="'font-size:' + fontSize + 'px;color:' + bodyColor + ';font-family:' + fontFamily"
 									>{{ seg.text }}</text>
 								</text>
+									<view
+										v-for="(band, bi) in paraBands(item, currentChapterId)"
+										:key="'nb' + item.origin + '-' + bi"
+										class="para-note-band"
+										:class="band.thought ? 'para-note-band-thought' : ''"
+										:style="band.style"
+									></view>
 							</view>
 						</view>
 					</view>
@@ -142,6 +156,13 @@
 										:style="'font-size:' + fontSize + 'px;color:' + bodyColor + ';font-family:' + fontFamily"
 									>{{ seg.text }}</text>
 								</text>
+								<view
+									v-for="(band, bi) in paraBands(item, prevPageChapterId)"
+									:key="'nb' + item.origin + '-' + bi"
+									class="para-note-band"
+									:class="band.thought ? 'para-note-band-thought' : ''"
+									:style="band.style"
+								></view>
 							</view>
 						</view>
 					</view>
@@ -178,6 +199,13 @@
 										:style="'font-size:' + fontSize + 'px;color:' + bodyColor + ';font-family:' + fontFamily"
 									>{{ seg.text }}</text>
 								</text>
+								<view
+									v-for="(band, bi) in paraBands(item, nextPageChapterId)"
+									:key="'nb' + item.origin + '-' + bi"
+									class="para-note-band"
+									:class="band.thought ? 'para-note-band-thought' : ''"
+									:style="band.style"
+								></view>
 							</view>
 						</view>
 					</view>
@@ -212,6 +240,7 @@
 			:thought-card-max-w="0"
 			:page-h="pageH"
 			:metrics="metrics"
+			:anchors-from-view="false"
 			:segs="selSegs"
 			:text="selText"
 			:share-ctx="shareCtx"
@@ -317,8 +346,8 @@
 	import { findBook, isBookDirty, loadBookProgress, saveBookProgress, updateBookReading, createReadingClock } from '@/utils/books.uts'
 	import type { ParsedChapter } from '@/utils/bookparseDefs.ts'
 	import { parseChapters, readTextFile } from '@/utils/bookparse.uts'
-	import type { Chapter, Paragraph, Bookmark, Thought, UnderlineEntry, NoteRecord, ShareQuoteCtx, SelSpan, SpanSeg, TextMetrics, ParaRect, ReaderSettings } from '@/utils/readerTypesDefs.ts'
-	import { fontOptionOf, loadStoredFontKey, setActiveBookId, loadUnderlines, loadThoughts, findUnderlineEntry, loadBookmarks, loadSettings, buildNoteRecords, buildShareQuoteCtx, fetchNotesToCache, fetchBookmarksToCache, VIRTUAL_BOOK_ID, SENTENCE_END_CHARS, thoughtAt, spanOfThought, buildSpanSegs } from '@/utils/readerTypes.uts'
+	import type { Chapter, Paragraph, Bookmark, Thought, UnderlineEntry, NoteRecord, ShareQuoteCtx, SelSpan, SpanSeg, TextMetrics, ParaRect, ParaBand, ReaderSettings } from '@/utils/readerTypesDefs.ts'
+	import { fontOptionOf, loadStoredFontKey, setActiveBookId, loadUnderlines, loadThoughts, findUnderlineEntry, loadBookmarks, loadSettings, buildNoteRecords, buildShareQuoteCtx, fetchNotesToCache, fetchBookmarksToCache, VIRTUAL_BOOK_ID, thoughtAt, spanOfThought, buildSpanSegs } from '@/utils/readerTypes.uts'
 	import type { PageSlice, ParaLineLayout } from '@/utils/paginationDefs.ts'
 	import { computePageBreaks, computePageBreaksMeasured, computePageBreaksExact, readerLineHeightPx, readerParagraphGapPx } from '@/utils/pagination.uts'
 	// #ifdef APP-ANDROID
@@ -688,40 +717,6 @@
 	/** 手柄拖动（跨段）与触摸事件处理已内聚气泡组件（正文段落矩形由宿主查询回传 setDragRects） */
 
 
-	/** 句末标点与闭合引号（句界扫描：句末标点后紧跟闭合引号视为引用嵌入、非句子边界；句末集常量收口 readerTypes） */
-	const SENTENCE_CLOSERS = '”』」）)】》"'
-	/** 所在句范围（[起点, 终点] 闭区间）：触点向前/向后扫句末标点定句界，标点后的闭合引号随句并入 */
-	function sentenceRange(text : string, idx : number) : number[] {
-		let start = 0
-		for (let i = idx - 1; i >= 0; i--) {
-			if (SENTENCE_END_CHARS.indexOf(text.charAt(i)) >= 0) {
-				if (i + 1 < text.length && SENTENCE_CLOSERS.indexOf(text.charAt(i + 1)) >= 0) {
-					continue
-				}
-				start = i + 1
-				break
-			}
-		}
-		let end = text.length - 1
-		for (let i = idx; i < text.length; i++) {
-			if (SENTENCE_END_CHARS.indexOf(text.charAt(i)) >= 0) {
-				if (i + 1 < text.length && SENTENCE_CLOSERS.indexOf(text.charAt(i + 1)) >= 0) {
-					continue
-				}
-				// #ifdef APP-ANDROID
-				end = i.toInt()
-				// #endif
-				// #ifndef APP-ANDROID
-				end = i
-				// #endif
-				break
-			}
-		}
-		while (end + 1 < text.length && SENTENCE_CLOSERS.indexOf(text.charAt(end + 1)) >= 0) {
-			end++
-		}
-		return [start, end]
-	}
 	/** 选中段落元素查询 id（滚动模式按段落所在章 id 前缀防多章同索引冲突，cid<0 为分页模式；滚动模式 id 同时用作 scroll-into-view 锚点） */
 	function selectionParaId(pi : number, cid : number) : string {
 		if (cid >= 0) {
@@ -1183,6 +1178,7 @@
 			const endRel = span != null ? span.toEnd - winFrom : -1
 			let mainFrom = a
 			let mainHandled = false
+			// #ifndef APP-ANDROID || APP-IOS || APP-HARMONY
 			if (span != null && inSel && renderCid == span.fromCid && item.origin == span.fromOrigin && startRel >= a && startRel < b) {
 				segs.push({ start: startRel, text: p.text.slice(winFrom + startRel, winFrom + startRel + 1), selected: true, underlined: inUl, thought: inThought, anchor: 1 } as TextSeg)
 				mainFrom = startRel + 1
@@ -1194,6 +1190,7 @@
 				segs.push({ start: endRel, text: p.text.slice(winFrom + endRel, winFrom + endRel + 1), selected: true, underlined: inUl, thought: inThought, anchor: 2 } as TextSeg)
 				mainHandled = true
 			}
+			// #endif
 			if (!mainHandled && mainFrom < b) {
 				const last = segs.length > 0 ? segs[segs.length - 1] : null
 				if (last != null && last.anchor == 0 && last.selected == inSel && last.underlined == inUl && last.thought == inThought) {
@@ -1203,6 +1200,34 @@
 				}
 			}
 		}
+		// #ifdef APP-ANDROID || APP-IOS || APP-HARMONY
+		// 锚点不单独成段：App 原生端嵌套 text 的背景按字形自身推进宽收边，单字锚点段落在选区首/末时
+		// 高亮条比字符格短一截（末字为标点时尤其明显，手柄与高亮之间露出缝隙，表现为「柄偏离」）。
+		// 锚点 id 改挂选区首/末的连续选段（App 端锚点矩形不参与定位，仅作测量就绪信号）
+		if (span != null && isSel && (renderCid == span.fromCid || renderCid == span.toCid)) {
+			const fromHere = renderCid == span.fromCid && item.origin == span.fromOrigin
+			const toHere = renderCid == span.toCid && item.origin == span.toOrigin
+			let firstSel = -1
+			let lastSel = -1
+			for (let si2 = 0; si2 < segs.length; si2++) {
+				if (segs[si2].selected) {
+					if (firstSel < 0) {
+						firstSel = si2
+					}
+					lastSel = si2
+				}
+			}
+			if (fromHere && firstSel >= 0) {
+				segs[firstSel].anchor = 1
+			}
+			// 跨段时终点段即使与起点段同为唯一选段也必须挂 anchor=2，否则宿主按缺锚点空等重试
+			if (toHere && lastSel >= 0 && (lastSel != firstSel || !fromHere)) {
+				if (segs[lastSel].anchor == 0) {
+					segs[lastSel].anchor = 2
+				}
+			}
+		}
+		// #endif
 		if (item.from == 0 && len > 0) {
 			// 段落首行缩进：渲染流头部插入两个全角空格（宽度=2×字号，全端字符级生效，不依赖 CSS text-indent；
 			// 空格为渲染装饰不入数据，划线/想法坐标与分页容量已按首行少 2 字适配）
@@ -1909,28 +1934,130 @@
 	}
 	/** 排版度量（响应式：随字号/屏宽变化，下行气泡组件供划词换算） */
 	const metrics = computed<TextMetrics>(() : TextMetrics => layoutMetrics())
+
+	/** ===== 段落想法/划线的行底线条带（App 端；非 App 端线条由 text-decoration 着色） ===== */
+	/** 字符所在段落绝对行（真实行断点口径） */
+	function absLineOfChar(charIdx : number, ends : number[]) : number {
+		let line = 0
+		while (line < ends.length - 1 && charIdx > ends[line]) {
+			line++
+		}
+		return line
+	}
+	/** 单条装饰区间的逐行线条带：区间∩切片按行拆分，行内 x 取 charX 字符边界，y 置行底
+	 *  （band 占 [行底-4, 行底-2]，与首页诗 band 的 bottom 2px 口径一致）。
+	 *  关键：charX 按行重启（续行首字 x=0），带若结束于行末，cx[行末+1] 取到的是下一行首字的
+	 *  x=0，xEnd≤xStart 会让该行带被整条丢弃（表现为「只有每段最后一行有线」）——
+	 *  行末字符的右界必须改用 lineRights[行]（StaticLayout 真实行右缘） */
+	function pushNoteBands(bands : ParaBand[], cx : number[], ends : number[], rights : number[] | null, s : number, e : number, from : number, to : number, thought : boolean, m : TextMetrics) : void {
+		const rs = Math.max(s, from)
+		const re = Math.min(e, to)
+		if (rs > re) {
+			return
+		}
+		// 切片起始字符所在段落绝对行（续切片行号平移，行内字符区间查段落行断点须用绝对行）
+		let absBase = 0
+		if (from > 0) {
+			while (absBase < ends.length - 1 && from > ends[absBase]) {
+				absBase++
+			}
+		}
+		const r0 = Math.max(0, absLineOfChar(rs, ends) - absBase)
+		const r1 = Math.max(r0, absLineOfChar(re, ends) - absBase)
+		for (let r = r0; r <= r1; r++) {
+			const paraLine = Math.min(absBase + r, ends.length - 1)
+			const rowStart = paraLine == 0 ? 0 : ends[paraLine - 1] + 1
+			const rowEnd = ends[paraLine]
+			const kA = Math.max(rowStart, rs)
+			const kB = Math.min(rowEnd, re)
+			if (kA > kB) {
+				continue
+			}
+			const xStart = cx[kA]
+			// 行末字符右界：kb==rowEnd 时 cx[kB+1] 是下一行首字左缘（x=0），必须用该行真实右缘
+			const atRowEnd = kB == rowEnd
+			let xEnd = cx[kB + 1]
+			if (atRowEnd && rights != null && paraLine < rights.length) {
+				xEnd = rights[paraLine] ?? 0
+			}
+			if (xEnd <= xStart) {
+				continue
+			}
+			const top = r * m.lineH + m.lineH - 4
+			bands.push({
+				style: 'left:' + xStart + 'px;top:' + top + 'px;width:' + (xEnd - xStart) + 'px;height:2px',
+				thought: thought
+			} as ParaBand)
+		}
+	}
+	/** 段落装饰线条带：想法=正蓝 2px、划线=弱灰 2px，置于所在行底部（与首页诗 band 同视觉）。
+	 *  App 原生端 text-decoration-color 不支持（想法与划线的线色无法区分），改由 charX 逐字几何
+	 *  逐行计算带状；非 App 端返回空数组（线条由 .para-underlined/.para-thought 着色） */
+	function paraBands(item : PageItem, cid : number) : ParaBand[] {
+		// #ifndef APP-ANDROID || APP-IOS || APP-HARMONY
+		return [] as ParaBand[]
+		// #endif
+		// #ifdef APP-ANDROID || APP-IOS || APP-HARMONY
+		const m = layoutMetrics()
+		const lay = paraLayoutCache.value.get(cid)
+		if (lay == null || item.origin >= lay.charX.length || item.origin >= lay.lineEnds.length) {
+			return [] as ParaBand[]
+		}
+		const cx = lay.charX[item.origin]
+		const ends = lay.lineEnds[item.origin]
+		let rights : number[] | null = null
+		if (item.origin < lay.lineRights.length) {
+			rights = lay.lineRights[item.origin]
+		}
+		if (ends.length == 0) {
+			return [] as ParaBand[]
+		}
+		const bands : ParaBand[] = []
+		// 划线区间（弱灰）
+		for (const u of rangesAt(cid, item.origin)) {
+			pushNoteBands(bands, cx, ends, rights, u[0], u[1], item.from, item.to, false, m)
+		}
+		// 想法区间（正蓝；与划线重叠时后渲染覆盖，想法优先，与 segClass 同口径）
+		for (const t of thoughts.value) {
+			const r = spanRangeAt(t.fromCid, t.fromOrigin, t.fromStart, t.toCid, t.toOrigin, t.toEnd, cid, item.origin)
+			if (r.length == 2) {
+				pushNoteBands(bands, cx, ends, rights, r[0], r[1], item.from, item.to, true, m)
+			}
+		}
+		return bands
+		// #endif
+	}
 	/** 触点 → 整段字符索引（触点相对本页切片渲染矩形做行列换算，切片内索引加切片偏移对齐整段坐标；
-	 *  与分页排版同源公式：段首切片首行容量 perLine-2（缩进占 2 字），续行 perLine） */
+	 *  与分页排版同源公式：段首切片首行容量 perLine-2（缩进占 2 字），续切片首行即满容量，续行 perLine） */
 	function charIndexOfRect(rect : NodeInfo, clientX : number, clientY : number, from : number, to : number) : number {
 		const m = layoutMetrics()
 		const sliceLen = to - from + 1
-		// 切片行数：段首切片（from==0）首行容量 = perLine-2（缩进占 2 字），续切片每行 perLine
+		// 首行容量：段首切片被两个全角缩进占去 2 字，续切片（段落跨页）首行即满容量
+		const firstCap = from == 0 ? Math.max(1, m.perLine - 2) : m.perLine
+		// 切片行数：段首切片首行容量 firstCap，续切片每行 perLine
 		let maxRow : number
 		if (from == 0) {
-			const rest = sliceLen - (m.perLine - 2)
+			const rest = sliceLen - firstCap
 			maxRow = rest <= 0 ? 0 : Math.ceil(rest / m.perLine)
 		} else {
 			maxRow = Math.max(0, Math.ceil(sliceLen / m.perLine) - 1)
 		}
 		let row = Math.floor((clientY - (rect.top ?? 0)) / m.lineH)
 		row = Math.max(0, Math.min(row, maxRow))
-		// 首行触点先扣除缩进宽（两个全角空格），字距：首行与末行未拉伸用自然字距，中间满行用两端对齐拉伸字距
+		// 首行触点先扣除缩进宽（两个全角空格）；字距：App 原生端左对齐恒为自然字距，
+		// 非 App 端首行/末行未拉伸用自然字距、中间满行用两端对齐拉伸字距
 		const indent = (from == 0 && row == 0) ? m.indentPx : 0
+		// #ifdef APP-ANDROID || APP-IOS || APP-HARMONY
+		const spacing = m.charW
+		// #endif
+		// #ifndef APP-ANDROID || APP-IOS || APP-HARMONY
 		const spacing = row == 0 ? m.charW : (row < maxRow ? m.fullCharW : m.charW)
+		// #endif
+		const rowCap = row == 0 ? firstCap : m.perLine
 		let col = Math.floor((clientX - (rect.left ?? 0) - indent) / spacing)
-		col = Math.max(0, Math.min(col, m.perLine - 1))
-		// 切片内字符索引（首行容量 perLine-2）加切片偏移 = 整段坐标
-		const sliceIdx = row == 0 ? col : (m.perLine - 2) + (row - 1) * m.perLine + col
+		col = Math.max(0, Math.min(col, rowCap - 1))
+		// 切片内字符索引（首行容量 firstCap）加切片偏移 = 整段坐标
+		const sliceIdx = row == 0 ? col : firstCap + (row - 1) * m.perLine + col
 		return Math.min(sliceIdx, sliceLen - 1) + from
 	}
 	/** 指定章的分页结果（跨章预渲染取相邻章末页/首页用）：APP 端引擎断行即真源（断点恒落在真实行边界），
@@ -2414,8 +2541,18 @@
 			callback(arr != null && arr.length > 0 ? arr[0] : null)
 		})
 	}
+	/** 段落矩形是否落在视口内：翻页/回弹/下拉动画期间当前页层带位移，rect 会整页偏移，
+	 *  直接采用会让手柄与高亮整行错位（偶现）；视口外视为测量未就绪。null 不判异常（端点不在本页） */
+	function rectOnScreen(r : NodeInfo | null, pageHeight : number) : boolean {
+		if (r == null) {
+			return true
+		}
+		const t = r.top ?? 0
+		const b = r.bottom ?? 0
+		return b >= 0 && t <= pageHeight
+	}
 	/** 锚点测量尝试：选区起止字符分段随选区状态变更渲染，查询与渲染存在竞态——
-	 *  任一锚点缺失均延迟重试（至多 2 次）；Android 锚点矩形不可用时按选中段的真实行边界换算 */
+	 *  任一锚点缺失均延迟重试（至多 3 次）；Android 锚点矩形不可用时按两端各自的真实行边界换算 */
 	function measureAnchorsAttempt(attempt : number) : void {
 		const s = selSpan.value
 		if (s == null) {
@@ -2423,9 +2560,14 @@
 		}
 		// 只按当前代次 id 查锚点，避免读到上一选区的旧位置
 		const epochAtQuery = selEpoch.value
-		// 段落断点来自 StaticLayout 初排缓存（章未初排时并入后台测量串行链等待）；其余端锚点用节点实测矩形，无需准备
+		// 段落断点来自 StaticLayout 初排缓存（章未初排时并入后台测量串行链等待）；跨章选区终点章也要就绪
 		// #ifdef APP-ANDROID
-		const prepare : Promise<void> = paraLayoutCache.value.get(s.fromCid) != null ? Promise.resolve() : measureChain
+		let prepare : Promise<void> = paraLayoutCache.value.get(s.fromCid) != null ? Promise.resolve() : measureChain
+		if (s.toCid != s.fromCid && paraLayoutCache.value.get(s.toCid) == null) {
+			prepare = prepare.then(() : Promise<void> => {
+				return measureChain
+			})
+		}
 		// #endif
 		// #ifndef APP-ANDROID
 		const prepare : Promise<void> = Promise.resolve()
@@ -2446,6 +2588,9 @@
 			}
 			const startSelNow = '#' + anchorStartId.value
 			const endSelNow = '#' + anchorEndId.value
+			// 段落节点选择器：滚动模式段落 id 带章前缀（#ppara-* 仅分页模式存在），跨章时终点段按终点章取
+			const fromParaSel = scrollMode.value ? '#scroll-para-' + s.fromCid + '-' + s.fromOrigin : '#ppara-' + s.fromOrigin
+			const toParaSel = scrollMode.value ? '#scroll-para-' + s.toCid + '-' + s.toOrigin : '#ppara-' + s.toOrigin
 			let anchorStart : NodeInfo | null = null
 			let anchorEnd : NodeInfo | null = null
 			let fromPara : NodeInfo | null = null
@@ -2460,14 +2605,25 @@
 				if (epochAtQuery != selEpoch.value) {
 					return
 				}
-				// #ifndef APP-ANDROID
-				if ((anchorStart == null || anchorEnd == null) && attempt < 2) {
+				// 单字符选区共用同一段真实字符矩形：起点取左缘、终点取右缘（渲染侧只产出一个锚点段，
+				// 须在重试判定前补上，否则会误判终点缺失而空等重试）
+				if (anchorStart != null && anchorEnd == null && s.fromCid == s.toCid && s.fromOrigin == s.toOrigin && s.fromStart == s.toEnd) {
+					anchorEnd = anchorStart
+				}
+				// 段落矩形随页层动画带位移时不采用（整页偏移会让手柄错位整屏），并入同一重试链
+				const rectBad = !rectOnScreen(fromPara, pageH.value) || !rectOnScreen(toPara, pageH.value)
+				// 锚点竞态重试：新代次锚点随选区状态异步渲染，查询早于渲染时读到 null（Android 同样存在）
+				if ((anchorStart == null || anchorEnd == null || rectBad) && attempt < 3) {
 					setTimeout(() : void => {
 						measureAnchorsAttempt(attempt + 1)
 					}, 80)
 					return
 				}
-				// #endif
+				if (rectBad) {
+					// 重试用尽仍带位移：丢弃矩形，退回锚点绝对坐标（锚点同样偏移时至少不会越界更多）
+					fromPara = null
+					toPara = null
+				}
 				// 两端段落的本页切片起始偏移（估算兜底按切片口径换算；滚动模式无切片，items 为空恒 0）
 				let fromSlice = 0
 				let toSlice = 0
@@ -2480,18 +2636,32 @@
 						toSlice = items[i].from
 					}
 				}
-				// 段落真实行边界（StaticLayout 同参排版）：划词行列换算与行尾吸附的唯一依据，缺失时组件回退锚点绝对坐标
-				const baseLayout = paraLayoutCache.value.get(s.fromCid)
-				let exactEnds : number[] | null = null
-				if (baseLayout != null && s.fromOrigin < baseLayout.lineEnds.length && baseLayout.lineEnds[s.fromOrigin].length > 0) {
-					exactEnds = baseLayout.lineEnds[s.fromOrigin]
+				// 两端各自的真实行边界（StaticLayout 同参排版）：划词行列换算与行尾吸附的唯一依据。
+				// 跨段/跨章时行断点属于各自段落，把起点段的断点套给终点会让终点手柄整行错位
+				let fromEnds : number[] | null = null
+				const fromLayout = paraLayoutCache.value.get(s.fromCid)
+				if (fromLayout != null && s.fromOrigin < fromLayout.lineEnds.length && fromLayout.lineEnds[s.fromOrigin].length > 0) {
+					fromEnds = fromLayout.lineEnds[s.fromOrigin]
 				}
-				// 单字符选区共用同一段真实字符矩形：起点取左缘、终点取右缘
-				if (anchorStart != null && anchorEnd == null && s.fromCid == s.toCid && s.fromOrigin == s.toOrigin && s.fromStart == s.toEnd) {
-					anchorEnd = anchorStart
+				let toEnds : number[] | null = null
+				let toRights : number[] | null = null
+				const toLayout = paraLayoutCache.value.get(s.toCid)
+				if (toLayout != null && s.toOrigin < toLayout.lineEnds.length && toLayout.lineEnds[s.toOrigin].length > 0) {
+					toEnds = toLayout.lineEnds[s.toOrigin]
 				}
-				const exactRights = baseLayout != null && s.fromOrigin < baseLayout.lineRights.length ? baseLayout.lineRights[s.fromOrigin] : null
-				popoverRef.value?.$callMethod('setAnchors', s, anchorStart, anchorEnd, fromPara, toPara, fromSlice, toSlice, exactEnds, exactRights)
+				if (toLayout != null && s.toOrigin < toLayout.lineRights.length) {
+					toRights = toLayout.lineRights[s.toOrigin]
+				}
+				// 逐字左缘（App 端 StaticLayout.getPrimaryHorizontal 缓存）：手柄精确到字形边界
+				let fromCharX : number[] | null = null
+				if (fromLayout != null && s.fromOrigin < fromLayout.charX.length) {
+					fromCharX = fromLayout.charX[s.fromOrigin]
+				}
+				let toCharX : number[] | null = null
+				if (toLayout != null && s.toOrigin < toLayout.charX.length) {
+					toCharX = toLayout.charX[s.toOrigin]
+				}
+				popoverRef.value?.$callMethod('setAnchors', s, anchorStart, anchorEnd, fromPara, toPara, fromSlice, toSlice, fromEnds, toEnds, toRights, fromCharX, toCharX)
 			}
 			// Android 起止字符锚点现在为真实字符分段，可尝试实测；矩形不可用时由真实行边界兜底。
 			// 段落节点与锚点同批查询
@@ -2500,14 +2670,17 @@
 			uni.createSelectorQuery()
 				.select(startSelNow).boundingClientRect()
 				.select(endSelNow).boundingClientRect()
-				.select('#ppara-' + s.fromOrigin).boundingClientRect()
-				.select('#ppara-' + s.toOrigin).boundingClientRect()
+				.select(fromParaSel).boundingClientRect()
+				.select(toParaSel).boundingClientRect()
 				.exec((res : any) : void => {
 					const arr = res as Array<NodeInfo | null>
 					anchorStart = arr != null && arr.length > 0 ? arr[0] : null
 					anchorEnd = arr != null && arr.length > 1 ? arr[1] : null
 					fromPara = arr != null && arr.length > 2 ? arr[2] : null
 					toPara = arr != null && arr.length > 3 ? arr[3] : null
+					// 批量查询一次回传四项：remaining 是逐项查询口径，此处直接归零进入结算
+					// （此前漏了这一行，App 端锚点测量永远不结算，手柄停留在拖动估算位置）
+					remaining = 1
 					finish()
 				})
 			// #endif
@@ -2520,11 +2693,11 @@
 				anchorEnd = rect
 				finish()
 			})
-			queryNodeInfo('#ppara-' + s.fromOrigin, (rect : NodeInfo | null) : void => {
+			queryNodeInfo(fromParaSel, (rect : NodeInfo | null) : void => {
 				fromPara = rect
 				finish()
 			})
-			queryNodeInfo('#ppara-' + s.toOrigin, (rect : NodeInfo | null) : void => {
+			queryNodeInfo(toParaSel, (rect : NodeInfo | null) : void => {
 				toPara = rect
 				finish()
 			})
@@ -2556,17 +2729,34 @@
 				for (let ci = 0; ci < scrollChapters.value.length; ci++) {
 					const cid = scrollChapters.value[ci]
 					const paras = paragraphsOf(cid)
+					const lay = paraLayoutCache.value.get(cid)
 					for (let o = 0; o < paras.length && idx < rects.length; o++) {
+						let cx : number[] | null = null
+						let pends : number[] | null = null
+						let prights : number[] | null = null
+						if (lay != null && o < lay.charX.length) {
+							cx = lay.charX[o]
+						}
+						if (lay != null && o < lay.lineEnds.length && lay.lineEnds[o].length > 0) {
+							pends = lay.lineEnds[o]
+						}
+						if (lay != null && o < lay.lineRights.length && lay.lineRights[o].length > 0) {
+							prights = lay.lineRights[o]
+						}
 						dragParaRects.push({
 							cid: cid,
 							origin: o,
 							left: rects[idx].left ?? 0,
 							top: rects[idx].top ?? 0,
 							bottom: rects[idx].bottom ?? 0,
+							right: rects[idx].right ?? 0,
 							len: paras[o].text.length,
 							from: 0,
 							firstLen: -1,
-							secondOrigin: -1
+							secondOrigin: -1,
+							charX: cx,
+							lineEnds: pends,
+							lineRights: prights
 						} as ParaRect)
 						idx++
 					}
@@ -2582,21 +2772,38 @@
 				// rect 顺序与当前页切片渲染项一致（切片分页段落可跨页，len/from 必须取本页切片口径，
 				// 不能用整章段集——章内页序错位会使触点映射到错误段落，跨段拖动失效）
 				const items = currentPageItems.value
+				const lay = paraLayoutCache.value.get(currentChapterId.value)
 				for (let i = 0; i < rects.length && i < items.length; i++) {
 					const it = items[i]
+					let cx : number[] | null = null
+					let pends : number[] | null = null
+					let prights : number[] | null = null
+					if (lay != null && it.origin < lay.charX.length) {
+						cx = lay.charX[it.origin]
+					}
+					if (lay != null && it.origin < lay.lineEnds.length && lay.lineEnds[it.origin].length > 0) {
+						pends = lay.lineEnds[it.origin]
+					}
+					if (lay != null && it.origin < lay.lineRights.length && lay.lineRights[it.origin].length > 0) {
+						prights = lay.lineRights[it.origin]
+					}
 					dragParaRects.push({
 						cid: currentChapterId.value,
 						origin: it.origin,
 						left: rects[i].left ?? 0,
 						top: rects[i].top ?? 0,
 						bottom: rects[i].bottom ?? 0,
+						right: rects[i].right ?? 0,
 						len: it.to - it.from + 1,
 						from: it.from,
 						firstLen: -1,
-						secondOrigin: -1
-					} as ParaRect)
-				}
-				popoverRef.value?.$callMethod('setDragRects', dragParaRects)
+						secondOrigin: -1,
+						charX: cx,
+						lineEnds: pends,
+						lineRights: prights
+						} as ParaRect)
+						}
+						popoverRef.value?.$callMethod('setDragRects', dragParaRects)
 			}).exec()
 		}
 	}
@@ -2618,7 +2825,7 @@
 			if (rect == null) {
 				return
 			}
-			// 段落文本按被长按段落所在章取（滚动模式多章渲染下 pi 属于 spanCid 章）；句界在整段文本上计算（跨页句子的两端坐标仍属整段）
+			// 段落文本按被长按段落所在章取（滚动模式多章渲染下 pi 属于 spanCid 章）；长按字符在整段坐标上计算（切片内索引加 from 偏移）
 			const p = paragraphsOf(spanCid)[pi]
 			const sliceLen = to - from + 1
 			// 触点相对段落文本区 → 行列估算字符索引（换算公式与分页排版同源，见 charIndexOfRect）
@@ -2627,28 +2834,47 @@
 				currentChapterId.value = spanCid
 				saveProgress()
 			}
-			// 长按位置落在已有想法区间：恢复该想法的完整选区（含划线区域）；否则按句选取
+			// 长按位置落在已有想法区间：恢复该想法的完整选区（含划线区域）；
+			// 落在已有划线区间：恢复划线完整选区（与想法恢复同口径，长按即选中划线部分）；
+			// 否则选中触点所在字符（单字起选，左右手柄可逐字拖动扩展/收缩）
 			const hit = thoughtAt(thoughts.value, spanCid, pi, charIdx)
 			let span : SelSpan | null = null
 			if (hit != null) {
 				span = spanOfThought(hit)
 			}
 			if (span == null) {
-				const range = sentenceRange(p.text, charIdx)
+				const uEntry = findUnderlineEntry(underlineStore.value, spanCid, pi)
+				if (uEntry != null) {
+					for (const u of uEntry.ranges) {
+						if (charIdx >= u[0] && charIdx <= u[1]) {
+							span = {
+								fromCid: spanCid,
+								fromOrigin: pi,
+								fromStart: u[0],
+								toCid: spanCid,
+								toOrigin: pi,
+								toEnd: u[1]
+							} as SelSpan
+							break
+						}
+					}
+				}
+			}
+			if (span == null) {
 				span = {
 					fromCid: spanCid,
 					fromOrigin: pi,
-					fromStart: range[0],
+					fromStart: charIdx,
 					toCid: spanCid,
 					toOrigin: pi,
-					toEnd: range[1]
+					toEnd: charIdx
 				} as SelSpan
 			}
 			// 选区状态与手柄/气泡在气泡组件内建立（锚点实测由组件发起请求、宿主查询回传）；起点段长按本页切片长度与偏移传（手柄估算的切片口径）
 			popoverRef.value?.$callMethod('beginSelection', span, rect.left ?? 0, rect.top ?? 0, clientX, Math.min(sliceLen, p.text.length - from), from)
 		}).exec()
 	}
-	/** 长按段落：触点位置估算字符索引，定位所在句整句选中并显示拖动手柄（cid=-1 为分页模式，滚动模式传段落所在章 id）；
+	/** 长按段落：触点位置估算字符索引并选中该字符（单字起选，手柄逐字拖动扩展；cid=-1 为分页模式，滚动模式传段落所在章 id）；
 	 *  from/to 为本页渲染的整段字符切片区间（流式分页段落可跨页），切片内行列换算后加 from 偏移对齐划线/想法的整段坐标 */
 	// 模板 @longpress 的 $event 为 Any（vdom 事件绑定无静态类型），内部收窄 UniTouchEvent
 	function onLongPress(pi : number, cid : number, e : any, from : number, to : number) : void {
@@ -3031,45 +3257,74 @@
 		bookTitle.value = book.title
 		bookHasPreface.value = book.hasPreface
 		uni.showLoading({ title: t('reader.opening'), mask: true })
-		// 锁定当前书籍后拉取云端笔记（划线/想法/书签云端为准），落缓存后刷新镜像；
-		// bookId 赋值置于落缓存之后：书签面板 watch 该 prop 重载，避免先重载读到旧缓存
-		setActiveBookId(book.id)
-		await syncNotesFromCloud(book.id)
-		reloadNotesMirror()
-		bookId.value = book.id
-		// 先让 loading 完成渲染，再进入同步的文件读取与章节解析（大文件解析耗时，主线程会短暂阻塞）
-		await new Promise<void>((resolve) => {
-			setTimeout(() : void => {
-				resolve()
-			}, 60)
-		})
 		try {
-			const text = await readTextFile(book.path)
-			const parsed = parseChapters(text, book.title)
-			// 旧书（导入时未标记序章）：剔除新解析生成的序章，章 id 与存量进度/划线/书签保持对齐
-			const chaptersParsed = book.hasPreface == true ? parsed : parsed.filter((c : ParsedChapter) : boolean => !c.preface)
-			const chs = chaptersParsed.map((c, i) : Chapter => {
-				return { id: i, title: c.title, label: c.label, contentTitle: c.contentTitle, active: false } as Chapter
+			// 锁定当前书籍后拉取云端笔记（划线/想法/书签云端为准），落缓存后刷新镜像；
+			// bookId 赋值置于落缓存之后：书签面板 watch 该 prop 重载，避免先重载读到旧缓存。
+			// 云端同步限时 6s：无网/后端不可达/401 刷新链叠加时请求可能长时间不归，开书不能被笔记同步卡死
+			setActiveBookId(book.id)
+			await Promise.race([
+				syncNotesFromCloud(book.id),
+				new Promise<void>((resolve) => {
+					setTimeout(() : void => {
+						resolve()
+					}, 6000)
+				})
+			])
+			reloadNotesMirror()
+			bookId.value = book.id
+			// 先让 loading 完成渲染，再进入同步的文件读取与章节解析（大文件解析耗时，主线程会短暂阻塞）
+			await new Promise<void>((resolve) => {
+				setTimeout(() : void => {
+					resolve()
+				}, 60)
 			})
-			loadBookContent(chs, chaptersParsed.map((c) : string[] => c.paragraphs))
-			restoreProgress(book.id)
-			// #ifdef APP-ANDROID
-			// 雷电冷启动的 windowWidth/windowHeight 不可靠：先等到正文容器实测值，再生成首章与邻章分页
-			await measurePageBox()
-			// #endif
-			if (pageTurn.value != '滚动') {
-				// 翻页模式：首屏页在 loading 遮罩内完成实测，展示即最终布局（邻章后台预取供跨章预渲染）
-				const cid = currentChapterId.value
-				await ensureChaptersMeasured([cid - 1, cid, cid + 1])
-				clampPageIndex()
-			} else {
-				// 滚动模式：首章/恢复章内容不足一屏时预拼接下一章（否则 scrolltolower 永不触发）
-				fillScrollViewport()
+			try {
+				const text = await readTextFile(book.path)
+				const parsed = parseChapters(text, book.title)
+				// 旧书（导入时未标记序章）：剔除新解析生成的序章，章 id 与存量进度/划线/书签保持对齐
+				const chaptersParsed = book.hasPreface == true ? parsed : parsed.filter((c : ParsedChapter) : boolean => !c.preface)
+				const chs = chaptersParsed.map((c, i) : Chapter => {
+					return { id: i, title: c.title, label: c.label, contentTitle: c.contentTitle, active: false } as Chapter
+				})
+				loadBookContent(chs, chaptersParsed.map((c) : string[] => c.paragraphs))
+				restoreProgress(book.id)
+				// #ifdef APP-ANDROID
+				// 雷电冷启动的 windowWidth/windowHeight 不可靠：先等到正文容器实测值，再生成首章与邻章分页。
+				// 实测 Promise 理论上不落定（查询回调未触发）会让 loading 永久滞留，统一限时放行——
+				// 内容随后由重算路径自行就位，宁可短暂空页也不可卡死开书
+				await Promise.race([
+					measurePageBox(),
+					new Promise<void>((resolve) => {
+						setTimeout(() : void => {
+							resolve()
+						}, 10000)
+					})
+				])
+				// #endif
+				if (pageTurn.value != '滚动') {
+					// 翻页模式：首屏页在 loading 遮罩内完成实测，展示即最终布局（邻章后台预取供跨章预渲染）
+					const cid = currentChapterId.value
+					await Promise.race([
+						ensureChaptersMeasured([cid - 1, cid, cid + 1]),
+						new Promise<void>((resolve) => {
+							setTimeout(() : void => {
+								resolve()
+							}, 10000)
+						})
+					])
+					clampPageIndex()
+				} else {
+					// 滚动模式：首章/恢复章内容不足一屏时预拼接下一章（否则 scrolltolower 永不触发）
+					fillScrollViewport()
+				}
+			} catch (e) {
+				showToast(t('reader.readFail'))
 			}
-		} catch (e) {
-			showToast(t('reader.readFail'))
+		} finally {
+			// 无论任何环节异常/超时，loading 必须解除——此前 hideLoading 顺序在 await 链末尾，
+			// 云端请求或测量 Promise 不落定会让「正在打开」永久滞留
+			uni.hideLoading()
 		}
-		uni.hideLoading()
 	}
 	/** ===== 打开本地书籍（书架点击传入 bookId） ===== */
 	onLoad((options : OnLoadOptions) : void => {
@@ -3558,26 +3813,34 @@
 		color: rgba(0, 0, 0, 0);
 	}
 
-	/* 划线标注（划线统一为连续实线，颜色取弱文本 mute；纹理与首页诗词卡片划线条带保持一致） */
+	/* 划线/想法的线条（非 App 端：text-decoration 着色——划线弱灰、想法正蓝；
+	 * App 端 text-decoration-color 不支持，线条由 .para-note-band 按行渲染，此处不着色） */
+	/* #ifndef APP-ANDROID || APP-IOS || APP-HARMONY */
 	.para-underlined {
-		/* App 仅支持 text-decoration-line，线色/线型回落默认（非 App 端保持弱文本色实线） */
 		text-decoration-line: underline;
-		/* #ifndef APP */
 		text-decoration-color: $bai-mute;
-		/* #endif */
 	}
 
-	/* 想法段：实线下划线（正蓝色），与划线波浪线区分，点击可查看想法 */
 	.para-thought {
 		text-decoration-line: underline;
-		/* #ifndef APP */
 		text-decoration-color: $bai-positive;
-		/* #endif */
+	}
+	/* #endif */
+
+	/* 段落想法/划线的行底线条带（App 端：charX 逐行计算，与首页诗 band 同视觉——想法=正蓝、划线=弱灰） */
+	.para-note-band {
+		position: absolute;
+		height: 2px;
+		background-color: $bai-mute;
 	}
 
-	/* 划词高亮（Stitch: 正蓝 14% 背景；微圆角 2px，rounded 令牌未覆盖，保留字面值） */
+	.para-note-band-thought {
+		background-color: $bai-positive;
+	}
+
+	/* 划词高亮（Stitch: 灰 16% 背景；微圆角 2px，rounded 令牌未覆盖，保留字面值） */
 	.para-highlight {
-		background-color: rgba($bai-positive, 0.14);
+		background-color: rgba($bai-mute, 0.16);
 		border-radius: 4rpx;
 	}
 

@@ -66,6 +66,7 @@ export function buildParaLayout(texts : string[], fontSize : number, fontFamily 
 	const lines : number[] = []
 	const lineEnds : number[][] = []
 	const lineRights : number[][] = []
+	const charX : number[][] = []
 	for (let i = 0; i < texts.length; i++) {
 		const full = '　　' + texts[i]
 		const builder = StaticLayout.Builder.obtain(full, 0, full.length.toInt(), paint, w.toInt())
@@ -80,6 +81,16 @@ export function buildParaLayout(texts : string[], fontSize : number, fontFamily 
 		lines.push(lc)
 		const ends : number[] = []
 		const rights : number[] = []
+		// 逐字符左缘（含末字右边界）：getPrimaryHorizontal(offset) 返回 offset 处字符边界 x（物理像素）。
+		// 布局文本含 2 字缩进前缀，数据字符 k 的左界 = offset k+2；k=段长 → offset 段长+2 = 末字右边界。
+		// 供划词手柄精确到字形边界——引号/标点等窄字形推进宽 ≠ charW，均分口径会差出半个字
+		const xs : number[] = []
+		const plen = texts[i].length
+		for (let k = 0; k <= plen; k++) {
+			const px : number = layout.getPrimaryHorizontal((k + 2).toInt())
+			xs.push(px / dpr)
+		}
+		charX.push(xs)
 		for (let k = 0; k < lc; k++) {
 			// StaticLayout 偏移含 2 字缩进前缀：独占端点 - 前缀 2 字 - 1 = 段内末字符下标
 			// getLineEnd 返回 Int：先收窄为 number 再与字面量运算（Int - number 无重载）
@@ -92,6 +103,6 @@ export function buildParaLayout(texts : string[], fontSize : number, fontFamily 
 		lineEnds.push(ends)
 		lineRights.push(rights)
 	}
-	return { lines: lines, lineEnds: lineEnds, lineRights: lineRights } as ParaLineLayout
+	return { lines: lines, lineEnds: lineEnds, lineRights: lineRights, charX: charX } as ParaLineLayout
 }
 // #endif

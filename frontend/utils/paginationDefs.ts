@@ -19,4 +19,7 @@ export type ParaLineLayout = {
 	lineEnds : number[][]
 	/** 每段逐行真实右缘（px，与 lineEnds 对齐；供划词终点吸附行尾字符） */
 	lineRights : number[][]
+	/** 每段逐字符左缘 x（px，段落坐标：charX[k]=第 k 字左边界、charX[段长]=末字右边界；
+	 *  含首行缩进的布局坐标，供划词手柄精确到字形边界——窄引号/标点推进宽 ≠ charW） */
+	charX : number[][]
 }

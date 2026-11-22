@@ -153,10 +153,10 @@
 	/**
 	 * SelectionPopover —— 阅读页划词气泡（可复用组件，框架层）
 	 * --------------------------------------------------------------
-	 * 职责：划词子系统（选区状态/手柄拖动/句间吸附/气泡定位显隐）+
+	 * 职责：划词子系统（选区状态/手柄逐字拖动/气泡定位显隐）+
 	 * 气泡五项操作分发；想法（查看卡片/编辑器）与分享（预览/canvas 导出）
 	 * 已拆分为 ThoughtPanel/ShareCard 子组件，本组件经 ref 与事件接线。
-	 * 划词：宿主长按正文完成 rect 查询与字符换算后经 ref 调
+	 * 划词：宿主长按正文选中触点所在字符，完成 rect 查询与字符换算后经 ref 调
 	 *       beginSelection() 建立选区（正文锚点零宽字符与拖动段落矩形
 	 *       在宿主模板内，跨组件查询不可行，由宿主查询后经
 	 *       setAnchors/setDragRects 回传组件差分定位）；选区变化
@@ -187,6 +187,9 @@
 		pageH: number
 		/** 排版度量（每行字数/行高/字距，宿主随字号与屏宽下行，划词换算用） */
 		metrics: TextMetrics
+		/** 宿主锚点是否为 view 级元素（首页诗字符单元）：true 时 App 原生端也可信并取其实测 x；
+		 *  正文嵌套 text 的锚点在 App 端 X 含首行缩进平移，须置 false 走段落矩形+真实行边界 */
+		anchorsFromView: boolean
 		/** 选区覆盖段序列（宿主按选区与各章段落展开；划线按项写入所在章） */
 		segs: SpanSeg[]
 		/** 选区文本（跨段拼接，宿主计算） */
@@ -233,7 +236,7 @@
 	const twoLineAvailW = props.pageW - rpxToPx(48)
 	twoLine.value = twoLineNeedW > twoLineAvailW
 
-	/** ===== 划词子系统（选区状态/手柄/拖动/句间吸附内聚；正文锚点与段落矩形由宿主查询回传） ===== */
+	/** ===== 划词子系统（选区状态/手柄/逐字拖动吸附内聚；正文锚点与段落矩形由宿主查询回传） ===== */
 	/** 划词选区（跨段选区：从起点段/字符到终点段/字符的闭区间） */
 	const selSpan = ref<SelSpan | null>(null)
 	/** 起点段视口位置（px，长按时缓存；滚动/翻页/字号变化即清选区防止手柄错位） */
@@ -285,10 +288,16 @@
 		return [row, col]
 	}
 
-	/** 行字距：首行（缩进未满额）与未满行用自然字距，满行（两端对齐拉伸）用拉伸字距 */
+	/** 行字距：App 原生端正文左对齐（text-align: justify 被平台裁剪），字格步进恒为自然字距；
+	 *  非 App 端满行两端对齐拉伸，末列按行宽均分（末字符右缘再由真实行右界吸附校正） */
 	function spacingOfRow(col : number, perLine : number) : number {
 		const m = props.metrics
+		// #ifdef APP-ANDROID || APP-IOS || APP-HARMONY
+		return m.charW
+		// #endif
+		// #ifndef APP-ANDROID || APP-IOS || APP-HARMONY
 		return (col + 1 >= perLine) ? m.fullCharW : m.charW
+		// #endif
 	}
 
 	/** 字符边界视口坐标（[x, y]）：isEnd=末字符右缘/其行底，否则首字符左缘/其行顶。
@@ -341,17 +350,23 @@
 		selBottomPx.value = ep[1]
 	}
 
-	/** 锚点矩形可用性校验：与段落矩形同一查询批次（坐标系一致），做相对包含性校验；
-	 *  异常矩形（如未渲染返回的 (0,0) 默认值）判不可用，退回行列估算。
+	/** 锚点矩形可用性校验：与段落矩形同一查询批次（坐标系一致），做相对包含性校验与粒度校验；
+	 *  App 原生端嵌套 text 的实测矩形可能是整行文本盒（宽度远大于一个字符）或 0 宽，
+	 *  取错右缘会把手柄甩到行尾/字头——宽度不在单字量级即判不可用，退回真实行边界估算。
 	 *  NodeInfo 字段在类型上可空，Kotlin 侧禁止可空值参与算术，统一 ?? 0 兜底 */
 	function anchorUsable(a : NodeInfo, para : NodeInfo, m : TextMetrics) : boolean {
 		const aTop = a.top ?? 0
 		const aHeight = a.height ?? 0
 		const aLeft = a.left ?? 0
+		const aWidth = (a.right ?? 0) - aLeft
 		const pTop = para.top ?? 0
 		const pLeft = para.left ?? 0
 		const pRight = para.right ?? 0
 		const pBottom = para.bottom ?? 0
+		// 下限取 0.28 字：首页诗行尾标点单元仅 27rpx（约 0.4 字宽）需通过；0 宽异常矩形仍被拒
+		if (aWidth > m.charW * 2 || aWidth < m.charW * 0.28) {
+			return false
+		}
 		const cy = aTop + aHeight / 2
 		if (cy < pTop - m.lineH || cy > pBottom + m.lineH) {
 			return false
@@ -379,6 +394,55 @@
 		return rowColOf(charIdx, perLine)
 	}
 
+	/** 切片起始字符所在段落的绝对行号（真实行断点口径；续切片无缩进，行号需整体平移） */
+	function absLineOf(sliceFrom : number, ends : number[]) : number {
+		let line = 0
+		if (sliceFrom > 0) {
+			while (line < ends.length - 1 && sliceFrom > ends[line]) {
+				line++
+			}
+		}
+		return line
+	}
+
+	/** 触点 → 字符（charX 精确口径）：pxPara 为触点相对段落文本原点的 x，在 paraLine 行的
+	 *  可见字符区间 [visFrom, visTo]（切片口径）内找所属字格。端点边界语义与均匀口径一致：
+	 *  起点柄边界归右字（floor）、终点柄边界归左字（ceil-1）。返回 [字符段落下标, 手柄 x]；
+	 *  数据不可用返回 [-1, 0]（调用方退回均匀字格口径）。
+	 *  rights 为该段逐行真实右缘：行末字符的右边界 cx[行末+1] 是下一行首字左缘（x=0，charX 按行
+	 *  重启），必须改用本行右缘，否则终点柄拖到行末会吸附到 x=0 */
+	function charCellAt(pxPara : number, cx : number[] | null, ends : number[] | null, rights : number[] | null, paraLine : number, visFrom : number, visTo : number, isEnd : boolean) : number[] {
+		if (cx == null || ends == null) {
+			return [-1, 0]
+		}
+		if (paraLine < 0 || paraLine >= ends.length) {
+			return [-1, 0]
+		}
+		const rowStart = paraLine == 0 ? 0 : ends[paraLine - 1] + 1
+		const rowEnd = ends[paraLine]
+		const kStart = Math.max(rowStart, visFrom)
+		const kEnd = Math.min(rowEnd, visTo)
+		if (kEnd < kStart) {
+			return [-1, 0]
+		}
+		if (isEnd) {
+			let k = kEnd
+			while (k > kStart && pxPara <= cx[k]) {
+				k--
+			}
+			let x = cx[k + 1]
+			if (k == rowEnd && rights != null && paraLine < rights.length) {
+				x = rights[paraLine] ?? 0
+			}
+			return [k, x]
+		}
+		let k = kStart
+		while (k < kEnd && pxPara >= cx[k + 1]) {
+			k++
+		}
+		return [k, cx[k]]
+	}
+
 	/** 选区端点行列换算（真实行边界）：exactEnds 为整段真实逐行末字符下标，行号按本页切片起始偏移平移 */
 	function rowColOfExact(charIdx : number, ends : number[], sliceFrom : number) : number[] {
 		let line = 0
@@ -399,50 +463,99 @@
 		return [line - sliceLine, col]
 	}
 
-	/** 宿主批量回传同一查询批次的矩形（锚点起/终 + 选区起/终段落），执行差分定位：
+	/** 宿主批量回传同一查询批次的矩形（锚点起/终 + 选区起/终段落）与两端各自的真实行边界，执行差分定位：
 	 *  锚点矩形可实测时直接取真实字符边界；Android 零宽/单字锚点矩形可能为 0×0，
-	 *  此时用宿主实测的真实行边界换算行/列，替代均匀行容量估算 */
-	function setAnchors(span : SelSpan, anchorStart : NodeInfo | null, anchorEnd : NodeInfo | null, fromPara : NodeInfo | null, toPara : NodeInfo | null, fromSliceFrom : number, toSliceFrom : number, exactLineEnds : number[] | null, exactLineRights : number[] | null) : void {
+	 *  此时按所在端的真实行边界换算行/列（跨段选区两端行断点不同，必须分别传入） */
+	function setAnchors(span : SelSpan, anchorStart : NodeInfo | null, anchorEnd : NodeInfo | null, fromPara : NodeInfo | null, toPara : NodeInfo | null, fromSliceFrom : number, toSliceFrom : number, fromLineEnds : number[] | null, toLineEnds : number[] | null, toLineRights : number[] | null, fromCharX : number[] | null, toCharX : number[] | null) : void {
 		const m = props.metrics
 		const hotH = rpxToPx(HANDLE_HOT_RPX)
 		const visH = rpxToPx(HANDLE_VISUAL_RPX)
 		const sameChapter = span.fromCid == span.toCid
 		// UTS 无跨语句空值智能转换（Kotlin 侧不生效），可空入参先经 ! 归一为非空局部值，
 		// NodeInfo 字段读取统一 ?? 0（可空值参与算术/赋给非空字段均编译失败）
-		if (sameChapter && fromPara != null && (span.fromOrigin == span.toOrigin || toPara != null)) {
+		if (fromPara != null && ((sameChapter && span.fromOrigin == span.toOrigin) || toPara != null)) {
 			const fp = fromPara!
-			// 终点段矩形：同段即起点段；跨段取 toPara（上方守卫已保证非空）。
+			// 终点段矩形：同段即起点段；跨段/跨章取 toPara（上方守卫已保证非空）。
 			// 不用「cond ? a : b!」三元——UTS codegen 对「三元+非空断言」的成员访问解析有缺陷
 			let ep = fp
-			if (span.fromOrigin != span.toOrigin) {
+			if (!sameChapter || span.fromOrigin != span.toOrigin) {
 				ep = toPara!
 			}
-			// 估算兜底：真实行边界优先，无实测断点时退回段内行列×排版常量
-			const sc = exactLineEnds != null ? rowColOfExact(span.fromStart, exactLineEnds, fromSliceFrom) : rowColSliced(span.fromStart, fromSliceFrom, m.perLine)
-			const ec = exactLineEnds != null ? rowColOfExact(span.toEnd + 1, exactLineEnds, toSliceFrom) : rowColSliced(span.toEnd, toSliceFrom, m.perLine)
+			// 估算兜底：真实行边界优先（起点用起点段、终点用终点段——跨段时两段行断点不同，
+			// 拿起点段的断点算终点会整行错位），无实测断点时退回段内行列×排版常量
+			const sc = fromLineEnds != null ? rowColOfExact(span.fromStart, fromLineEnds, fromSliceFrom) : rowColSliced(span.fromStart, fromSliceFrom, m.perLine)
+			// 终点按末字符自身行列换算（+1 会落到下一行行首，单字选区拖到行尾时手柄跑到下一行左侧）
+			const ec = toLineEnds != null ? rowColOfExact(span.toEnd, toLineEnds, toSliceFrom) : rowColSliced(span.toEnd, toSliceFrom, m.perLine)
 			let startRow = sc[0]
 			let endRow = ec[0]
+			// 段落绝对行号：toLineEnds/toLineRights 是整段逐行数组，切片口径行号须加回切片起始行
+			const absEndRow = toLineEnds != null ? ec[0] + absLineOf(toSliceFrom, toLineEnds) : -1
 			let startX = (fp.left ?? 0) + (fromSliceFrom == 0 && startRow == 0 ? m.indentPx : 0) + sc[1] * spacingOfRow(sc[1], m.perLine)
 			let endX = (ep.left ?? 0) + (toSliceFrom == 0 && endRow == 0 ? m.indentPx : 0) + (ec[1] + 1) * spacingOfRow(ec[1], m.perLine)
 			// 选区终点恰在原生行尾时直接吸附真实行右缘，消除按均分列宽估算的末端误差
-			if (exactLineRights != null && exactLineEnds != null && endRow < exactLineRights.length && endRow < exactLineEnds.length && span.toEnd == exactLineEnds[endRow]) {
-				endX = (ep.left ?? 0) + (exactLineRights[endRow] ?? 0)
+			if (toLineRights != null && toLineEnds != null && absEndRow >= 0 && absEndRow < toLineRights.length && absEndRow < toLineEnds.length && span.toEnd == toLineEnds[absEndRow]) {
+				endX = (ep.left ?? 0) + (toLineRights[absEndRow] ?? 0)
 			}
+			// #ifdef APP-ANDROID || APP-IOS || APP-HARMONY
+			// 末字符右缘统一从真实行右界倒推：行宽含「”」「，」等窄字形的实际推进宽，
+			// 前进口径按 charW 均分会把窄字形多算约半字（尾柄超出高亮条/标点）。
+			// 后缀字符按自然字距折算（正文左对齐，App 端无两端对齐拉伸）
+			if (toLineEnds != null && toLineRights != null && absEndRow >= 0 && absEndRow < toLineEnds.length && absEndRow < toLineRights.length) {
+				const remain = toLineEnds[absEndRow] - span.toEnd
+				if (remain >= 0) {
+					endX = (ep.left ?? 0) + (toLineRights[absEndRow] ?? 0) - remain * m.charW
+				}
+			}
+			// 逐字推进宽（StaticLayout.getPrimaryHorizontal 缓存，段落坐标含缩进）：字符边界精确到字形，
+			// 窄引号/标点的推进宽 ≠ charW，均分/行右倒推口径的残差在此归零
+			if (fromCharX != null && span.fromStart >= 0 && span.fromStart < fromCharX.length) {
+				startX = (fp.left ?? 0) + fromCharX[span.fromStart]
+			}
+			const endBound = span.toEnd + 1
+			if (toCharX != null && endBound >= 0 && endBound < toCharX.length) {
+				endX = (ep.left ?? 0) + toCharX[endBound]
+			}
+			// #endif
 			// 行号钳制进段落实际行数（矩形高度反推），异常值不至飞出段落
 			startRow = Math.max(0, Math.min(startRow, maxRowOf(fp, m.lineH)))
 			endRow = Math.max(0, Math.min(endRow, maxRowOf(ep, m.lineH)))
 			let startTop = (fp.top ?? 0) + startRow * m.lineH
 			let endBottom = (ep.top ?? 0) + (endRow + 1) * m.lineH
-			// 锚点实测优先：X/Y 均直接使用真实字符边界，不再把实测结果折算回估算行高
-			if (anchorStart != null && anchorUsable(anchorStart, fp, m)) {
+			// 锚点实测优先：X/Y 均直接使用真实字符边界，不再把实测结果折算回估算行高。
+			// App 原生端嵌套 text 的锚点矩形 X 含首行缩进平移、Y 为行盒口径，不可作正文划词真源；
+			// 首页诗的字符单元是 view，实测矩形精确（anchorsFromView=true）——该端只取其 x，y 仍用行估算
+			let useAnchor = false
+			// #ifndef APP-ANDROID || APP-IOS || APP-HARMONY
+			useAnchor = true
+			// #endif
+			// #ifdef APP-ANDROID || APP-IOS || APP-HARMONY
+			useAnchor = props.anchorsFromView
+			// #endif
+			if (useAnchor && anchorStart != null && anchorUsable(anchorStart, fp, m)) {
 				const asN = anchorStart!
 				startX = asN.left ?? 0
-				startTop = asN.top ?? 0
+				if (!props.anchorsFromView) {
+					startTop = asN.top ?? 0
+				}
 			}
-			if (anchorEnd != null && anchorUsable(anchorEnd, ep, m)) {
+			if (useAnchor && anchorEnd != null && anchorUsable(anchorEnd, ep, m)) {
 				const aeN = anchorEnd!
 				endX = aeN.right ?? 0
-				endBottom = aeN.bottom ?? 0
+				if (!props.anchorsFromView) {
+					endBottom = aeN.bottom ?? 0
+				}
+			}
+			// view 锚点宿主（首页诗）经 toRights 下发终点字符的「视觉右界」（字符=步进边界含单元右距、
+			// 行尾标点=内容右缘，与高亮条/拖动吸附同公式）：锚点 right=单元盒右缘，比视觉右界少 15rpx 右距，
+			// 直接采用会让松手落定比拖动预览/高亮右缘缩进半个字距——此处覆盖为视觉右界
+			if (props.anchorsFromView && useAnchor && toLineRights != null && toLineRights.length > 0) {
+				endX = (ep.left ?? 0) + (toLineRights[0] ?? 0)
+			}
+			// 兜底：末字符右缘不得越出段落矩形右界（首页诗行尾标点单元窄于字格步进，
+			// 按列宽前推会把手柄推到标点右侧之外；正文段落右界恒 ≥ 文本右缘，无副作用）
+			const epRight = ep.right ?? 0
+			if (epRight > (ep.left ?? 0) && endX > epRight) {
+				endX = epRight
 			}
 			handleStartLeft.value = startX - hotH / 2
 			handleStartTop.value = startTop - visH
@@ -473,23 +586,52 @@
 		selectionLaidOut.value = true
 	}
 
-	/** 手柄拖动核心（触摸与 Web 鼠标桥接共用；x/y 为触点视口坐标） */
+	/** 拖动手柄的抓握偏移（触点 - 被拖端字符边界锚点）：手柄视觉体悬于行外（起点柄在行顶上方、
+	 *  终点柄圆头垂于行底下方），直接把触点当字符落点会让人抓在圆头时首帧跳到相邻行；
+	 *  拖动全程沿用该偏移还原逻辑落点，视觉位置由逐字吸附决定 */
+	let dragGrabDX = 0
+	let dragGrabDY = 0
+
+	/** 手柄拖动核心（触摸与 Web 鼠标桥接共用；x/y 为触点视口坐标）：
+	 *  触点按抓握偏移还原逻辑落点 → 映射段落行列 → 更新被拖端点 → 手柄逐字吸附到字符边界
+	 *  （起点柄贴字符左缘/行顶，终点柄贴字符右缘/行底；每次跨过一个字格才移动一格） */
 	function applyHandleDragAt(x : number, y : number, isEnd : boolean) : void {
 		const span = selSpan.value
 		if (span == null || dragRects.length == 0) {
 			return
 		}
 		const m = props.metrics
+		const px = x - dragGrabDX
+		const py = y - dragGrabDY
 		// 触点命中段落（纵向区间，未命中钳制首末段）
 		let idx = -1
 		for (let i = 0; i < dragRects.length; i++) {
-			if (y >= dragRects[i].top && y <= dragRects[i].bottom) {
+			if (py >= dragRects[i].top && py <= dragRects[i].bottom) {
 				idx = i
 				break
 			}
 		}
 		if (idx < 0) {
-			idx = y < dragRects[0].top ? 0 : dragRects.length - 1
+			// 段落间距空隙：归入纵向最近的段落（落到首/末段会让端点跨段跳变）
+			idx = 0
+			let best = 0
+			if (py < dragRects[0].top) {
+				best = dragRects[0].top - py
+			} else if (py > dragRects[0].bottom) {
+				best = py - dragRects[0].bottom
+			}
+			for (let i = 1; i < dragRects.length; i++) {
+				let d = 0
+				if (py < dragRects[i].top) {
+					d = dragRects[i].top - py
+				} else if (py > dragRects[i].bottom) {
+					d = py - dragRects[i].bottom
+				}
+				if (d < best) {
+					best = d
+					idx = i
+				}
+			}
 		}
 		const pr = dragRects[idx]
 		// 拖动到的段落长度：以段序列口径不可用（跨章/跨段展开顺序≠rect 顺序），由宿主随矩形回传段长
@@ -497,31 +639,85 @@
 		if (len <= 0) {
 			return
 		}
-		// 切片行数：段首切片（pr.from==0）首行容量 = perLine-2（缩进占 2 字），续切片每行 perLine
+		// 首行容量：段首切片（pr.from==0）被两个全角缩进占去 2 字，续切片（段落跨页）首行即满容量
+		const firstCap = pr.from == 0 ? Math.max(1, m.perLine - 2) : m.perLine
 		let maxRow : number
 		if (pr.from == 0) {
-			const rest = len - (m.perLine - 2)
+			const rest = len - firstCap
 			maxRow = rest <= 0 ? 0 : Math.ceil(rest / m.perLine)
 		} else {
 			maxRow = Math.max(0, Math.ceil(len / m.perLine) - 1)
 		}
-		let row = Math.floor((y - pr.top) / m.lineH)
+		// 行映射按端点边界取整：起点柄锚在行顶（触点所在行）、终点柄锚在行底（触点上一行），
+		// 触点恰在边界上时归入手柄当前所在行，拖动首帧不会跳到相邻行
+		let row : number
+		if (isEnd) {
+			row = Math.ceil((py - pr.top) / m.lineH) - 1
+		} else {
+			row = Math.floor((py - pr.top) / m.lineH)
+		}
 		row = Math.max(0, Math.min(row, maxRow))
-		// 首行触点先扣除缩进宽（两个全角空格），字距：首行与末行未拉伸用自然字距，中间满行用拉伸字距
-		const indent = (pr.from == 0 && row == 0) ? m.indentPx : 0
-		const spacing = row == 0 ? m.charW : (row < maxRow ? m.fullCharW : m.charW)
-		let col = Math.floor((x - pr.left - indent) / spacing)
-		col = Math.max(0, Math.min(col, m.perLine - 1))
-		// 切片内字符索引（首行容量 perLine-2）加切片偏移 = 整段坐标（流式分页段落跨页时 pr.from 非 0）
-		const sliceIdx = row == 0 ? col : (m.perLine - 2) + (row - 1) * m.perLine + col
-		const charIdx = Math.min(sliceIdx, len - 1) + pr.from
-		// 合并行（首页诗宽屏"每行一句"：一个渲染行并置两个笔记段）——超过前段长度的字符索引
-		// 归入后段（secondOrigin），段内列 = 字符索引 - 前段长度；无合并（-1）按单段原样
+
 		let effOrigin = pr.origin
-		let effCharIdx = charIdx
-		if (pr.secondOrigin > 0 && charIdx >= pr.firstLen) {
-			effOrigin = pr.secondOrigin
-			effCharIdx = charIdx - pr.firstLen
+		let effCharIdx = 0
+		let snapX = 0
+		let lineTop = 0
+		let preciseDone = false
+		// #ifdef APP-ANDROID || APP-IOS || APP-HARMONY
+		// 精确路径：charX（逐字左缘，段落坐标含缩进）+ lineEnds（行断点）由宿主从 StaticLayout 缓存下发。
+		// 触点 px 相对段落文本原点，在触点所在行的可见字符区间内找所属字格——窄引号/标点的
+		// 真实推进宽在此生效，拖动预览与松手落定完全一致（无松手跳变）
+		const cxN = pr.charX
+		const endsN = pr.lineEnds
+		if (cxN != null && endsN != null) {
+			const paraLine = Math.max(0, Math.min(absLineOf(pr.from, endsN) + row, endsN.length - 1))
+			const cell = charCellAt(px - pr.left, cxN, endsN, pr.lineRights, paraLine, pr.from, pr.from + len - 1, isEnd)
+			if (cell[0] >= 0) {
+				effCharIdx = cell[0]
+				snapX = pr.left + cell[1]
+				lineTop = pr.top + row * m.lineH
+				preciseDone = true
+			}
+		}
+		// #endif
+		if (!preciseDone) {
+			// 均匀字格口径（首页诗/无逐字缓存的端）：首行触点先扣除缩进宽（两个全角空格）；
+			// 字距：App 原生端左对齐恒为自然字距，非 App 端首行/末行自然字距、中间满行两端对齐拉伸
+			const indent = (pr.from == 0 && row == 0) ? m.indentPx : 0
+			// #ifdef APP-ANDROID || APP-IOS || APP-HARMONY
+			const spacing = m.charW
+			// #endif
+			// #ifndef APP-ANDROID || APP-IOS || APP-HARMONY
+			const spacing = row == 0 ? m.charW : (row < maxRow ? m.fullCharW : m.charW)
+			// #endif
+			const rowCap = row == 0 ? firstCap : m.perLine
+			// 列映射同口径：起点柄取触点所在字格（floor），终点柄锚在字符右缘（ceil-1），边界处不跳字
+			let col : number
+			if (isEnd) {
+				col = Math.ceil((px - pr.left - indent) / spacing) - 1
+			} else {
+				col = Math.floor((px - pr.left - indent) / spacing)
+			}
+			col = Math.max(0, Math.min(col, rowCap - 1))
+			// 切片内字符索引（首行容量 firstCap）加切片偏移 = 整段坐标（流式分页段落跨页时 pr.from 非 0）
+			const sliceIdx = row == 0 ? col : firstCap + (row - 1) * m.perLine + col
+			// 钳制到切片末字符后回推列号：触点落在行尾空白/标点区时吸附末字符，不越出文本
+			const sliceCharIdx = Math.max(0, Math.min(sliceIdx, len - 1))
+			const snapCol = row == 0 ? sliceCharIdx : Math.max(0, sliceCharIdx - firstCap - (row - 1) * m.perLine)
+			const charIdx = sliceCharIdx + pr.from
+			effCharIdx = charIdx
+			// 合并行（首页诗宽屏"每行一句"：一个渲染行并置两个笔记段）——超过前段长度的字符索引
+			// 归入后段（secondOrigin），段内列 = 字符索引 - 前段长度；无合并（-1）按单段原样
+			if (pr.secondOrigin > 0 && charIdx >= pr.firstLen) {
+				effOrigin = pr.secondOrigin
+				effCharIdx = charIdx - pr.firstLen
+			}
+			snapX = pr.left + indent + (isEnd ? (snapCol + 1) * spacing : snapCol * spacing)
+			if (isEnd && snapCol == len - 1 && pr.right > pr.left) {
+				// 末字符右缘按段落右界收敛（首页诗行尾标点区窄于字格步进，避免手柄悬出文本）
+				snapX = Math.min(snapX, pr.right)
+			}
+			lineTop = pr.top + row * m.lineH
 		}
 		if (isEnd) {
 			// 终点柄：新位置在起点之前则互换端点，否则更新终点
@@ -552,31 +748,52 @@
 				span.toEnd = effCharIdx
 			}
 		}
+		// 逐字吸附：被拖端落在新字符的左/右缘与行顶/行底，箭头焦点同步吸附点
 		const hotH = rpxToPx(HANDLE_HOT_RPX)
-		// 箭头焦点跟随触点（跨段拖动时气泡随手指移动，避免停留在旧位置无法点击）
-		selFocusX.value = x
+		const visH = rpxToPx(HANDLE_VISUAL_RPX)
+		selFocusX.value = snapX
 		if (isEnd) {
-			handleEndLeft.value = x - hotH / 2
-			handleEndTop.value = y - hotH / 2
+			handleEndLeft.value = snapX - hotH / 2
+			handleEndTop.value = lineTop + m.lineH - hotH + visH
 		} else {
-			handleStartLeft.value = x - hotH / 2
-			handleStartTop.value = y - hotH / 2
+			handleStartLeft.value = snapX - hotH / 2
+			handleStartTop.value = lineTop - visH
 		}
 		// 选区端点变化上行（宿主渲染高亮与派生上下文）
 		emit('spanChanged', span)
 	}
 
-	/** 手柄拖动（跨段）：触点映射到段落与字符并更新被拖端点；越过另一端时端点互换（原生选择交互）；拖动中手柄视觉跟随手指，松手后由锚点实测吸附真实边界 */
+	/** 手柄拖动（跨段）：触点映射到段落与字符并更新被拖端点；越过另一端时端点互换（原生选择交互）；拖动中手柄逐字吸附，松手后由锚点实测校正真实边界 */
 	function applyHandleDrag(e : UniTouchEvent, isEnd : boolean) : void {
 		if (e.touches.length == 0) {
 			return
 		}
 		applyHandleDragAt(e.touches[0].clientX, e.touches[0].clientY, isEnd)
 	}
-	function onStartHandleTouchStart() : void {
-		dragStartActive.value = true
-		lastDragEnd = -1
+
+	/** 开始拖动手柄（触摸与 Web 鼠标共用）：锁定被拖端、记录抓握偏移并通知宿主刷新拖动段落矩形 */
+	function beginHandleDrag(isEnd : boolean, touchX : number, touchY : number) : void {
+		const hotH = rpxToPx(HANDLE_HOT_RPX)
+		const visH = rpxToPx(HANDLE_VISUAL_RPX)
+		if (isEnd) {
+			dragGrabDX = touchX - (handleEndLeft.value + hotH / 2)
+			dragGrabDY = touchY - (handleEndTop.value + hotH - visH)
+			dragEndActive.value = true
+			lastDragEnd = 1
+		} else {
+			dragGrabDX = touchX - (handleStartLeft.value + hotH / 2)
+			dragGrabDY = touchY - (handleStartTop.value + visH)
+			dragStartActive.value = true
+			lastDragEnd = -1
+		}
 		emit('dragStarted')
+	}
+
+	function onStartHandleTouchStart(e : UniTouchEvent) : void {
+		if (e.touches.length == 0) {
+			return
+		}
+		beginHandleDrag(false, e.touches[0].clientX, e.touches[0].clientY)
 	}
 
 	function onStartHandleTouchMove(e : UniTouchEvent) : void {
@@ -590,10 +807,11 @@
 		emit('queryAnchors')
 	}
 
-	function onEndHandleTouchStart() : void {
-		dragEndActive.value = true
-		lastDragEnd = 1
-		emit('dragStarted')
+	function onEndHandleTouchStart(e : UniTouchEvent) : void {
+		if (e.touches.length == 0) {
+			return
+		}
+		beginHandleDrag(true, e.touches[0].clientX, e.touches[0].clientY)
 	}
 
 	function onEndHandleTouchMove(e : UniTouchEvent) : void {
@@ -608,8 +826,8 @@
 	}
 
 	// #ifdef WEB
-	/** 桌面端无 touch 事件：鼠标桥接手柄拖动（mousedown 命中手柄 → move 跟手映射选区 → up 落定实测），
-	 *  与触摸共用 applyHandleDragAt / onStart·EndHandleTouchStart·End；组件常挂载，监听挂 document/window 一次 */
+	/** 桌面端无 touch 事件：鼠标桥接手柄拖动（mousedown 命中手柄 → move 逐字吸附映射选区 → up 落定实测），
+	 *  与触摸共用 beginHandleDrag / applyHandleDragAt / onStart·EndHandleTouchEnd；组件常挂载，监听挂 document/window 一次 */
 	let webHandleDragging = -1
 
 	function onWebHandleMouseDown(e : MouseEvent) : void {
@@ -623,11 +841,11 @@
 		if (target.closest('#sel-handle-end') != null) {
 			e.preventDefault()
 			webHandleDragging = 1
-			onEndHandleTouchStart()
+			beginHandleDrag(true, e.clientX, e.clientY)
 		} else if (target.closest('#sel-handle-start') != null) {
 			e.preventDefault()
 			webHandleDragging = 0
-			onStartHandleTouchStart()
+			beginHandleDrag(false, e.clientX, e.clientY)
 		}
 	}
 
@@ -663,7 +881,7 @@
 	})
 	// #endif
 
-	/** 建立选区（宿主长按正文完成 rect 查询/字符换算/想法恢复/句界计算后调用）：状态建立、手柄估算、请求锚点实测；
+	/** 建立选区（宿主长按正文选中触点所在字符，完成 rect 查询/字符换算/想法恢复后调用）：状态建立、手柄估算、请求锚点实测；
 	 *  sliceFrom 为长按切片在整段中的起始偏移（流式分页段落跨页时非 0），手柄估算的行列换算需按切片口径 */
 	function beginSelection(span : SelSpan, rectLeft : number, rectTop : number, focusX : number, paraLen : number, sliceFrom : number) : void {
 		selRectLeft.value = rectLeft
@@ -885,7 +1103,7 @@
 		width: 34rpx;
 		height: 34rpx;
 		border-radius: $bai-rounded-pill;
-		background-color: $bai-positive;
+		background-color: $bai-mute;
 	}
 
 	.sel-handle-tip {
@@ -902,14 +1120,14 @@
 	.sel-handle-tip-down {
 		border-top-width: 16rpx;
 		border-top-style: solid;
-		border-top-color: $bai-positive;
+		border-top-color: $bai-mute;
 		margin-top: -4rpx;
 	}
 
 	.sel-handle-tip-up {
 		border-bottom-width: 16rpx;
 		border-bottom-style: solid;
-		border-bottom-color: $bai-positive;
+		border-bottom-color: $bai-mute;
 		margin-bottom: -4rpx;
 	}
 
