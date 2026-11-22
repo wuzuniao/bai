@@ -98,7 +98,7 @@
 		/** 想法/划线记录卡片列表 */
 		notes: NoteRecord[]
 	}>()
-	const emit = defineEmits(['selectChapter', 'goNote', 'goBookmark', 'toast', 'changed'])
+	const emit = defineEmits(['selectChapter', 'goNote', 'goBookmark', 'changed'])
 
 	/** 书签子组件引用（书签增删 ref 转发）。vdom 模式下自定义 Expose 类型 ref 会在运行时
 	 *  cast 失败（项目规范 3.4），统一用内置 ComponentPublicInstance + $callMethod
@@ -143,7 +143,6 @@
 	function onSortTap(e : UniPointerEvent) : void {
 		e.stopPropagation()
 		orderDesc.value = !orderDesc.value
-		emit('toast', orderDesc.value ? t('readercomp.orderDesc') : t('readercomp.orderAsc'))
 		locateCatalogAnchor()
 	}
 

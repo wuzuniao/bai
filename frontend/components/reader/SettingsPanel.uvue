@@ -105,8 +105,8 @@
 	/**
 	 * SettingsPanel —— 阅读设置面板子组件（设置真源）
 	 * --------------------------------------------------------------------------
-	 * 字号/字体/背景/翻页/日夜的调节动作、持久化（reader_settings / reader_font）
-	 * 与提示全部内聚；变更经 change 事件上行宿主（ReaderControl 转发页面应用渲染）。
+	 * 字号/字体/背景/翻页/日夜的调节动作与持久化（reader_settings / reader_font）
+	 * 全部内聚；变更经 change 事件上行宿主（ReaderControl 转发页面应用渲染）。
 	 * 字体为点击即时预览：选择即上行渲染，保存才持久化 reader_font，
 	 * 取消/收起列表/面板关闭均回退到已保存字体。
 	 * 组件常挂载（宿主经 v-show 控制显隐），open 由隐藏转可见时重置面板内
@@ -117,7 +117,7 @@
 		/** 面板可见状态（宿主 v-show 控制显隐；转可见时重置临时 UI 状态） */
 		open: boolean
 	}>()
-	const emit = defineEmits(['change', 'toast'])
+	const emit = defineEmits(['change'])
 
 	/** ===== 阅读设置（真源：组件内调节/持久化，change 事件上行宿主应用渲染） ===== */
 	/** 当前主题 key：light / night / paper */
@@ -196,12 +196,11 @@
 		emitChange()
 	}
 
-	/** 翻页模式选择（Stitch: 单选高亮 + toast） */
+	/** 翻页模式选择（Stitch: 单选高亮） */
 	function selectPageTurn(mode : string) : void {
 		pageTurn.value = mode
 		saveSettings({ fontSize: fontSize.value, pageTurn: pageTurn.value, theme: themeKey.value, fontKey: fontKey.value } as ReaderSettings)
 		emitChange()
-		emit('toast', t('readercomp.switchedMode').replace('{0}', modeLabel(mode)))
 	}
 
 	/** 日/夜切换（宿主三项导航经 ref 调用：真源唯一写入口，保证持久化与上行一致） */
@@ -210,7 +209,6 @@
 		selectedBg.value = readerThemeOf(key).readerBg
 		saveSettings({ fontSize: fontSize.value, pageTurn: pageTurn.value, theme: themeKey.value, fontKey: fontKey.value } as ReaderSettings)
 		emitChange()
-		emit('toast', key == 'night' ? t('readercomp.nightOn') : t('readercomp.nightOff'))
 	}
 
 	/** ===== 字体列表（点击即时预览：选择即上行渲染；保存才持久化，取消/收起/关面板回退已保存值） ===== */
@@ -252,7 +250,6 @@
 		fontKey.value = pendingFontKey.value
 		savedFontKey.value = pendingFontKey.value
 		uni.setStorageSync('reader_font', pendingFontKey.value)
-		emit('toast', t('readercomp.fontSaved'))
 	}
 
 	/** 取消字体选择：放弃预览并收起列表 */

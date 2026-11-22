@@ -280,7 +280,6 @@
 			@go-note="goToUnderline"
 			@change="onControlChange"
 			@bookmarks-changed="onBookmarksChanged"
-			@toast="onControlToast"
 		/>
 		<!-- 书签下拉/移除遮罩（顶部半透明提示条：高度即内容位移量，填补内容下移留出的空白；书签图标在遮罩内右上角随动作变化） -->
 		<view
@@ -3604,10 +3603,6 @@
 	/** 听书悬浮球点击（ReaderControl 上行，功能占位） */
 	function onListenTap() : void {
 		showToast(t('reader.listenTodo'))
-	}
-	/** 控制框组件内部动作提示（如目录正/倒序切换） */
-	function onControlToast(msg: string) : void {
-		showToast(msg)
 	}
 </script>
 

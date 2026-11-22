@@ -41,9 +41,8 @@
 				@select-chapter="onSelectChapter"
 				@go-note="onGoNote"
 				@go-bookmark="onGoBookmark"
-				@toast="onPanelToast"
 				@changed="onBookmarksChanged"
-			/>
+				/>
 			<!-- 设置面板（子组件化：字号/字体/背景/翻页/日夜真源与持久化内聚；
 			     常挂载 v-show 控制显隐——日夜切换 ref 调用常可用） -->
 			<SettingsPanel
@@ -51,8 +50,7 @@
 				v-show="settingsOpen"
 				:open="settingsOpen"
 				@change="onSettingsChange"
-				@toast="onPanelToast"
-			/>
+				/>
 			<!-- 听书悬浮球（Stitch: 黑底 64px 圆，"听" 28px/900，设置/抽屉展开时隐藏） -->
 			<view v-if="!settingsOpen && !drawerOpen" class="listen-wrap">
 				<view class="listen-btn" @click="onListen">
@@ -136,7 +134,7 @@
 		return ''
 	})
 
-	const emit = defineEmits(['back', 'toggleDrawer', 'toggleSettings', 'listen', 'selectChapter', 'goBookmark', 'goNote', 'toast', 'change', 'bookmarksChanged'])
+	const emit = defineEmits(['back', 'toggleDrawer', 'toggleSettings', 'listen', 'selectChapter', 'goBookmark', 'goNote', 'change', 'bookmarksChanged'])
 
 	/** ===== 子组件引用（真源在子组件，本组件只做转发与镜像派生）。
 	 *  vdom 模式下自定义 Expose 类型 ref 会在运行时 cast 失败（项目规范 3.4），
@@ -212,10 +210,6 @@
 
 	function onGoBookmark(bm : Bookmark) : void {
 		emit('goBookmark', bm)
-	}
-
-	function onPanelToast(msg : string) : void {
-		emit('toast', msg)
 	}
 
 	function onBookmarksChanged() : void {
