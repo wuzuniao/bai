@@ -209,11 +209,17 @@ export function computePageBreaksExact(paraTexts : string[], layout : ParaLineLa
 			continue
 		}
 		let ends = i < layout.lineEnds.length ? layout.lineEnds[i] : ([] as number[])
-		if (ends.length == 0) {
-			// 断点数据缺失兜底：按单行整段处理，保证内容不丢失
-			ends = [len - 1] as number[]
+		const measuredLines = i < layout.lines.length ? layout.lines[i] : ends.length
+		const totalLines = Math.min(len, Math.max(1, measuredLines))
+		if (ends.length != totalLines) {
+			// 行数与断点不一致时只能均分兜底（仅保证不越界）：均分断点不是真实行边界，页尾切断会落在行中间，
+			// 表现为最后一行半行、下方留白，甚至切片超出真实行边界导致渲染溢出吞字。
+			// 调用方必须保证 lines 与 lineEnds 同源（APP-ANDROID 统一取 StaticLayout 初排，见 utils/textlayout.uts）
+			ends = [] as number[]
+			for (let k = 0; k < totalLines; k++) {
+				ends.push(Math.round((k + 1) * len / totalLines) - 1)
+			}
 		}
-		const totalLines = ends.length
 		let k = 0
 		let firstSlice = true
 		while (k < totalLines) {

@@ -452,7 +452,6 @@
 	.settings-page__member-card {
 		position: relative;
 		width: 100%;
-		min-height: 556rpx;
 		margin-top: 32rpx;
 		padding: 48rpx;
 		box-sizing: border-box;
@@ -506,12 +505,11 @@
 		font-weight: 400;
 	}
 
-	/* 价格行：左侧大价格顶对齐，右侧说明组贴底 */
+	/* 价格行：左侧大价格顶对齐，右侧说明组与大价格底对齐 */
 	.settings-page__member-price-row {
 		position: relative;
 		z-index: 1;
 		margin-top: 48rpx;
-		min-height: 140rpx;
 		flex-direction: row;
 	}
 
@@ -524,7 +522,9 @@
 
 	.settings-page__member-price-meta {
 		margin-left: 20rpx;
-		align-self: flex-end;
+		align-self: flex-start;
+		/* 底边对齐大价格：价格行高 96rpx − 说明组两行高（32rpx + 48rpx）= 16rpx */
+		margin-top: 16rpx;
 		flex-direction: column;
 	}
 

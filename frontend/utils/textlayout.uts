@@ -4,13 +4,18 @@ import { readerLineHeightPx } from '@/utils/pagination.uts'
 import StaticLayout from 'android.text.StaticLayout'
 import TextPaint from 'android.text.TextPaint'
 import Typeface from 'android.graphics.Typeface'
+import Layout from 'android.text.Layout'
 
 /**
  * APP-Android 引擎级精确排版（条件编译，仅 APP-ANDROID 生效）：
- * 用与正文完全同参的 StaticLayout 逐段离线排版，直接读取文本引擎的断行结果
- * （行数 + 每行末字符下标），替代 DOM 高度推断与末行二分探测，实现零漂移分页。
- * 断行是否与 uvue 文本组件真实渲染同源，由宿主的同参校验（行高比例一致性）判定，
- * 不一致时宿主自动回退 DOM 探测管线。
+ * 用与正文完全同参的 StaticLayout 逐段离线排版，直接读取文本引擎的真实行数、
+ * 每行末字符下标与行右边界（lineRights 供划词行尾吸附）。
+ *
+ * 本端翻页分页、划词行列换算与锚点定位均以此为唯一数据源；
+ * 旧链路（DOM 离屏行数取整 + 逐字矩形校正与原生断点混用）已删除，
+ * 混用会在两者不一致时退回均分断点，页尾切断落在行中间（半行、下方留白）。
+ * 字号/宽/字距按物理像素构建（与正文渲染同尺寸），断行策略取 SIMPLE（与逐行填充断行同口径）。
+ * 字体族取 CSS 栈首项映射系统字族；未安装时由系统回退，与正文渲染同链。
  */
 
 /** 字体族 CSS 栈 → Android Typeface（取首选项，通用关键字映射系统字族，其余按名创建，未安装时由系统回退） */
@@ -38,43 +43,55 @@ function resolveTypeface(family : string) : Typeface {
 
 /**
  * 逐段构建 StaticLayout 并读取断行结果。
- * @param texts          段落正文（不含缩进，缩进在函数内按正文口径补两个全角空格）
- * @param fontSize       字号 px
- * @param fontFamily     字体族 CSS 栈（与正文渲染同源）
- * @param letterSpacingPx 字距 px（正文字距 0.4rpx 换算；Paint.letterSpacing 单位为 em，内部换算）
- * @param widthPx        行宽 px（与正文内容区宽一致）
+ * @param texts           段落正文（不含缩进，缩进在函数内按正文口径补两个全角空格）
+ * @param fontSize        字号 dp（与正文字号一致）
+ * @param fontFamily      字体族 CSS 栈（与正文渲染同源）
+ * @param letterSpacingPx 字距 dp（正文字距 0.4rpx 换算；Paint.letterSpacing 单位为 em，内部换算）
+ * @param widthPx         行宽 dp（与正文内容区宽一致）
+ * @param pixelRatio      逻辑像素 → 物理像素比例（排版按物理像素进行，与正文渲染同尺寸）
  */
-export function buildParaLayout(texts : string[], fontSize : number, fontFamily : string, letterSpacingPx : number, widthPx : number) : ParaLineLayout {
+export function buildParaLayout(texts : string[], fontSize : number, fontFamily : string, letterSpacingPx : number, widthPx : number, pixelRatio : number) : ParaLineLayout {
+	const dpr = pixelRatio > 0 ? pixelRatio : 1
 	const paint = new TextPaint()
-	paint.setTextSize(fontSize.toFloat())
+	paint.setTextSize((fontSize * dpr).toFloat())
 	paint.setAntiAlias(true)
 	paint.setTypeface(resolveTypeface(fontFamily))
 	if (letterSpacingPx != 0 && fontSize > 0) {
 		paint.setLetterSpacing((letterSpacingPx / fontSize).toFloat())
 	}
-	const w = Math.max(1, Math.round(widthPx))
+	const w = Math.max(1, Math.round(widthPx * dpr))
 	// 行距与正文共享像素行高（仅影响高度校验口径，不影响断行位置）
 	const fm = paint.getFontMetrics()
-	const lineAdd = readerLineHeightPx(fontSize) - (fm.descent - fm.ascent)
+	const lineAdd = readerLineHeightPx(fontSize) * dpr - (fm.descent - fm.ascent)
 	const lines : number[] = []
 	const lineEnds : number[][] = []
+	const lineRights : number[][] = []
 	for (let i = 0; i < texts.length; i++) {
 		const full = '　　' + texts[i]
 		const builder = StaticLayout.Builder.obtain(full, 0, full.length.toInt(), paint, w.toInt())
 		builder.setLineSpacing(lineAdd.toFloat(), 1.0.toFloat())
 		builder.setIncludePad(false)
+		// 简单贪心断行：HIGH_QUALITY（默认）会做段落级均衡/标点优化，把行尾字符挪到下一行，
+		// 与正文 UniTextView 的逐行填充断行不一致（实测页尾切点差 1 字）；SIMPLE 与渲染同口径
+		builder.setBreakStrategy(Layout.BREAK_STRATEGY_SIMPLE)
+		builder.setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NONE)
 		const layout = builder.build()
 		const lc = layout.getLineCount()
 		lines.push(lc)
 		const ends : number[] = []
+		const rights : number[] = []
 		for (let k = 0; k < lc; k++) {
 			// StaticLayout 偏移含 2 字缩进前缀：独占端点 - 前缀 2 字 - 1 = 段内末字符下标
 			// getLineEnd 返回 Int：先收窄为 number 再与字面量运算（Int - number 无重载）
 			const endPos : number = layout.getLineEnd(k.toInt())
 			ends.push(endPos - 3)
+			// getLineRight 返回 Float（物理像素）：换算回 dp 供划词行尾吸附
+			const right : number = layout.getLineRight(k.toInt())
+			rights.push(right / dpr)
 		}
 		lineEnds.push(ends)
+		lineRights.push(rights)
 	}
-	return { lines: lines, lineEnds: lineEnds } as ParaLineLayout
+	return { lines: lines, lineEnds: lineEnds, lineRights: lineRights } as ParaLineLayout
 }
 // #endif

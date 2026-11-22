@@ -362,12 +362,6 @@
 		return true
 	}
 
-	/** 锚点中心相对段落原点的行序号（半行取整，兼容行盒高度为行高或字号的平台差异） */
-	function rowOfAnchor(a : NodeInfo, para : NodeInfo, lineH : number) : number {
-		const cy = (a.top ?? 0) + (a.height ?? 0) / 2
-		return Math.floor((cy - (para.top ?? 0) - lineH / 2) / lineH + 0.5)
-	}
-
 	/** 段落实际行数（元素高度/行高反推）的最大行序号，用于钳制异常行号 */
 	function maxRowOf(para : NodeInfo, lineH : number) : number {
 		const rows = Math.round((para.height ?? 0) / lineH)
@@ -385,13 +379,30 @@
 		return rowColOf(charIdx, perLine)
 	}
 
+	/** 选区端点行列换算（真实行边界）：exactEnds 为整段真实逐行末字符下标，行号按本页切片起始偏移平移 */
+	function rowColOfExact(charIdx : number, ends : number[], sliceFrom : number) : number[] {
+		let line = 0
+		while (line < ends.length - 1 && charIdx > ends[line]) {
+			line++
+		}
+		let sliceLine = 0
+		if (sliceFrom > 0) {
+			while (sliceLine < ends.length - 1 && sliceFrom > ends[sliceLine]) {
+				sliceLine++
+			}
+		}
+		if (line < sliceLine) {
+			line = sliceLine
+		}
+		const lineStart = line == 0 ? 0 : ends[line - 1] + 1
+		const col = Math.max(0, charIdx - lineStart)
+		return [line - sliceLine, col]
+	}
+
 	/** 宿主批量回传同一查询批次的矩形（锚点起/终 + 选区起/终段落），执行差分定位：
-	 *  锚点零宽字符与段落矩形同批次实测（坐标系一致，transform 祖先的系统偏差在差分中相消），
-	 *  手柄优先取锚点实测坐标（字符边界 X + 锚点中心差分反推行号，与真实渲染零漂移）；
-	 *  锚点缺失（端点不在本页，如跨页句子的页外端点）或矩形异常时退回段内行列×排版常量估算
-	 *  （fromSliceFrom/toSliceFrom 为两端段落在本页的切片起始偏移，估算按切片口径换算）；
-	 *  跨章或段落矩形缺失时退回锚点绝对坐标 */
-	function setAnchors(span : SelSpan, anchorStart : NodeInfo | null, anchorEnd : NodeInfo | null, fromPara : NodeInfo | null, toPara : NodeInfo | null, fromSliceFrom : number, toSliceFrom : number) : void {
+	 *  锚点矩形可实测时直接取真实字符边界；Android 零宽/单字锚点矩形可能为 0×0，
+	 *  此时用宿主实测的真实行边界换算行/列，替代均匀行容量估算 */
+	function setAnchors(span : SelSpan, anchorStart : NodeInfo | null, anchorEnd : NodeInfo | null, fromPara : NodeInfo | null, toPara : NodeInfo | null, fromSliceFrom : number, toSliceFrom : number, exactLineEnds : number[] | null, exactLineRights : number[] | null) : void {
 		const m = props.metrics
 		const hotH = rpxToPx(HANDLE_HOT_RPX)
 		const visH = rpxToPx(HANDLE_VISUAL_RPX)
@@ -406,35 +417,39 @@
 			if (span.fromOrigin != span.toOrigin) {
 				ep = toPara!
 			}
-			// 估算兜底：段内行列×排版常量（锚点缺失或矩形异常时使用）
-			const sc = rowColSliced(span.fromStart, fromSliceFrom, m.perLine)
-			const ec = rowColSliced(span.toEnd, toSliceFrom, m.perLine)
+			// 估算兜底：真实行边界优先，无实测断点时退回段内行列×排版常量
+			const sc = exactLineEnds != null ? rowColOfExact(span.fromStart, exactLineEnds, fromSliceFrom) : rowColSliced(span.fromStart, fromSliceFrom, m.perLine)
+			const ec = exactLineEnds != null ? rowColOfExact(span.toEnd + 1, exactLineEnds, toSliceFrom) : rowColSliced(span.toEnd, toSliceFrom, m.perLine)
 			let startRow = sc[0]
 			let endRow = ec[0]
 			let startX = (fp.left ?? 0) + (fromSliceFrom == 0 && startRow == 0 ? m.indentPx : 0) + sc[1] * spacingOfRow(sc[1], m.perLine)
 			let endX = (ep.left ?? 0) + (toSliceFrom == 0 && endRow == 0 ? m.indentPx : 0) + (ec[1] + 1) * spacingOfRow(ec[1], m.perLine)
-			// 锚点实测优先：字符边界 X 取锚点实测值，行序号由锚点中心差分反推（与真实渲染零漂移）；
-			// 起点锚点取矩形左缘、终点锚点取矩形右缘（阅读页零宽锚点两侧相等不受影响，
-			// 非零宽元素锚点——如首页诗行尾标点单元——直接传元素矩形即可表达末字符右缘）
-			if (anchorStart != null && anchorUsable(anchorStart, fp, m)) {
-				const asN = anchorStart!
-				startRow = rowOfAnchor(asN, fp, m.lineH)
-				startX = asN.left ?? 0
-			}
-			if (anchorEnd != null && anchorUsable(anchorEnd, ep, m)) {
-				const aeN = anchorEnd!
-				endRow = rowOfAnchor(aeN, ep, m.lineH)
-				endX = aeN.right ?? 0
+			// 选区终点恰在原生行尾时直接吸附真实行右缘，消除按均分列宽估算的末端误差
+			if (exactLineRights != null && exactLineEnds != null && endRow < exactLineRights.length && endRow < exactLineEnds.length && span.toEnd == exactLineEnds[endRow]) {
+				endX = (ep.left ?? 0) + (exactLineRights[endRow] ?? 0)
 			}
 			// 行号钳制进段落实际行数（矩形高度反推），异常值不至飞出段落
 			startRow = Math.max(0, Math.min(startRow, maxRowOf(fp, m.lineH)))
 			endRow = Math.max(0, Math.min(endRow, maxRowOf(ep, m.lineH)))
+			let startTop = (fp.top ?? 0) + startRow * m.lineH
+			let endBottom = (ep.top ?? 0) + (endRow + 1) * m.lineH
+			// 锚点实测优先：X/Y 均直接使用真实字符边界，不再把实测结果折算回估算行高
+			if (anchorStart != null && anchorUsable(anchorStart, fp, m)) {
+				const asN = anchorStart!
+				startX = asN.left ?? 0
+				startTop = asN.top ?? 0
+			}
+			if (anchorEnd != null && anchorUsable(anchorEnd, ep, m)) {
+				const aeN = anchorEnd!
+				endX = aeN.right ?? 0
+				endBottom = aeN.bottom ?? 0
+			}
 			handleStartLeft.value = startX - hotH / 2
-			handleStartTop.value = (fp.top ?? 0) + startRow * m.lineH - visH
+			handleStartTop.value = startTop - visH
 			handleEndLeft.value = endX - hotH / 2
-			handleEndTop.value = (ep.top ?? 0) + endRow * m.lineH + m.lineH - hotH + visH
-			selTopPx.value = (fp.top ?? 0) + startRow * m.lineH
-			selBottomPx.value = (ep.top ?? 0) + (endRow + 1) * m.lineH
+			handleEndTop.value = endBottom - hotH + visH
+			selTopPx.value = startTop
+			selBottomPx.value = endBottom
 		} else if (anchorStart != null && anchorEnd != null) {
 			const asN = anchorStart!
 			const aeN = anchorEnd!

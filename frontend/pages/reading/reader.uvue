@@ -502,7 +502,7 @@
 
 
 
-	/** 段落渲染分段（按划线/想法区间与当前选区切分，相邻同属性段合并；选区两端插入零宽锚点段供实测边界坐标） */
+	/** 段落渲染分段（按划线/想法区间与当前选区切分，相邻同属性段合并；选区起止字符段兼作边界锚点） */
 	type TextSeg = {
 		start: number
 		text: string
@@ -513,9 +513,6 @@
 		/** 锚点标记：0=普通段 / 1=选区起点锚点段 / 2=选区终点锚点段 */
 		anchor: number
 	}
-
-	/** 选区两端锚点（零宽字符，排入选中文本流）：其渲染位置即字符边界的真实位置，手柄/气泡吸附实测值 */
-	const ANCHOR_CHAR = '\u200B'
 
 	/** 分段样式类：选区高亮与下划线叠加；想法段实线下划线优先于划线波浪线 */
 	function segClass(seg : TextSeg) : string {
@@ -865,8 +862,6 @@
 	const bookFinished = ref(false)
 	/** 测量串行链：多章/多次请求排队执行，避免离屏节点交叉渲染 */
 	let measureChain : Promise<void> = Promise.resolve()
-	/** StaticLayout 与真实渲染一致性：0=未校验 1=可信（免重复一致性判定，仍逐章校正行数）2=禁用（回退 DOM 探测管线） */
-	let staticLayoutMode = 0
 	/** 在测章 id（含末行探测）：门控调用需等待在测章完成，避免提前放行造成可见换算 */
 	let measuringCids : number[] = []
 	/** 在测标记清理 */
@@ -1024,12 +1019,8 @@
 	 *  每行字数标定/分页/划词换算全部以它为准（与 content-inner/scroll-mode-inner 铺满布局同源） */
 	const bodyW = computed(() : number => pageW.value)
 	const calibWidth = computed(() : number => bodyW.value - bodySidePaddingPx())
-	/** APP 端引擎级精确排版缓存（章 id → 行数+逐行末字符下标；StaticLayout 条件编译，其余端恒空） */
+	/** APP 端 StaticLayout 初排缓存（该端分页/划词的唯一排版真源：真实行数+行边界+行右边界） */
 	const paraLayoutCache = ref<Map<number, ParaLineLayout>>(new Map())
-	/** 校准得到的真实行高倍率（×字号；自适应端上行高实现差异） */
-	let staticLayoutAlpha = 1.7
-	/** 逐段行数实测校正入口（实现定义在分页钳制函数之后，经函数值转发避免前向引用） */
-	let scheduleLineCalibration : ((cid : number, epoch : number) => void) | null = null
 	/** 全书各章段落（章 id → 段落列表；切章/跨章预渲染按 id 取用） */
 	const chapterParas = ref<Paragraph[][]>([])
 	/** 想法/划线卡片列表（组装规则见 readerTypes.buildNoteRecords：划线派生卡片关联想法、无匹配想法独立成卡、按章/段/位置排序） */
@@ -1187,19 +1178,29 @@
 					break
 				}
 			}
-			// 选区起点锚点段：仅当本切片含选区起点字符时插入（跨页选区起点在另一页时不插）
-			if (span != null && inSel && renderCid == span.fromCid && item.origin == span.fromOrigin && span.fromStart >= winFrom && span.fromStart <= winTo) {
-				segs.push({ start: a, text: ANCHOR_CHAR, selected: false, underlined: false, thought: false, anchor: 1 } as TextSeg)
+			// 选区锚点使用真实起止字符：Android 零宽字符 rect 为 0×0 不可实测，也不插入额外字符改变断行
+			const startRel = span != null ? span.fromStart - winFrom : -1
+			const endRel = span != null ? span.toEnd - winFrom : -1
+			let mainFrom = a
+			let mainHandled = false
+			if (span != null && inSel && renderCid == span.fromCid && item.origin == span.fromOrigin && startRel >= a && startRel < b) {
+				segs.push({ start: startRel, text: p.text.slice(winFrom + startRel, winFrom + startRel + 1), selected: true, underlined: inUl, thought: inThought, anchor: 1 } as TextSeg)
+				mainFrom = startRel + 1
 			}
-			const last = segs.length > 0 ? segs[segs.length - 1] : null
-			if (last != null && last.anchor == 0 && last.selected == inSel && last.underlined == inUl && last.thought == inThought) {
-				last.text = last.text + p.text.slice(winFrom + a, winFrom + b)
-			} else {
-				segs.push({ start: a, text: p.text.slice(winFrom + a, winFrom + b), selected: inSel, underlined: inUl, thought: inThought, anchor: 0 } as TextSeg)
+			if (span != null && inSel && renderCid == span.toCid && item.origin == span.toOrigin && endRel >= mainFrom && endRel < b) {
+				if (endRel > mainFrom) {
+					segs.push({ start: mainFrom, text: p.text.slice(winFrom + mainFrom, winFrom + endRel), selected: inSel, underlined: inUl, thought: inThought, anchor: 0 } as TextSeg)
+				}
+				segs.push({ start: endRel, text: p.text.slice(winFrom + endRel, winFrom + endRel + 1), selected: true, underlined: inUl, thought: inThought, anchor: 2 } as TextSeg)
+				mainHandled = true
 			}
-			// 选区终点锚点段：仅当本切片含选区终点字符时插入
-			if (span != null && inSel && renderCid == span.toCid && item.origin == span.toOrigin && span.toEnd >= winFrom && span.toEnd <= winTo) {
-				segs.push({ start: b, text: ANCHOR_CHAR, selected: false, underlined: false, thought: false, anchor: 2 } as TextSeg)
+			if (!mainHandled && mainFrom < b) {
+				const last = segs.length > 0 ? segs[segs.length - 1] : null
+				if (last != null && last.anchor == 0 && last.selected == inSel && last.underlined == inUl && last.thought == inThought) {
+					last.text = last.text + p.text.slice(winFrom + mainFrom, winFrom + b)
+				} else {
+					segs.push({ start: mainFrom, text: p.text.slice(winFrom + mainFrom, winFrom + b), selected: inSel, underlined: inUl, thought: inThought, anchor: 0 } as TextSeg)
+				}
 			}
 		}
 		if (item.from == 0 && len > 0) {
@@ -1739,18 +1740,18 @@
 					lines.push(len > 0 ? Math.max(1, Math.round((rects[i].height ?? 0) / lineH)) : 0)
 				}
 				paraLinesCache.value = mapWithEntry(paraLinesCache.value, cid, lines)
-				// 卸载整章节点，转入末行探测（探测节点更轻量）
 				measureParas.value = [] as number[]
 				probeTailChars(cid, epoch, new Map<number, TailSearch>(), new Map<number, number>(), 0, resolve)
 			}).exec()
 		}, 40)
 	}
-	/** 单章行数实测：挂载整章离屏渲染（章头探针同批挂载、并行实测——共享一次 setData 与挂载等待，
-	 *  章头 30ms 轮询查询先于段落完成，末行探测打包前已落缓存）→ 批量查询段落块高度反推行数 → 卸载后转入末行探测；
-	 *  resolve 前等待章头落定（成功或放弃），保证切换前章首页预算就绪、无二次重排 */
+	/** 单章行数实测（DOM 离屏管线，非 Android 端）：章头与整章段落同批离屏渲染，resolve 前两者均落定，
+	 *  随后按被切断段落探测末行字符数（末行探测见 probeTailChars） */
 	function measureChapterLines(cid : number, epoch : number) : Promise<void> {
 		return new Promise<void>((resolve : (v : void) => void) => {
-			measuringCids.push(cid)
+			if (measuringCids.indexOf(cid) < 0) {
+				measuringCids.push(cid)
+			}
 			measureParas.value = [cid]
 			let headerP : Promise<void> = Promise.resolve()
 			if (chapterHeadHCache.value.get(cid) == null) {
@@ -1771,102 +1772,34 @@
 	function storeLayout(cid : number, layout : ParaLineLayout) : void {
 		paraLayoutCache.value = mapWithEntry(paraLayoutCache.value, cid, layout)
 	}
-	/** APP 端测量：StaticLayout 引擎直读断行。会话首章做一次同参一致性校验
-	 *  （离屏 DOM 块高 vs 预测行数的行高比例 α 一致性），后续章免重复判定但仍逐章校正真实行数；校验失败回退 DOM 探测管线 */
+	/** APP 端测量：StaticLayout 逐段初排即分页真源（真实行数 + 行边界），章头占位高单独实测。
+	 *  不再做 DOM 行数实测/末行探测/逐字矩形校正——引擎断行与正文同参排版，行数与段内断点直接可用，
+	 *  分页切点恒落在真实行边界（页尾半行的根因即旧链路「DOM 行数 + 原生断点 + 逐字校正」三者混用） */
 	function measureChapterAuto(cid : number, epoch : number) : Promise<void> {
-		return new Promise<void>((resolve) => {
+		return new Promise<void>((resolve : (v : void) => void) => {
 			const paras = paragraphsOf(cid)
 			if (epoch != layoutEpoch || paras.length == 0) {
 				resolve()
 				return
 			}
+			if (measuringCids.indexOf(cid) < 0) {
+				measuringCids.push(cid)
+			}
 			const texts : string[] = []
 			for (let i = 0; i < paras.length; i++) {
 				texts.push(paras[i].text)
 			}
-			const layout = buildParaLayout(texts, fontSize.value, fontFamily.value, bodyLetterSpacingPx(), calibWidth.value)
-			if (layout.lines.length != paras.length) {
+			const layout = buildParaLayout(texts, fontSize.value, fontFamily.value, bodyLetterSpacingPx(), calibWidth.value, initWin.pixelRatio)
+			storeLayout(cid, layout)
+			// 章头高度只占章首页预算：与排版并行实测，落定后触发分页重算（标题样式固定，全会话缓存）
+			measureChapterHeader(cid, epoch).then(() : void => {
 				resolve()
-				return
-			}
-			if (staticLayoutMode == 1) {
-				// 免重复做引擎一致性判定，但每章仍须校正真实行数；否则后续章高估行数会提前封页、页尾留出数行空白
-				storeLayout(cid, layout)
-				if (scheduleLineCalibration != null) {
-					scheduleLineCalibration!(cid, epoch)
-				}
-				measureChapterHeader(cid, epoch).then(() : void => {
-					resolve()
-				})
-				return
-			}
-			// 未校验：挂整章离屏节点做一次同参校验
-			measureParas.value = [cid]
-			setTimeout(() => {
-				if (epoch != layoutEpoch) {
-					measureParas.value = [] as number[]
-					resolve()
-					return
-				}
-				uni.createSelectorQuery().selectAll('.measure-para-' + cid).boundingClientRect((res : any) : void => {
-					const rects = res == null ? null : (res as NodeInfo[])
-					measureParas.value = [] as number[]
-					if (epoch != layoutEpoch || rects == null || rects.length != paras.length) {
-						// DOM 校验不可用：保守禁用引擎路径，回退 DOM 探测管线
-						staticLayoutMode = 2
-						measureChapterLines(cid, epoch).then(() => {
-							resolve()
-						})
-						return
-					}
-					// 行高比例 α = 真实块高 /（预测行数 × 字号）。断行不同源时 L 失真致 α 离散，
-					// 仅行高实现差异时 α 一致——按离散度判定断行可信性，并自校准真实行高
-					let sum = 0
-					let count = 0
-					for (let i = 0; i < rects.length; i++) {
-						if (layout.lines[i] > 0 && fontSize.value > 0) {
-							sum += (rects[i].height ?? 0) / (layout.lines[i] * fontSize.value)
-							count++
-						}
-					}
-					const mean = count > 0 ? sum / count : 0
-					let keep = 0
-					let sum2 = 0
-					for (let i = 0; i < rects.length; i++) {
-						if (layout.lines[i] > 0 && fontSize.value > 0) {
-							const a = (rects[i].height ?? 0) / (layout.lines[i] * fontSize.value)
-							if (Math.abs(a - mean) <= 0.2) {
-								keep++
-								sum2 += a
-							}
-						}
-					}
-					const alpha = keep > 0 ? sum2 / keep : 1.7
-					if (count > 0 && keep >= count * 0.8 && alpha > 0.5 && alpha < 4) {
-						staticLayoutMode = 1
-						staticLayoutAlpha = alpha
-						storeLayout(cid, layout)
-						// 后台逐段行数实测校正（不阻塞展示）：静态断行与真实渲染行数不一致时，该章改走实测行数分页
-						if (scheduleLineCalibration != null) {
-							scheduleLineCalibration!(cid, epoch)
-						}
-						// 章头占位独立实测（resolve 前落定）
-						measureChapterHeader(cid, epoch).then(() : void => {
-							resolve()
-						})
-					} else {
-						staticLayoutMode = 2
-						measureChapterLines(cid, epoch).then(() => {
-							resolve()
-						})
-					}
-				}).exec()
-			}, 120)
+			})
 		})
 	}
 	// #endif
-	/** 依序测量多章（运行时再次校验缓存与版本号，避免重复/过期测量；APP-ANDROID 走引擎直读，其余端走 DOM 探测。
-	 *  章头占位测量在各路径内部并行：DOM 路径并入整章挂载批次（见 measureChapterLines），APP 引擎路径直读后 resolve 前补测（见 measureChapterAuto） */
+	/** 依序测量多章（运行时再次校验缓存与版本号，避免重复/过期测量；APP-ANDROID 走引擎初排，其余端走 DOM 探测。
+	 *  章头占位测量在各路径内部并行：DOM 路径并入整章挂载批次（见 measureChapterLines），APP 引擎路径与初排并行（见 measureChapterAuto） */
 	function runMeasureChapters(ids : number[], epoch : number) : Promise<void> {
 		let p : Promise<void> = Promise.resolve()
 		for (let i = 0; i < ids.length; i++) {
@@ -1896,12 +1829,15 @@
 		let waitChain = false
 		for (let i = 0; i < cids.length; i++) {
 			const cid = cids[i]
-			if (cid < 0 || cid >= chapters.value.length || paraLinesCache.value.get(cid) != null || paraLayoutCache.value.get(cid) != null) {
+			if (cid < 0 || cid >= chapters.value.length) {
 				continue
 			}
+			// 在测优先于缓存：初排缓存落库后仍有章头测量与后续章节排队，命中缓存不代表本批测量结束
 			if (measuringCids.indexOf(cid) >= 0) {
-				// 该章测量在途：等待串行链跑完（含末行探测）
 				waitChain = true
+				continue
+			}
+			if (paraLinesCache.value.get(cid) != null || paraLayoutCache.value.get(cid) != null) {
 				continue
 			}
 			if (ids.indexOf(cid) < 0) {
@@ -1997,7 +1933,7 @@
 		const sliceIdx = row == 0 ? col : (m.perLine - 2) + (row - 1) * m.perLine + col
 		return Math.min(sliceIdx, sliceLen - 1) + from
 	}
-	/** 指定章的分页结果（跨章预渲染取相邻章末页/首页用）：APP 端引擎断行就绪走逐行断点精确分页，
+	/** 指定章的分页结果（跨章预渲染取相邻章末页/首页用）：APP 端引擎断行即真源（断点恒落在真实行边界），
 	 *  其余实测行数就绪走实测分页（切断段末行未探测时回退段均估算）；均未就绪回退字数估算（perLine 标定口径） */
 	function chapterBreaks(cid : number) : PageSlice[][] {
 		const paras = paragraphsOf(cid)
@@ -2007,15 +1943,7 @@
 		}
 		const layout = paraLayoutCache.value.get(cid)
 		if (layout != null && layout.lines.length == paras.length) {
-			// APP 端引擎级断行（StaticLayout 条件编译）：切断位置即真实行边界
-			// Android 外层正文与离屏测量均使用共享像素行高，分页必须同值，不能混用未统一的 DOM 校准值
-			// #ifdef APP-ANDROID
-			const exactLineH = readerLineHeightPx(fontSize.value)
-			// #endif
-			// #ifndef APP-ANDROID
-			const exactLineH = staticLayoutAlpha * fontSize.value
-			// #endif
-			return computePageBreaksExact(texts, layout, pageH.value, fontSize.value, exactLineH, contentTopPx.value, contentBottomPx.value, headerHeightOf(cid), paginationFrameW())
+			return computePageBreaksExact(texts, layout, pageH.value, fontSize.value, readerLineHeightPx(fontSize.value), contentTopPx.value, contentBottomPx.value, headerHeightOf(cid), paginationFrameW())
 		}
 		const lines = measuredLinesOf(cid)
 		if (lines != null) {
@@ -2086,57 +2014,6 @@
 		}
 	}
 	clampPageIndex()
-	/** 逐段行数校正应用：实测行数与静态断行行数一致 → 保留精确断行；不一致 → 丢弃该章静态断行缓存，
-	 *  分页自动改走「实测行数」路径（页尾按真实渲染行数装页，消除底部余白；只在本进程内发生一次重排） */
-	function applyLineCorrection(cid : number, layout : ParaLineLayout, measured : number[]) : void {
-		if (measured.length != layout.lines.length) {
-			return
-		}
-		let diverge = false
-		for (let i = 0; i < measured.length; i = i + 1) {
-			if (layout.lines[i] != measured[i]) {
-				diverge = true
-				break
-			}
-		}
-		if (!diverge) {
-			return
-		}
-		const next : Map<number, ParaLineLayout> = new Map()
-		paraLayoutCache.value.forEach((v : ParaLineLayout, k : number) => {
-			if (k != cid) {
-				next.set(k, v)
-			}
-		})
-		paraLayoutCache.value = next
-		clampPageIndex()
-	}
-	/** 逐段行数实测校正（APP 静态断行路径）：静态断行与 DOM 渲染可能相差 ±1 行/段，导致每页少排 1~3 行；
-	 *  开书/切章展示后后台离屏实测整章每段真实行数（已有缓存直接比对），不一致则该章转实测行数分页 */
-	function calibrateStaticLines(cid : number, epoch : number) : void {
-		const layout = paraLayoutCache.value.get(cid)
-		if (layout == null) {
-			return
-		}
-		const measured = paraLinesCache.value.get(cid)
-		if (measured != null) {
-			applyLineCorrection(cid, layout, measured)
-			return
-		}
-		measureChapterLines(cid, epoch).then(() : void => {
-			if (epoch != layoutEpoch) {
-				return
-			}
-			const m = paraLinesCache.value.get(cid)
-			const l = paraLayoutCache.value.get(cid)
-			if (m != null && l != null) {
-				applyLineCorrection(cid, l, m)
-			}
-		})
-	}
-	scheduleLineCalibration = (cid : number, epoch : number) : void => {
-		calibrateStaticLines(cid, epoch)
-	}
 	/** 注入真实书籍数据（章节目录 + 各章段落正文）并重置阅读位置：本地文件解析完成后调用一次，目录、分页、划线/想法/书签渲染全部基于注入后的数据重建 */
 	function loadBookContent(chs : Chapter[], allParas : string[][]) : void {
 		chapters.value = chs
@@ -2164,8 +2041,6 @@
 		paraLayoutCache.value = new Map()
 		// 旧字号的每行字数不得参与新字号的首轮回退分页
 		perLineExact.value = 0
-		// 排版参数变化后 StaticLayout 同参一致性需重新校验（字体族映射可能随字体变化）
-		staticLayoutMode = 0
 		if (relayoutTimer >= 0) {
 			clearTimeout(relayoutTimer)
 		}
@@ -2532,35 +2407,67 @@
 	 *  目标章匹配防止连点场景下前一章切换提前收起抽屉） */
 	let drawerClosePending = false
 	let drawerCloseTarget = -1
-	/** 锚点测量尝试：选区分段（含零宽锚点）随选区状态变更渲染，查询与渲染存在竞态——
-	 *  起终锚点双双缺失时延迟重试（至多 2 次），避免首测落空后退化为估算定位且不再校正 */
+	/** 单项矩形查询：在 exec 回调中解析结果，Android 对缺失节点的 boundingRect 回调可能不触发，exec 回调恒可达 */
+	function queryNodeInfo(selector : string, callback : (rect : NodeInfo | null) => void) : void {
+		uni.createSelectorQuery().select(selector).boundingClientRect().exec((res : any) : void => {
+			const arr = res as Array<NodeInfo | null>
+			callback(arr != null && arr.length > 0 ? arr[0] : null)
+		})
+	}
+	/** 锚点测量尝试：选区起止字符分段随选区状态变更渲染，查询与渲染存在竞态——
+	 *  任一锚点缺失均延迟重试（至多 2 次）；Android 锚点矩形不可用时按选中段的真实行边界换算 */
 	function measureAnchorsAttempt(attempt : number) : void {
 		const s = selSpan.value
 		if (s == null) {
 			return
 		}
-		// 只按当前代次 id 查锚点：选区刚变化时新锚点尚未渲染，查询落空（null）触发下方重试，
-		// 不会读到上一选区旧位置的锚点（不取消选区再次长按时手柄/气泡错位的根因）
-		const startSel = '#' + anchorStartId.value
-		const endSel = '#' + anchorEndId.value
+		// 只按当前代次 id 查锚点，避免读到上一选区的旧位置
 		const epochAtQuery = selEpoch.value
-		uni.createSelectorQuery()
-			.select(startSel).boundingClientRect()
-			.select(endSel).boundingClientRect()
-			.select('#ppara-' + s.fromOrigin).boundingClientRect()
-			.select('#ppara-' + s.toOrigin).boundingClientRect()
-			.exec((res) => {
-				const arr = res as Array<NodeInfo | null>
+		// 段落断点来自 StaticLayout 初排缓存（章未初排时并入后台测量串行链等待）；其余端锚点用节点实测矩形，无需准备
+		// #ifdef APP-ANDROID
+		const prepare : Promise<void> = paraLayoutCache.value.get(s.fromCid) != null ? Promise.resolve() : measureChain
+		// #endif
+		// #ifndef APP-ANDROID
+		const prepare : Promise<void> = Promise.resolve()
+		// #endif
+		let fallbackQueryStarted = false
+		let exactQueryStarted = false
+		const startAnchorQuery = (useExact : boolean) : void => {
+			if (useExact ? exactQueryStarted : (fallbackQueryStarted || exactQueryStarted)) {
+				return
+			}
+			if (useExact) {
+				exactQueryStarted = true
+			} else {
+				fallbackQueryStarted = true
+			}
+			if (epochAtQuery != selEpoch.value) {
+				return
+			}
+			const startSelNow = '#' + anchorStartId.value
+			const endSelNow = '#' + anchorEndId.value
+			let anchorStart : NodeInfo | null = null
+			let anchorEnd : NodeInfo | null = null
+			let fromPara : NodeInfo | null = null
+			let toPara : NodeInfo | null = null
+			let remaining = 4
+			const finish = () : void => {
+				remaining--
+				if (remaining > 0) {
+					return
+				}
 				// 回调期间选区已再次变化：本次结果作废，由新选区自身的测量流程接管
 				if (epochAtQuery != selEpoch.value) {
 					return
 				}
-				if (arr[0] == null && arr[1] == null && attempt < 2) {
-					setTimeout(() => {
+				// #ifndef APP-ANDROID
+				if ((anchorStart == null || anchorEnd == null) && attempt < 2) {
+					setTimeout(() : void => {
 						measureAnchorsAttempt(attempt + 1)
 					}, 80)
 					return
 				}
+				// #endif
 				// 两端段落的本页切片起始偏移（估算兜底按切片口径换算；滚动模式无切片，items 为空恒 0）
 				let fromSlice = 0
 				let toSlice = 0
@@ -2573,8 +2480,63 @@
 						toSlice = items[i].from
 					}
 				}
-				popoverRef.value?.$callMethod('setAnchors', s, arr[0], arr[1], arr[2], arr[3], fromSlice, toSlice)
+				// 段落真实行边界（StaticLayout 同参排版）：划词行列换算与行尾吸附的唯一依据，缺失时组件回退锚点绝对坐标
+				const baseLayout = paraLayoutCache.value.get(s.fromCid)
+				let exactEnds : number[] | null = null
+				if (baseLayout != null && s.fromOrigin < baseLayout.lineEnds.length && baseLayout.lineEnds[s.fromOrigin].length > 0) {
+					exactEnds = baseLayout.lineEnds[s.fromOrigin]
+				}
+				// 单字符选区共用同一段真实字符矩形：起点取左缘、终点取右缘
+				if (anchorStart != null && anchorEnd == null && s.fromCid == s.toCid && s.fromOrigin == s.toOrigin && s.fromStart == s.toEnd) {
+					anchorEnd = anchorStart
+				}
+				const exactRights = baseLayout != null && s.fromOrigin < baseLayout.lineRights.length ? baseLayout.lineRights[s.fromOrigin] : null
+				popoverRef.value?.$callMethod('setAnchors', s, anchorStart, anchorEnd, fromPara, toPara, fromSlice, toSlice, exactEnds, exactRights)
+			}
+			// Android 起止字符锚点现在为真实字符分段，可尝试实测；矩形不可用时由真实行边界兜底。
+			// 段落节点与锚点同批查询
+			// #ifdef APP-ANDROID
+			remaining = 4
+			uni.createSelectorQuery()
+				.select(startSelNow).boundingClientRect()
+				.select(endSelNow).boundingClientRect()
+				.select('#ppara-' + s.fromOrigin).boundingClientRect()
+				.select('#ppara-' + s.toOrigin).boundingClientRect()
+				.exec((res : any) : void => {
+					const arr = res as Array<NodeInfo | null>
+					anchorStart = arr != null && arr.length > 0 ? arr[0] : null
+					anchorEnd = arr != null && arr.length > 1 ? arr[1] : null
+					fromPara = arr != null && arr.length > 2 ? arr[2] : null
+					toPara = arr != null && arr.length > 3 ? arr[3] : null
+					finish()
+				})
+			// #endif
+			// #ifndef APP-ANDROID
+			queryNodeInfo(startSelNow, (rect : NodeInfo | null) : void => {
+				anchorStart = rect
+				finish()
 			})
+			queryNodeInfo(endSelNow, (rect : NodeInfo | null) : void => {
+				anchorEnd = rect
+				finish()
+			})
+			queryNodeInfo('#ppara-' + s.fromOrigin, (rect : NodeInfo | null) : void => {
+				fromPara = rect
+				finish()
+			})
+			queryNodeInfo('#ppara-' + s.toOrigin, (rect : NodeInfo | null) : void => {
+				toPara = rect
+				finish()
+			})
+			// #endif
+		}
+		prepare.then(() : void => {
+			startAnchorQuery(true)
+		})
+		// 长按定位不等待初排完成；300ms 后先按已有数据定位，初排落定后经二次校正刷新
+		setTimeout(() : void => {
+			startAnchorQuery(false)
+		}, 300)
 	}
 	/** 测量选区两端锚点与起/终段落的渲染矩形（同一查询批次，坐标系一致），批量回传气泡组件做差分定位 */
 	function measureAnchors() : void {

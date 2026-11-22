@@ -17,4 +17,6 @@ export type ParaLineLayout = {
 	lines : number[]
 	/** 每段逐行末字符下标（段落坐标 0-based 含端点，与 lines 对齐；行数即断点数） */
 	lineEnds : number[][]
+	/** 每段逐行真实右缘（px，与 lineEnds 对齐；供划词终点吸附行尾字符） */
+	lineRights : number[][]
 }
