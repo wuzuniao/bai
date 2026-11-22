@@ -324,10 +324,11 @@
 	}
 
 	/* 引用块双排版模式（宿主 quoteAlign 下行）：
-	 * 对齐式（短行诗句）——开引号固定宽盒（56rpx）悬挂行首、后续行 padding-left 对齐，各行文字左缘一致，
+	 * 对齐式（短行诗句）——开引号固定宽盒悬挂行首、后续行 padding-left 对齐，各行文字左缘一致，
 	 *   行文字 flex 占满防长行溢出；流式（长文段落）——正文式排版：每段独立 text 流式折行，段首两全角
-	 *   缩进、折行续行顶格。引号 line-height 压至正文行高防撑高行盒（大字字形上下溢出，微信端可见、
-	 *   APP 端裁剪待真机验证） */
+	 *   缩进、折行续行顶格。引号 56rpx 字形在 38rpx 行盒内曾整字被 App 裁剪（首行开引号不可见，
+	 *   2026-11-22 真机实测；末行闭引号因越界仍在视图内而可见）——字号压到行盒 1.25 倍安全比内
+	 *   （38/1.25=30.4），行高维持正文行距不变 */
 	.thought-quote {
 		margin-bottom: 15rpx;
 	}
@@ -338,7 +339,7 @@
 	}
 
 	.thought-quote-line-indent {
-		padding-left: 56rpx;
+		padding-left: 30rpx;
 	}
 
 	.thought-quote-line-text {
@@ -353,7 +354,7 @@
 	}
 
 	.thought-quote-mark {
-		font-size: 56rpx;
+		font-size: 30rpx;
 		font-weight: 800;
 		line-height: 38rpx;
 		color: rgba($bai-ink, 0.18);
@@ -361,7 +362,7 @@
 
 	.thought-quote-mark-open {
 		flex-shrink: 0;
-		width: 56rpx;
+		width: 30rpx;
 		line-height: 38rpx;
 	}
 
