@@ -39,7 +39,7 @@
 						<!-- #ifdef APP -->
 						<text class="pay-page__price">¥6</text>
 						<!-- #endif -->
-						<!-- #ifdef MP-WEIXIN -->
+						<!-- #ifdef WEB -->
 						<text class="pay-page__price">1 {{ t('memberpay.coin') }}</text>
 						<!-- #endif -->
 						<text class="pay-page__price-unit">{{ t('memberpay.priceUnit') }}</text>
@@ -48,8 +48,8 @@
 						<!-- #ifdef APP -->
 						<text class="pay-page__price-origin">{{ t('memberpay.priceOriginApp') }}</text>
 						<!-- #endif -->
-						<!-- #ifdef MP-WEIXIN -->
-						<text class="pay-page__price-origin">{{ t('memberpay.priceOriginMp') }}</text>
+						<!-- #ifdef WEB -->
+						<text class="pay-page__price-origin">{{ t('memberpay.priceOriginCoin') }}</text>
 						<!-- #endif -->
 						<view class="pay-page__pill">
 							<text class="pay-page__pill-text">{{ t('memberpay.save') }}</text>
@@ -59,14 +59,14 @@
 			</view>
 		</scroll-view>
 
-		<!-- 底部操作区：APP 端纯展示（应用商店内购待接入）；微信小程序端点击弹出支付确认卡 -->
+		<!-- 底部操作区：APP 端纯展示（应用商店内购待接入）；Web 端点击弹出支付确认卡 -->
 		<view class="pay-page__action">
 			<!-- #ifdef APP -->
 			<view class="pay-page__btn" hover-class="pay-page__btn--hover" :hover-stay-time="70">
 				<text class="pay-page__btn-text">{{ t('memberpay.subscribe') }}</text>
 			</view>
 			<!-- #endif -->
-			<!-- #ifdef MP-WEIXIN -->
+			<!-- #ifdef WEB -->
 			<view class="pay-page__btn" hover-class="pay-page__btn--hover" :hover-stay-time="70" @click="openPaySheet">
 				<text class="pay-page__btn-text">{{ t('memberpay.subscribe') }}</text>
 			</view>
@@ -74,12 +74,12 @@
 			<!-- #ifdef APP -->
 			<text class="pay-page__safe-tip">{{ t('memberpay.safeApp') }}</text>
 			<!-- #endif -->
-			<!-- #ifdef MP-WEIXIN -->
-			<text class="pay-page__safe-tip">{{ t('memberpay.safeMp') }}</text>
+			<!-- #ifdef WEB -->
+			<text class="pay-page__safe-tip">{{ t('memberpay.safeCoin') }}</text>
 			<!-- #endif -->
 		</view>
 
-		<!-- #ifdef MP-WEIXIN -->
+		<!-- #ifdef WEB -->
 		<!-- 支付确认卡片（底部滑出半屏，标准支付布局）：商品信息 / 支付金额 / 支付方式 / 确认按钮 -->
 		<view v-if="paySheetOpen" class="pay-sheet__mask" @click="closePaySheet">
 			<view class="pay-sheet" @click.stop>
@@ -121,7 +121,7 @@
 			</view>
 		</view>
 
-		<!-- 全屏支付成功卡片：订单明细 + 确认返回活动页 -->
+		<!-- 全屏支付成功卡片：订单明细 + 确认返回来源页（设置页引导卡/活动页） -->
 		<view v-if="successOpen" class="pay-success">
 			<view class="pay-success__body">
 				<view class="pay-success__icon">
@@ -155,19 +155,23 @@
 	/**
 	 * 会员支付页（member-pay.uvue）
 	 * --------------------------------------------------------------------------
-	 * - APP 端：纯静态展示（权益卡/价格/订阅按钮），应用商店内购待接入
-	 * - 微信小程序端：金币支付通道——「立即订阅」弹出支付确认卡，确认后调
+	 * - APP 端（安卓/鸿蒙）：法币支付——纯静态展示（权益卡/价格/订阅按钮），应用商店内购待接入
+	 * - Web/H5 端：金币支付通道——「立即订阅」弹出支付确认卡，确认后调
 	 *   POST /api/v1/membership/purchase（计价 1 金币/月、单月按 31 天计为服务端真源，
 	 *   后端扣金币并调 auth 授 iron 角色续费顺延）
-	 * - 入口：APP 端「我的」页会员卡「立即抢购」；微信小程序端活动页补签
-	 *   提示条「查看」（补签权益引导购买月卡）
+	 * - 微信小程序端：页面不注册（pages.json 条件编译，平台虚拟支付合规），无任何入口
+	 * - 入口：H5/APP「我的」页会员引导卡（仅已登录普通用户可见）+ 活动页金币使用
+	 *   按钮/补签提示条「查看」（均 #ifndef MP-WEIXIN）
 	 * - 固定深色皮肤：支付相关区块（含支付确认卡）按约定保留原支付配色
 	 *   （#0e0f0c 页底 / #2f3131 卡底 + #e2e2e2 描边 / #acf67c 亮绿强调，不随 bai 主题令牌更换）
 	 */
+	// #ifdef WEB
 	import { fetchActivitySummary } from '@/api/activity.uts'
 	import { purchaseMembership } from './api/membership.uts'
-	import type { ApiResponse } from '@/utils/requestDefs.ts'
 	import { forceRefreshToken } from '@/utils/request.uts'
+	import { useUserStore } from '@/stores/user.uts'
+	import type { ApiResponse } from '@/utils/requestDefs.ts'
+	// #endif
 	import { rpxToPx } from '@/utils/layout.uts'
 	import { t, tf } from '@/utils/i18n.uts'
 	// 词典注册（memberpay 页文案 + 公共段）
@@ -194,7 +198,7 @@
 	mainTop.value = 32
 	// #endif
 
-	/** 返回上一页：页面栈为空（如分享直达）时回退首页 */
+	/** 返回上一页：页面栈为空（如浏览器直达 URL）时回退首页 */
 	function goBack() : void {
 		const pages = getCurrentPages()
 		if (pages.length > 1) {
@@ -204,8 +208,9 @@
 		}
 	}
 
-	// #ifdef MP-WEIXIN
+	// #ifdef WEB
 	/** 支付确认卡显隐 / 支付进行中锁 / 金币余额（确认卡打开时拉取，支付后以返回值刷新） */
+	const userStore = useUserStore()
 	const paySheetOpen = ref(false)
 	const paying = ref(false)
 	const balanceGold = ref(0)
@@ -239,7 +244,7 @@
 
 	/**
 	 * 从活动 summary 响应中提取金币余额并刷新
-	 * uts2js（小程序/H5）的 UTSJSONObject 无 getJSONObject 方法，
+	 * uts2js（Web/H5）的 UTSJSONObject 无 getJSONObject 方法，
 	 * 嵌套取值一律索引访问 + 判空 + as 转换（与 request.uts 同构）
 	 */
 	function applyGoldBalance(res: ApiResponse) : void {
@@ -288,6 +293,17 @@
 			paying.value = false
 			if (res.code == 0 && res.data != null) {
 				applyGoldBalance(res)
+				// 授权成功（auth 已授 iron）同步本地角色：返回设置页后会员引导卡隐藏、
+				// 资料卡切换会员版式（store 响应式），无需等待重新登录
+				const info = userStore.userInfo
+				if (info != null && !info.roles.includes('iron')) {
+					const nextRoles : string[] = []
+					for (let i = 0; i < info.roles.length; i++) {
+						nextRoles.push(info.roles[i])
+					}
+					nextRoles.push('iron')
+					userStore.patchUser('roles', nextRoles)
+				}
 				const data = res.data!
 				// 到期时间为 ISO 字符串（无时区后缀），展示日期部分
 				const expiresAtRaw = data['expires_at']
@@ -325,16 +341,6 @@
 			}
 		})
 	}
-	// #endif
-
-	// 微信小程序分享：转发好友与朋友圈（封面统一 /static/share-cover.png，复制自 yao 项目）
-	// #ifdef MP-WEIXIN
-	onShareAppMessage(() => {
-		return { title: t('memberpay.title'), imageUrl: '/static/share-cover.png' }
-	})
-	onShareTimeline(() => {
-		return { title: t('memberpay.title'), imageUrl: '/static/share-cover.png' }
-	})
 	// #endif
 </script>
 
@@ -563,7 +569,7 @@
 		text-align: center;
 	}
 
-	/* ===== 支付确认卡片（MP-WEIXIN：底部滑出半屏；配色随页面深色支付皮肤统一：
+	/* ===== 支付确认卡片（Web 端：底部滑出半屏；配色随页面深色支付皮肤统一：
 	          #2f3131 卡底 + #e2e2e2 描边 + #acf67c 亮绿强调 + 灰阶文字，不用 $bai 主题令牌） ===== */
 	.pay-sheet__mask {
 		position: fixed;
