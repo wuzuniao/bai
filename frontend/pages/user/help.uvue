@@ -1,6 +1,6 @@
 <template>
 	<PageShell :title="t('help.title')" :desc="t('help.desc')" :center="false">
-				<!-- FAQ 卡片列表（仅保留一个示例条目） -->
+				<!-- FAQ 卡片列表（后续问题在此追加卡片） -->
 				<view class="help-page__list">
 					<view class="help-page__card">
 						<text class="help-page__card-title">{{ t('help.faqProfileTitle') }}</text>
@@ -14,7 +14,16 @@
 						<text class="help-page__card-title">{{ t('help.faqSyncTitle') }}</text>
 						<text class="help-page__card-text">{{ t('help.faqSyncText') }}</text>
 					</view>
-				</view>
+					<view class="help-page__card">
+						<text class="help-page__card-title">{{ t('help.faqMemberTitle') }}</text>
+						<text class="help-page__card-text">{{ t('help.faqMemberText1') }}</text>
+						<text class="help-page__card-text">{{ t('help.faqMemberText2') }}</text>
+						<view class="help-page__link-row">
+							<text class="help-page__card-text">{{ t('help.faqMemberLinkLabel') }}</text>
+							<text class="help-page__card-link" @click="openMemberPayUrl">{{ MEMBER_PAY_URL }}</text>
+						</view>
+					</view>
+					</view>
 	</PageShell>
 </template>
 
@@ -24,6 +33,28 @@
 	// 词典注册（contact/help/delete 页文案）
 	import '@/pages/user/locales/userinfo-pages.uts'
 	import '@/utils/locales/common.uts'
+
+	/** 会员兑换 H5 端地址（本项目会员支付页 pages/user/member-pay 的生产 H5 URL；App/小程序端无法直接打开外部 H5，故展示浏览器地址） */
+	const MEMBER_PAY_URL = 'https://bai.wuzuniao.com/h5/pages/user/member-pay'
+
+	/** 打开会员兑换地址：Web 端新标签打开，App/小程序端复制到剪贴板 */
+	function openMemberPayUrl() : void {
+		// #ifdef WEB
+		window.open(MEMBER_PAY_URL, '_blank')
+		// #endif
+		// #ifdef MP-WEIXIN
+		// 微信端系统强制「内容已复制」提示，不再叠加自定义 toast（与 SelectionPopover 同口径）
+		uni.setClipboardData({ data: MEMBER_PAY_URL })
+		// #endif
+		// #ifndef MP-WEIXIN || WEB
+		uni.setClipboardData({
+			data: MEMBER_PAY_URL,
+			success: () => {
+				uni.showToast({ title: t('help.copied'), icon: 'none' })
+			}
+		})
+		// #endif
+	}
 
 	// 微信小程序分享：转发好友与朋友圈（封面统一 /static/share-cover.png，复制自 yao 项目）
 	// #ifdef MP-WEIXIN
@@ -66,5 +97,22 @@
 		font-size: 32rpx;
 		line-height: 52rpx;
 		font-weight: 400;
+	}
+
+	/* H5端地址行：前缀与链接并列一行，链接放不下时整体折行 */
+	.help-page__link-row {
+		flex-direction: row;
+		flex-wrap: wrap;
+	}
+
+	/* 会员兑换地址链接：深墨色提示可点；URL 无空格无断行点，flex-wrap 只能整体换行不能拆词，
+	   须占满剩余宽度（flex: 1）并允许任意字符处断行（word-break: break-all），否则行宽不足时溢出被裁切 */
+	.help-page__card-link {
+		color: $bai-ink-deep;
+		font-size: 32rpx;
+		line-height: 52rpx;
+		font-weight: 400;
+		flex: 1;
+		word-break: break-all;
 	}
 </style>
