@@ -3,22 +3,32 @@
 		<view :class="modelValue ? 'agree-check__box agree-check__box--on' : 'agree-check__box'">
 			<view v-if="modelValue" class="agree-check__mark"></view>
 		</view>
+		<!-- 小程序端不展示外部协议链接：文案引导查看小程序自身《用户隐私保护指引》 -->
+		<!-- #ifdef MP-WEIXIN -->
+		<text class="agree-check__text">{{ t('agree.viewAndAgreeMp') }}</text>
+		<text class="agree-check__text" @click.stop="goPrivacy">{{ t('agree.privacyContract') }}</text>
+		<!-- #endif -->
+		<!-- #ifndef MP-WEIXIN -->
 		<text class="agree-check__text">{{ t('agree.viewAndAgree') }}</text>
 		<text class="agree-check__text" @click.stop="goAgreement">{{ t('agree.service') }}</text>
 		<text class="agree-check__text">{{ t('agree.and') }}</text>
 		<text class="agree-check__text" @click.stop="goPrivacy">{{ t('agree.privacy') }}</text>
+		<!-- #endif -->
 	</view>
 </template>
 
 <script setup lang="uts">
 	/**
-	 * AgreementCheckbox —— 协议勾选行组件（checkbox + 服务协议/隐私政策链接）
+	 * AgreementCheckbox —— 协议勾选行组件（checkbox + 协议链接）
 	 * --------------------------------------------------------------------------
-	 * 登录（账号密码/微信/指纹三卡片）与注册页共用；协议链接跳转内聚
-	 * （openExternalLink 复制后浏览器打开），勾选状态经 v-model 双向绑定。
+	 * 登录（账号密码/微信/指纹三卡片）与注册页共用；勾选状态经 v-model 双向绑定。
+	 * 协议查看方式分端（均不再复制链接到剪贴板）：
+	 * - 小程序端：不展示《服务协议》外链，点击《用户隐私保护指引》经 wx.openPrivacyContract
+	 *   打开小程序后台配置的隐私保护指引（微信官方要求该入口打开，基础库 2.32.3+）
+	 * - App 端：跳站内协议查看页 agreement-view（web-view 内嵌，点击后直接阅读）
+	 * - Web 端：window.open 新标签页直接打开
 	 */
 	import { AGREEMENT_URL, PRIVACY_URL } from '@/utils/config.uts'
-	import { openExternalLink } from '@/utils/link.uts'
 	import { t } from '@/utils/i18n.uts'
 	// 词典注册（协议文案）
 	import '@/utils/locales/common.uts'
@@ -33,13 +43,46 @@
 		emit('update:modelValue', !props.modelValue)
 	}
 
-	/** 服务协议 / 隐私政策：外部链接，复制后浏览器打开 */
+	// #ifdef APP
+	/** 跳转站内协议查看页（type: agreement | privacy，URL 与标题由查看页自行映射，规避路由参数携带中文 URL 的跨端编码差异）。
+	 *  先于调用方定义：script setup 无函数提升（规范 3.4） */
+	function openAgreementView(type : string) : void {
+		uni.navigateTo({
+			url: '/pages/user/agreement-view?type=' + type,
+			fail: () => {
+				uni.showToast({ title: t('common.jumpFail'), icon: 'none' })
+			}
+		})
+	}
+	// #endif
+
+	/** 查看服务协议（小程序端不展示服务协议入口，仅 App/Web 消费） */
 	function goAgreement() : void {
-		openExternalLink(AGREEMENT_URL)
+		// #ifdef APP
+		openAgreementView('agreement')
+		// #endif
+		// #ifdef WEB
+		window.open(AGREEMENT_URL, '_blank')
+		// #endif
 	}
 
+	/** 查看隐私政策：小程序端打开小程序《用户隐私保护指引》，App 端站内查看页，Web 端新标签打开 */
 	function goPrivacy() : void {
-		openExternalLink(PRIVACY_URL)
+		// #ifdef MP-WEIXIN
+		wx.openPrivacyContract({
+			fail: () => {
+				uni.showToast({ title: t('agree.privacyFail'), icon: 'none' })
+			}
+		})
+		// #endif
+		// #ifndef MP-WEIXIN
+		// #ifdef APP
+		openAgreementView('privacy')
+		// #endif
+		// #ifdef WEB
+		window.open(PRIVACY_URL, '_blank')
+		// #endif
+		// #endif
 	}
 </script>
 

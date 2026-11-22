@@ -35,7 +35,7 @@
 							<CodeInput ref="codeRef" v-model="codeValue" :label="t('register.codeLabel')" :error="codeError" :sending="isSending" @request-send="handleGetCode" />
 						</view>
 
-						<!-- 协议勾选（注册仅提示隐私政策） -->
+						<!-- 协议勾选行（文案与协议查看方式随 AgreementCheckbox 组件分端） -->
 						<view class="register-page__agree">
 							<AgreementCheckbox v-model="agreed" />
 						</view>
@@ -63,7 +63,7 @@
 	import AgreementCheckbox from '@/components/form/AgreementCheckbox.uvue'
 	import { sendRegisterCode, registerUser } from './api/user.uts'
 	import { validateUsername, validatePassword, validateConfirmPassword, validateEmail } from './utils/validators.uts'
-	import { confirmAgreement, toastGo } from './utils/flow.uts'
+	import { agreeModalContent, confirmAgreement, toastGo } from './utils/flow.uts'
 	import { t } from '@/utils/i18n.uts'
 	// 词典注册（register 页文案 + 公共段）
 	import '@/pages/user/locales/register.uts'
@@ -181,7 +181,7 @@
 			return
 		}
 		if (!agreed.value) {
-			confirmAgreement(t('register.agreeContent'), agreed, () : void => { submitForm() })
+			confirmAgreement(agreeModalContent('register.agreeContent', 'register.agreeContentMp'), agreed, () : void => { submitForm() })
 			return
 		}
 		submitForm()

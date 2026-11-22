@@ -22,6 +22,7 @@ const zh = new Map<string, string>([
 	['register.shareTitle', '注册账号'],
 	['register.codeEmpty', '请输入验证码'],
 	['register.agreeContent', '查看并同意《服务协议》和《隐私政策》'],
+	['register.agreeContentMp', '请先阅读并同意小程序《用户隐私保护指引》'],
 	['register.success', '注册成功'],
 	['register.codeWrong', '请输入正确验证码'],
 	['register.codeSent', '验证码已发送']
@@ -45,6 +46,7 @@ const en = new Map<string, string>([
 	['register.shareTitle', 'Create Account'],
 	['register.codeEmpty', 'Please enter the code'],
 	['register.agreeContent', 'Please view and agree to the Terms of Service and Privacy Policy'],
+	['register.agreeContentMp', 'Please read and agree to the User Privacy Protection Guidelines of this mini program first'],
 	['register.success', 'Account created'],
 	['register.codeWrong', 'Please enter the correct code'],
 	['register.codeSent', 'Code sent']

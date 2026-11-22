@@ -1,0 +1,33 @@
+<template>
+	<web-view :src="src"></web-view>
+</template>
+
+<script setup lang="uts">
+	/**
+	 * 协议查看页（pages/user/agreement-view.uvue，分包页面，仅 App 端注册消费）
+	 * --------------------------------------------------------------------------
+	 * 以 web-view 内嵌加载服务协议 / 隐私政策页面，点击协议链接后站内直接阅读
+	 * （小程序端经 wx.openPrivacyContract 打开小程序自身隐私保护指引，Web 端新标签直接打开）。
+	 * 参数 type：agreement(服务协议) | privacy(隐私政策)，URL 由本页自行映射，
+	 * 规避路由参数携带中文 URL 的跨端编码差异。
+	 */
+	import { AGREEMENT_URL, PRIVACY_URL } from '@/utils/config.uts'
+	import { t } from '@/utils/i18n.uts'
+	// 词典注册（协议查看页文案）
+	import '@/pages/user/locales/agreementview.uts'
+
+	const src = ref('')
+
+	onLoad((options) => {
+		if (options != null && options['type'] == 'agreement') {
+			src.value = AGREEMENT_URL
+		} else {
+			src.value = PRIVACY_URL
+		}
+	})
+
+	// 原生导航栏标题随类型与语言切换（本页未启用自定义导航样式，与 member-pay 页同口径）
+	onShow(() => {
+		uni.setNavigationBarTitle({ title: t(src.value == AGREEMENT_URL ? 'agreementview.titleAgreement' : 'agreementview.titlePrivacy') })
+	})
+</script>

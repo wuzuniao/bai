@@ -58,6 +58,7 @@ export const API_BASE_URL: string = process.env.NODE_ENV === 'production'
 // 认证服务按 appid 解析对应应用密钥换取 openid
 export const WX_APPID: string = 'wx1fe7d69d23fdffb4'
 
-// 服务协议 / 隐私政策（外部页面，以链接形式关联，应用内不建页）
+// 服务协议 / 隐私政策（auth 服务静态页）：App 端经 agreement-view 页 web-view 内嵌加载，Web 端新标签直接打开；
+// 小程序端不展示外链，点击《用户隐私保护指引》经 wx.openPrivacyContract 打开小程序后台配置的隐私保护指引
 export const AGREEMENT_URL: string = 'https://auth.wuzuniao.com/pages/agreement.html'
 export const PRIVACY_URL: string = 'https://auth.wuzuniao.com/pages/privacy.html'

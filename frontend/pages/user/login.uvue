@@ -93,7 +93,7 @@
 	import '@/pages/user/locales/login.uts'
 	import '@/utils/locales/common.uts'
 	import { loginUser } from './api/user.uts'
-	import { confirmAgreement, toastGo } from './utils/flow.uts'
+	import { agreeModalContent, confirmAgreement, toastGo } from './utils/flow.uts'
 
 	// #ifdef MP-WEIXIN
 	import { wechatLogin } from './api/user.uts'
@@ -209,9 +209,9 @@
 			uni.showToast({ title: passwordError.value, icon: 'none' })
 			return
 		}
-		// 隐私协议勾选校验：未勾选时显示确认弹窗
+		// 隐私协议勾选校验：未勾选时显示确认弹窗（文案分端收口于 flow.uts）
 		if (!remember.value) {
-			confirmAgreement(t('login.agreeContent'), remember, () : void => { handleLogin() })
+			confirmAgreement(agreeModalContent('login.agreeContent', 'login.agreeContentMp'), remember, () : void => { handleLogin() })
 			return
 		}
 		submitting.value = true
@@ -302,7 +302,8 @@
 			return
 		}
 		if (!wechatAgree.value) {
-			confirmAgreement(t('login.agreeContent'), wechatAgree, handleWechatLogin)
+			// 本分支仅微信小程序端编译，直接用小程序隐私保护指引文案
+			confirmAgreement(t('login.agreeContentMp'), wechatAgree, handleWechatLogin)
 			return
 		}
 		submitting.value = true

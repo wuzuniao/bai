@@ -6,6 +6,20 @@
 import { Ref } from 'vue'
 import { t } from '@/utils/i18n.uts'
 
+/**
+ * 未勾选协议弹窗文案（分端收口）：小程序端不引导复制外部协议链接，
+ * 改引导查看小程序自身《用户隐私保护指引》；其他端维持服务协议/隐私政策文案。
+ * 两个 key 由调用方按页面前缀传入（agreeContent 与 agreeContentMp 同页面前缀）。
+ */
+export function agreeModalContent(contentKey : string, mpContentKey : string) : string {
+	// #ifdef MP-WEIXIN
+	return t(mpContentKey)
+	// #endif
+	// #ifndef MP-WEIXIN
+	return t(contentKey)
+	// #endif
+}
+
 /** 协议确认弹窗：未勾选时弹出，确认后置位并重入提交动作（login 三处与 register 共用同一骨架） */
 export function confirmAgreement(content : string, agreeRef : Ref<boolean>, onConfirmed : () => void) : void {
 	uni.showModal({

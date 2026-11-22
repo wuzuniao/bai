@@ -1,0 +1,17 @@
+/**
+ * 协议查看页词典段（pages/user/agreement-view.uvue）
+ * 模块载入时注册进 i18n 全局词典；agreement-view.uvue 引入本文件即完成注册。
+ */
+import { registerDict } from '../../../utils/i18n'
+
+const zh = new Map<string, string>([
+	['agreementview.titleAgreement', '服务协议'],
+	['agreementview.titlePrivacy', '隐私政策']
+])
+
+const en = new Map<string, string>([
+	['agreementview.titleAgreement', 'Terms of Service'],
+	['agreementview.titlePrivacy', 'Privacy Policy']
+])
+
+registerDict(zh, en)

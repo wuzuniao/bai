@@ -24,9 +24,12 @@ const zh = new Map<string, string>([
 	['common.exitHint', '再按一次退出应用'],
 	['common.jumpFail', '页面跳转失败'],
 	['agree.viewAndAgree', '查看并同意'],
+	['agree.viewAndAgreeMp', '已阅读并同意'],
 	['agree.service', '《服务协议》'],
 	['agree.and', '和'],
-	['agree.privacy', '《隐私政策》']
+	['agree.privacy', '《隐私政策》'],
+	['agree.privacyContract', '《用户隐私保护指引》'],
+	['agree.privacyFail', '无法打开隐私保护指引，可在小程序右上角菜单中查看']
 ])
 
 const en = new Map<string, string>([
@@ -49,9 +52,12 @@ const en = new Map<string, string>([
 	['common.exitHint', 'Press again to exit'],
 	['common.jumpFail', 'Failed to open page'],
 	['agree.viewAndAgree', 'I agree to the'],
+	['agree.viewAndAgreeMp', 'I have read and agree to'],
 	['agree.service', 'Terms of Service'],
 	['agree.and', 'and'],
-	['agree.privacy', 'Privacy Policy']
+	['agree.privacy', 'Privacy Policy'],
+	['agree.privacyContract', 'User Privacy Protection Guidelines'],
+	['agree.privacyFail', 'Cannot open the guidelines. View them via the menu in the top-right corner of the mini program']
 ])
 
 registerDict(zh, en)
