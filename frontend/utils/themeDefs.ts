@@ -19,8 +19,6 @@ export type ReaderTheme = {
 	menuTopBg: string
 	/** 底部面板毛玻璃背景 */
 	menuBottomBg: string
-	/** 浮层描边色 */
-	menuBorderColor: string
 	/** 当前章节高亮（正向蓝） */
 	activeBlue: string
 	/** 书签下拉/移除遮罩背景（夜间用浅色与暗底区分） */
@@ -29,8 +27,6 @@ export type ReaderTheme = {
 	maskTextColor: string
 	/** 划词气泡背景（夜间提亮与暗底区分） */
 	popoverBg: string
-	/** 底部控制栏投影（夜间切换为白色微光） */
-	panelShadow: string
 	/** 设置面板控件背景（夜间灰底，日间白底） */
 	controlBg: string
 	/** 设置面板控件描边 */
@@ -41,4 +37,8 @@ export type ReaderTheme = {
 	coverMaskBg: string
 	/** 想法查看面板底色（日间纯白与页面背景区分，夜间随浮层底色） */
 	thoughtPanelBg: string
+	/** 听书悬浮球底色（日间墨黑、夜间随控制栏底色） */
+	listenBallBg: string
+	/** 听书悬浮球文字色（日间白字、夜间反白） */
+	listenBallText: string
 }

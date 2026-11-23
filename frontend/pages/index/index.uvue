@@ -73,7 +73,6 @@
 			:quote-color="quoteColor"
 			:panel-bg="panelBg"
 			:content-color="contentColor"
-			:shadow="panelShadow"
 			@sync="onPopoverSync"
 			@dismiss="clearSelection"
 			@toast="showToast"
@@ -177,9 +176,10 @@
 	/** 气泡浮层配色（首页固定日间，取自阅读日间主题真源；panelBg 与阅读页想法面板同字段） */
 	const popoverBg = READER_THEME_LIGHT.popoverBg
 	const quoteColor = READER_THEME_LIGHT.mutedColor
-	const panelBg = READER_THEME_LIGHT.thoughtPanelBg
-	const contentColor = READER_THEME_LIGHT.titleColor
-	const panelShadow = READER_THEME_LIGHT.panelShadow
+	/** 想法查看卡片配色：首页诗容器是纯白卡片，thoughtPanelBg（纯白）对白卡无法区分——
+	 *  改用划词气泡同款墨黑底（popoverBg）白字（maskTextColor 日间值），视觉与气泡成对 */
+	const panelBg = READER_THEME_LIGHT.popoverBg
+	const contentColor = READER_THEME_LIGHT.maskTextColor
 
 	/** ===== 宽屏行合并（每行放一句）：窗口宽 ≥640px 时 16 行并置为 8 行（一行 = 一句 = 两个笔记行）。
 	 *  判定基于窗口宽（诗卡突破内容列限宽自适应扩展）；微信小程序窗口宽不受页面控制，

@@ -248,7 +248,6 @@
 			:quote-color="mutedColor"
 			:panel-bg="thoughtCardPanelBg"
 			:content-color="titleColor"
-			:shadow="panelShadow"
 			@sync="onPopoverSync"
 			@dismiss="clearSelection"
 			@toast="showToast"
@@ -788,8 +787,6 @@
 	const maskTextColor = ref(READER_THEME_LIGHT.maskTextColor)
 	/** 划词气泡背景（夜间提亮与暗底区分） */
 	const popoverBg = ref(READER_THEME_LIGHT.popoverBg)
-	/** 底部控制栏投影（夜间切换白色微光，想法查看面板沿用） */
-	const panelShadow = ref(READER_THEME_LIGHT.panelShadow)
 	const selectedBg = ref(READER_THEME_LIGHT.readerBg)
 	/** 当前主题 key：light / night / paper */
 	const themeKey = ref('light')
@@ -810,7 +807,6 @@
 		maskBg.value = theme.maskBg
 		maskTextColor.value = theme.maskTextColor
 		popoverBg.value = theme.popoverBg
-		panelShadow.value = theme.panelShadow
 		coverMaskBg.value = theme.coverMaskBg
 		thoughtCardPanelBg.value = theme.thoughtPanelBg
 	}

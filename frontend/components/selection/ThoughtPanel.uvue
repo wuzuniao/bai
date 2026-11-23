@@ -4,7 +4,7 @@
 		<view v-if="cardOpen" class="thought-view-mask" @click="closeCard">
 			<view
 				class="thought-view-panel"
-				:style="'left:' + cardLeft + 'px;top:' + cardTop + 'px;width:' + cardW + 'px;background-color:' + panelBg + ';box-shadow:' + shadow"
+				:style="'left:' + cardLeft + 'px;top:' + cardTop + 'px;width:' + cardW + 'px;background-color:' + panelBg"
 				@click="closeCard"
 			>
 				<scroll-view direction="vertical" class="thought-view-scroll" :style="'max-height:' + cardMaxH + 'px'">
@@ -94,8 +94,6 @@
 		panelBg: string
 		/** 查看卡片内容文字色（随主题） */
 		contentColor: string
-		/** 浮层投影（随主题，查看卡片沿用底栏投影） */
-		shadow: string
 		/** 页面宽（px，查看卡片宽度与水平定位） */
 		pageW: number
 		/** 页面高（px，查看卡片定位与编辑器输入框最大高度） */

@@ -4,7 +4,7 @@
 		<view
 			v-show="visible && !settingsOpen"
 			class="menu-top"
-			:style="'background-color:' + theme.menuTopBg + ';border-color:' + theme.menuBorderColor + ';padding-top:' + navTop + 'px'"
+			:style="'background-color:' + theme.menuTopBg + ';padding-top:' + navTop + 'px'"
 		>
 			<view class="menu-top-inner" :style="'height:' + navHeight + 'px'">
 				<view class="menu-top-left">
@@ -19,11 +19,11 @@
 			</view>
 		</view>
 
-		<!-- 底部控制面板（Stitch: 设置面板 + 听书悬浮球 + 三项导航，呼出态从底部滑入；抽屉打开时保持显示，三控制项不随子项变化；v-show 硬显隐——:class 切换 transform/opacity 在微信端实测未生效） -->
+		<!-- 底部控制面板（Stitch: 设置面板 + 三项导航，呼出态从底部滑入；抽屉打开时保持显示，三控制项不随子项变化；v-show 硬显隐——:class 切换 transform/opacity 在微信端实测未生效；听书球独立悬浮于本面板外，见模板末尾；无投影——与正文的区分靠面板底色） -->
 		<view
 			v-show="visible || drawerOpen"
 			class="menu-bottom"
-			:style="'background-color:' + theme.menuBottomBg + ';border-color:' + theme.menuBorderColor + ';box-shadow:' + theme.panelShadow"
+			:style="'background-color:' + theme.menuBottomBg"
 		>
 			<!-- 目录抽屉（子组件化：页签/排序/目录/想法列表自管理，书签真源在其内嵌 BookmarkPanel；
 			     常挂载 v-show 控制显隐——书签增删 ref 转发链常可用） -->
@@ -51,12 +51,6 @@
 				:open="settingsOpen"
 				@change="onSettingsChange"
 				/>
-			<!-- 听书悬浮球（Stitch: 黑底 64px 圆，"听" 28px/900，设置/抽屉展开时隐藏） -->
-			<view v-if="!settingsOpen && !drawerOpen" class="listen-wrap">
-				<view class="listen-btn" @click="onListen">
-					<text class="listen-text">{{ t('readercomp.listen') }}</text>
-				</view>
-			</view>
 			<!-- 底部三项导航（Stitch: 目录/夜间/设置） -->
 			<view class="bottom-nav">
 				<view class="bottom-nav-btn" @click="onToggleDrawer">
@@ -72,6 +66,16 @@
 					<text class="bottom-nav-text" :style="'color:' + theme.titleColor">{{ t('readercomp.navSettings') }}</text>
 				</view>
 			</view>
+		</view>
+		<!-- 听书悬浮球（Stitch: 纯色底圆，无描边阴影；独立 fixed 悬浮于底部控制栏上方一点，不随面板卡片——
+		     呼出态且设置/抽屉未展开时显示；底色/文字色随日夜主题反相） -->
+		<view
+			v-if="visible && !settingsOpen && !drawerOpen"
+			class="listen-btn"
+			:style="'background-color:' + theme.listenBallBg"
+			@click="onListen"
+		>
+			<text class="listen-text" :style="'color:' + theme.listenBallText">{{ t('readercomp.listen') }}</text>
 		</view>
 	</view>
 </template>
@@ -239,8 +243,8 @@
 		height: 0;
 	}
 
-	/* 顶部导航菜单（Stitch: 毛玻璃背景、底边框、底部圆角 16px；fixed 相对视口，top 即页面顶；
-	   阅读页不限宽，随正文铺满全屏） */
+	/* 顶部导航菜单（Stitch: 底部圆角 16px；fixed 相对视口，top 即页面顶；
+	   阅读页不限宽，随正文铺满全屏；无底边框——与正文的区分靠面板底色） */
 	.menu-top {
 		position: fixed;
 		left: 0;
@@ -250,8 +254,6 @@
 		padding-left: 38rpx;
 		padding-right: 38rpx;
 		padding-bottom: 27rpx;
-		border-bottom-width: 1px;
-		border-bottom-style: solid;
 		border-bottom-left-radius: $bai-rounded-lg;
 		border-bottom-right-radius: $bai-rounded-lg;
 		z-index: 40;
@@ -306,7 +308,7 @@
 		text-overflow: ellipsis;
 	}
 
-	/* 底部控制面板（令牌: 顶部圆角 xl 24px、毛玻璃、浮层提升阴影；fixed 相对视口，bottom 即页面底；
+	/* 底部控制面板（令牌: 顶部圆角 xl 24px；fixed 相对视口，bottom 即页面底；
 	   阅读页不限宽，随正文铺满全屏，目录抽屉/设置面板随本容器） */
 	.menu-bottom {
 		position: fixed;
@@ -316,36 +318,27 @@
 		border-top-left-radius: $bai-rounded-xl;
 		border-top-right-radius: $bai-rounded-xl;
 		z-index: 30;
-		/* 投影内联绑定（夜间切换白色微光）；显隐用 v-show 硬切（:class 过渡在微信端实测不生效，故无动画样式） */
+		/* 无投影：与正文的区分靠面板底色（日间/纸张纯白、夜间提亮一档）；显隐用 v-show 硬切（:class 过渡在微信端实测不生效，故无动画样式） */
 	}
 
-	/* 听书悬浮球（Stitch: 64px 黑底圆，悬浮于底栏上方 96px，右 20px） */
-	.listen-wrap {
-		position: relative;
-		flex-direction: row;
-		justify-content: flex-end;
-		padding-right: 38rpx;
-	}
-
+	/* 听书悬浮球（Stitch: 纯色底圆，无描边无阴影；fixed 相对视口独立悬浮——0×0 组件根下 absolute
+	   会失效（浮层一律 fixed，规范 3.4-17），bottom = 三项导航高约 150rpx + 间距 40rpx；
+	   底色/文字色随日夜主题内联绑定反相，样式侧不再写死色值 */
 	.listen-btn {
-		position: absolute;
+		position: fixed;
 		right: 38rpx;
-		bottom: 185rpx;
+		bottom: 190rpx;
 		width: 123rpx;
 		height: 123rpx;
 		border-radius: $bai-rounded-pill;
-		background-color: $bai-ink;
-		border: 1px solid rgba($bai-on-primary, 0.15);
 		flex-direction: row;
 		align-items: center;
 		justify-content: center;
-		box-shadow: $bai-shadow-fab;
 	}
 
 	.listen-text {
 		font-size: 54rpx;
 		font-weight: 900;
-		color: $bai-on-primary;
 	}
 
 	/* 底部三项导航（Stitch: 三等分，图标 20px + 文字 11px） */

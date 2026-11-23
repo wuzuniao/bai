@@ -114,7 +114,6 @@
 			:quote-color="quoteColor"
 			:panel-bg="panelBg"
 			:content-color="contentColor"
-			:shadow="shadow"
 			:page-w="pageW"
 			:page-h="pageH"
 			:nav-top="navTop"
@@ -204,8 +203,6 @@
 		panelBg: string
 		/** 想法查看卡片内容文字色（随主题） */
 		contentColor: string
-		/** 浮层投影（随主题，想法查看卡片沿用底栏投影） */
-		shadow: string
 	}>()
 
 	const emit = defineEmits(['sync', 'dismiss', 'toast', 'thoughtViewClosed', 'spanChanged', 'dragStarted', 'queryAnchors', 'shareImage'])
