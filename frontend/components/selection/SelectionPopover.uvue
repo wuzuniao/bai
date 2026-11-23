@@ -1,12 +1,12 @@
 <template>
 	<view class="sp-root">
-		<!-- 划词手柄（选区两端水滴形大手柄：拖动调节选中范围，触摸热区大于视觉体便于拖动；锚点实测完成后才显示，避免位置跳变。
+		<!-- 划词手柄（选区两端水滴形大手柄：拖动调节选中范围，触摸热区大于视觉体便于拖动；圆头+三角+边界竖线同色叠压连为一体——竖线贯穿整行文字、贴文字边界为手柄延伸，三角尖端指向竖线、不卡入文字行。锚点实测完成后才显示，避免位置跳变。
 		     拖动中必须保持挂载跟随手指——若随气泡一起隐藏，被拖手柄在触摸中途被卸载，微信端触摸序列随之中断，拖动即失效） -->
 		<template v-if="handlesVisible">
 			<view
 				id="sel-handle-start"
 				class="sel-handle sel-handle-start"
-				:style="'left:' + handleStartLeft + 'px;top:' + handleStartTop + 'px'"
+				:style="'left:' + handleStartLeft + 'px;top:' + handleStartTop + 'px;height:' + handleZoneH + 'px'"
 				@touchstart="onStartHandleTouchStart"
 				@touchmove="onStartHandleTouchMove"
 				@touchend="onStartHandleTouchEnd"
@@ -14,16 +14,18 @@
 			>
 				<view class="sel-handle-drop"></view>
 				<view class="sel-handle-tip sel-handle-tip-down"></view>
+				<view class="sel-handle-line sel-handle-line-start" :style="'height:' + handleLineH + 'px'"></view>
 			</view>
 			<view
 				id="sel-handle-end"
 				class="sel-handle sel-handle-end"
-				:style="'left:' + handleEndLeft + 'px;top:' + handleEndTop + 'px'"
+				:style="'left:' + handleEndLeft + 'px;top:' + handleEndTop + 'px;height:' + handleZoneH + 'px'"
 				@touchstart="onEndHandleTouchStart"
 				@touchmove="onEndHandleTouchMove"
 				@touchend="onEndHandleTouchEnd"
 				@touchcancel="onEndHandleTouchEnd"
 			>
+				<view class="sel-handle-line" :style="'height:' + handleLineH + 'px'"></view>
 				<view class="sel-handle-tip sel-handle-tip-up"></view>
 				<view class="sel-handle-drop"></view>
 			</view>
@@ -247,9 +249,14 @@
 	/** 选区几何（px，视口坐标，气泡定位用）：估算即时填充，锚点实测后覆盖为真实值 */
 	const selTopPx = ref(0)
 	const selBottomPx = ref(0)
-	/** 手柄热区/视觉体尺寸（rpx）：热区大于视觉体便于拖动 */
+	/** 手柄热区尺寸（rpx）：HOT 仅作热区宽度（水平居中用）；VISUAL 为圆头+三角视觉体高度（= 热区顶/底到文字边界的距离）。
+	 *  热区高度动态 = VISUAL + 行高（边界竖线贯穿整行文字），内联绑定 handleZoneH */
 	const HANDLE_HOT_RPX = 76
 	const HANDLE_VISUAL_RPX = 50
+	/** 手柄热区高度（px，动态）：圆头+三角 50rpx + 贯穿整行的边界竖线（行高）；宽度仍 76rpx */
+	const handleZoneH = computed(() : number => rpxToPx(HANDLE_VISUAL_RPX) + props.metrics.lineH)
+	/** 边界竖线高度（px）：整行行高 + 4rpx 搭接量（超出行高的部分藏进三角尖端，衔接无缝） */
+	const handleLineH = computed(() : number => props.metrics.lineH + rpxToPx(4))
 	/** 手柄拖动状态（触摸目标在 touchstart 时锁定，move/end 持续派发至该手柄；响应式供气泡显隐联动） */
 	const dragStartActive = ref(false)
 	const dragEndActive = ref(false)
@@ -332,6 +339,7 @@
 		}
 		const hotH = rpxToPx(HANDLE_HOT_RPX)
 		const visH = rpxToPx(HANDLE_VISUAL_RPX)
+		const m = props.metrics
 		// 选区同段内才能按排版估算；段长为建立选区时宿主提供的起点段文本长度
 		const len = beginParaLen
 		if (len <= 0) {
@@ -342,7 +350,7 @@
 		handleStartTop.value = sp[1] - visH
 		const ep = charEdgePos(s.toEnd, true, len)
 		handleEndLeft.value = ep[0] - hotH / 2
-		handleEndTop.value = ep[1] - hotH + visH
+		handleEndTop.value = ep[1] - m.lineH
 		selTopPx.value = sp[1]
 		selBottomPx.value = ep[1]
 	}
@@ -557,7 +565,7 @@
 			handleStartLeft.value = startX - hotH / 2
 			handleStartTop.value = startTop - visH
 			handleEndLeft.value = endX - hotH / 2
-			handleEndTop.value = endBottom - hotH + visH
+			handleEndTop.value = endBottom - m.lineH
 			selTopPx.value = startTop
 			selBottomPx.value = endBottom
 		} else if (anchorStart != null && anchorEnd != null) {
@@ -567,7 +575,7 @@
 			handleStartLeft.value = (asN.left ?? 0) - hotH / 2
 			handleStartTop.value = (asN.top ?? 0) - visH
 			handleEndLeft.value = (aeN.right ?? 0) - hotH / 2
-			handleEndTop.value = (aeN.bottom ?? 0) - hotH + visH
+			handleEndTop.value = (aeN.bottom ?? 0) - m.lineH
 			selTopPx.value = asN.top ?? 0
 			selBottomPx.value = aeN.bottom ?? 0
 		} else {
@@ -751,7 +759,8 @@
 		selFocusX.value = snapX
 		if (isEnd) {
 			handleEndLeft.value = snapX - hotH / 2
-			handleEndTop.value = lineTop + m.lineH - hotH + visH
+			// 终点柄热区顶=行顶（竖线自行顶贯穿至行底）：行底-行高=行顶，圆头三角垂于行底下方
+			handleEndTop.value = lineTop
 		} else {
 			handleStartLeft.value = snapX - hotH / 2
 			handleStartTop.value = lineTop - visH
@@ -772,9 +781,11 @@
 	function beginHandleDrag(isEnd : boolean, touchX : number, touchY : number) : void {
 		const hotH = rpxToPx(HANDLE_HOT_RPX)
 		const visH = rpxToPx(HANDLE_VISUAL_RPX)
+		const m = props.metrics
 		if (isEnd) {
 			dragGrabDX = touchX - (handleEndLeft.value + hotH / 2)
-			dragGrabDY = touchY - (handleEndTop.value + hotH - visH)
+			// 抓握锚点=文字边界（热区顶+行高）：终点柄热区顶=行底-行高
+			dragGrabDY = touchY - (handleEndTop.value + m.lineH)
 			dragEndActive.value = true
 			lastDragEnd = 1
 		} else {
@@ -925,11 +936,10 @@
 		const selBottom = selBottomPx.value
 		const w = popoverW > 0 ? popoverW : (twoLine.value ? rpxToPx(290) : POPOVER_EST_W)
 		const h = popoverH > 0 ? popoverH : (twoLine.value ? 100 : POPOVER_EST_H)
-		// 上下间距避开手柄视觉体：起点柄悬于行顶上方、终点柄圆头垂于行底下方，另留 16rpx 呼吸空隙
-		const hotH = rpxToPx(HANDLE_HOT_RPX)
+		// 上下间距避开手柄视觉体：起点柄悬于行顶上方、终点柄圆头三角垂于行底下方（延伸后各 50rpx），另留 16rpx 呼吸空隙
 		const visH = rpxToPx(HANDLE_VISUAL_RPX)
 		const gapUp = visH + rpxToPx(16)
-		const gapDown = hotH - visH + rpxToPx(16)
+		const gapDown = visH + rpxToPx(16)
 		const arrowH = rpxToPx(13)
 		// 水平：气泡体中心跟随焦点位置，两侧留边钳制不出屏
 		const margin = rpxToPx(24)
@@ -1085,11 +1095,11 @@
 		height: 0;
 	}
 
-	/* 划词手柄（选区两端水滴形大手柄：圆头+三角尖，色取正蓝与高亮呼应；热区 76rpx 大于视觉体 50rpx 便于拖动，起点柄贴行顶、终点柄贴行底） */
+	/* 划词手柄（选区两端水滴形大手柄：圆头+三角+边界竖线同色叠压连为一体；宽度 76rpx 大于视觉体便于拖动，
+	 * 高度动态内联绑定 handleZoneH（圆头三角 50rpx + 贯穿整行文字的竖线），起点柄贴行顶、终点柄贴行底） */
 	.sel-handle {
 		position: fixed;
 		width: 76rpx;
-		height: 76rpx;
 		flex-direction: column;
 		align-items: center;
 		justify-content: center;
@@ -1106,26 +1116,43 @@
 	.sel-handle-tip {
 		width: 0;
 		height: 0;
-		border-left-width: 12rpx;
+		border-left-width: 15rpx;
 		border-left-style: solid;
 		border-left-color: transparent;
-		border-right-width: 12rpx;
+		border-right-width: 15rpx;
 		border-right-style: solid;
 		border-right-color: transparent;
 	}
 
-	.sel-handle-tip-down {
-		border-top-width: 16rpx;
-		border-top-style: solid;
-		border-top-color: $bai-mute;
+	/* 边界竖线（手柄延伸）：贯穿整行文字（高度内联绑定 handleLineH = 行高 + 4rpx 搭接量），宽 2rpx 尽量少遮文字 */
+	.sel-handle-line {
+		width: 2rpx;
+		background-color: $bai-mute;
+	}
+
+	/* 起点柄竖线（三角在上、线在下）：上缘以 -4rpx 搭入三角尖端；终点柄线在上、三角在下，由 .sel-handle-tip-up 的 margin-top -4rpx 反向搭接 */
+	.sel-handle-line-start {
 		margin-top: -4rpx;
 	}
 
+	/* 三角底边 30rpx、高 25rpx：底边两角恰落在圆头轮廓上（圆底上方 9rpx 处弦宽恰 30rpx），侧边与圆面相切，
+	 * 衔接无豁口无尖角——底边窄于该处弦宽或搭接过浅都会让两角戳出圆外形成左右豁口；
+	 * tip-down 以 -9rpx 搭圆头；tip-up 以 -9rpx 搭圆头、-4rpx 搭竖线；
+	 * 圆头+三角有效高度 34+(25-9)=50rpx = HANDLE_VISUAL_RPX，加竖线（行高+4rpx 搭接）恰填满动态热区，
+	 * 三角尖端与文字边界精确重合；改 HANDLE_VISUAL_RPX 或本组尺寸须同步 script 侧 handleZoneH/handleLineH */
+	.sel-handle-tip-down {
+		border-top-width: 25rpx;
+		border-top-style: solid;
+		border-top-color: $bai-mute;
+		margin-top: -9rpx;
+	}
+
 	.sel-handle-tip-up {
-		border-bottom-width: 16rpx;
+		border-bottom-width: 25rpx;
 		border-bottom-style: solid;
 		border-bottom-color: $bai-mute;
-		margin-bottom: -4rpx;
+		margin-top: -4rpx;
+		margin-bottom: -9rpx;
 	}
 
 	/* 划词气泡（Stitch: 黑底圆角 12px 内边距 12x8，操作项竖排图标+文字；位置由内联绑定——水平对准选区中心、垂直置于选区上/下侧，箭头随朝向指向选区） */
