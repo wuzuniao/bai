@@ -82,7 +82,7 @@
 	import type { ReaderTheme } from '@/utils/themeDefs.ts'
 	import { READER_THEME_LIGHT, READER_THEME_PAPER, readerThemeOf } from '@/utils/theme.uts'
 	import type { ReaderSettings } from '@/utils/readerTypesDefs.ts'
-	import { FONT_OPTIONS, fontOptionOf, loadSettings, saveSettings, loadStoredFontKey } from '@/utils/readerTypes.uts'
+	import { FONT_OPTIONS, fontOptionOf, loadSettings, saveSettings, loadStoredFontKey, defaultPageTurn, fallbackPageTurn } from '@/utils/readerTypes.uts'
 	import { t } from '@/utils/i18n.uts'
 	// 词典注册（阅读器组件文案 + 公共段）
 	import '@/utils/locales/readercomp.uts'
@@ -125,7 +125,7 @@
 	/** 正文字号（12-36） */
 	const fontSize = ref(18)
 	/** 当前翻页模式 */
-	const pageTurn = ref('滚动')
+	const pageTurn = ref(defaultPageTurn())
 	/** 当前生效字体 key（预览期间可能领先于已保存值） */
 	const fontKey = ref('sourcehan')
 	/** 已持久化字体 key（预览回退基准，与 reader_font 存储一致） */
@@ -145,7 +145,7 @@
 	 *  UTS script setup 顶层不支持裸块语句，原块内变量提升并改名避免遮蔽 */
 	const savedSettings = loadSettings()
 	fontSize.value = savedSettings.fontSize
-	pageTurn.value = pageTurnModes.indexOf(savedSettings.pageTurn) >= 0 ? savedSettings.pageTurn : pageTurnModes[0]
+	pageTurn.value = pageTurnModes.indexOf(savedSettings.pageTurn) >= 0 ? savedSettings.pageTurn : fallbackPageTurn()
 	themeKey.value = savedSettings.theme
 	selectedBg.value = readerThemeOf(savedSettings.theme).readerBg
 	// 字体沿用独立 key（历史版本存储结构不变）

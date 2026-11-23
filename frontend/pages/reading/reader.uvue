@@ -346,7 +346,7 @@
 	import type { ParsedChapter } from '@/utils/bookparseDefs.ts'
 	import { parseChapters, readTextFile } from '@/utils/bookparse.uts'
 	import type { Chapter, Paragraph, Bookmark, Thought, UnderlineEntry, NoteRecord, ShareQuoteCtx, SelSpan, SpanSeg, TextMetrics, ParaRect, ParaBand, ReaderSettings } from '@/utils/readerTypesDefs.ts'
-	import { fontOptionOf, loadStoredFontKey, setActiveBookId, loadUnderlines, loadThoughts, findUnderlineEntry, loadBookmarks, loadSettings, buildNoteRecords, buildShareQuoteCtx, fetchNotesToCache, fetchBookmarksToCache, VIRTUAL_BOOK_ID, thoughtAt, spanOfThought, buildSpanSegs } from '@/utils/readerTypes.uts'
+	import { fontOptionOf, loadStoredFontKey, setActiveBookId, loadUnderlines, loadThoughts, findUnderlineEntry, loadBookmarks, loadSettings, defaultPageTurn, fallbackPageTurn, buildNoteRecords, buildShareQuoteCtx, fetchNotesToCache, fetchBookmarksToCache, VIRTUAL_BOOK_ID, thoughtAt, spanOfThought, buildSpanSegs } from '@/utils/readerTypes.uts'
 	import type { PageSlice, ParaLineLayout } from '@/utils/paginationDefs.ts'
 	import { computePageBreaks, computePageBreaksMeasured, computePageBreaksExact, readerLineHeightPx, readerParagraphGapPx } from '@/utils/pagination.uts'
 	// #ifdef APP-ANDROID
@@ -565,7 +565,7 @@
 
 
 
-	// 存储值不在当前端可选列表内（如非 APP 端的历史"仿真"设置）时回退默认，避免选中无按钮模式
+	// 存储值不在当前端可选列表内（如非 APP 端的历史"仿真"设置）时回退端侧回退值（非 APP 端为覆盖，见 readerTypes.fallbackPageTurn），避免选中无按钮模式
 	const restoredModes = ['滚动', '覆盖', '平移']
 	// #ifdef APP
 	restoredModes.splice(1, 0, '仿真')
@@ -2225,13 +2225,13 @@
 	const currentPageItems = computed(() : PageItem[] => {
 		return pageItemsAt(pageIndex.value)
 	})
-	const pageTurn = ref('滚动')
+	const pageTurn = ref(defaultPageTurn())
 	/** 当前页层样式（几何规则见 utils/flipstyle.uts，随翻页模式/方向/位移变化） */
 	const currentLayerStyle = computed(() : string => flipCurrentLayerStyle(pageTurn.value, flipDir.value, flipOffset.value, flipActive.value, flipSettling.value))
 	if (restoredModes.indexOf(restoredSettings.pageTurn) >= 0) {
 		pageTurn.value = restoredSettings.pageTurn
 	} else {
-		pageTurn.value = restoredModes[0]
+		pageTurn.value = fallbackPageTurn()
 	}
 	/** 是否上下滚动模式（语义化别名，正文手势/定位/渲染均按此分支；信息栏显隐随其下行组件） */
 	const scrollMode = computed(() : boolean => pageTurn.value == '滚动')

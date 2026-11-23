@@ -281,9 +281,29 @@ function bookmarksFromStored(raw : string) : Bookmark[] {
 	return list
 }
 
+/** 当前端默认翻页模式（APP 端含安卓/iOS/鸿蒙默认仿真；H5/微信小程序不支持仿真默认滚动；三处恢复点与云端缺项兜底同源引用） */
+export function defaultPageTurn() : string {
+	// #ifdef APP
+	return '仿真'
+	// #endif
+	// #ifndef APP
+	return '滚动'
+	// #endif
+}
+
+/** 存储翻页模式当前端不支持时的回退值：非 APP 端读到历史"仿真"（APP 端设置随云端偏好跟随）回退覆盖而非默认滚动，其余无效值同口径；APP 端四模式全支持，回退即默认 */
+export function fallbackPageTurn() : string {
+	// #ifdef APP
+	return defaultPageTurn()
+	// #endif
+	// #ifndef APP
+	return '覆盖'
+	// #endif
+}
+
 /** 读取本地阅读设置（损坏/缺项容错返回默认值） */
 export function loadSettings() : ReaderSettings {
-	let s = { fontSize: 18, pageTurn: '滚动', theme: 'light', fontKey: 'sourcehan' } as ReaderSettings
+	let s = { fontSize: 18, pageTurn: defaultPageTurn(), theme: 'light', fontKey: 'sourcehan' } as ReaderSettings
 	const stored  = uni.getStorageSync(SETTINGS_STORAGE_KEY)
 	if (typeof stored == 'string' && (stored as string).length > 0) {
 		const parsed = JSON.parse<ReaderSettings>(stored as string)
