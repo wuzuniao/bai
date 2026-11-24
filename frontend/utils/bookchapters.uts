@@ -1,0 +1,126 @@
+/**
+ * 分章正文文件：把整书正文按目录字符区间拆成每章一个小文件（`books/<书id>/<目录下标>.txt`），
+ * 阅读页开书只读「当前章 ±1」而非整本（13MB/1900 章实证：整读约 1.7s，单章约 1~3ms）。
+ * --------------------------------------------------------------------------
+ * - 只做存储拆分，不改变任何业务语义：原文文件 `books/<id>.txt` 保留（云端上传源、重新拆分源），
+ *   取名用**目录下标**（含序章）：阅读页按 hasPreface 剔除序章后 cid 会左移，故由调用方维护 cid→下标映射
+ * - 仅 APP 端启用：小程序用户数据目录的文件数与体积配额不明、Web 端为 IndexedDB 虚拟键（无目录语义），
+ *   两端退回「整文读入 + 按字符区间惰性切片」（功能等价，只是多一次整读）
+ * - 幂等：拆分即先清空目录再逐章重写；章节正文文件只是可再生的加速产物，缺失时整文路径会重建
+ */
+
+import type { CatalogChapter } from './bookcatalogDefs.ts'
+import { booksDir } from './bookpaths.uts'
+
+/** 每写入多少章让出一次事件循环（分章写入走主线程桥接调用，密集写入会让渲染/测量排到其后） */
+const SPLIT_YIELD_EVERY = 40
+
+/** 分章正文目录（`books/<书id>`） */
+export function chapterDirOf(bookId : number) : string {
+	return booksDir() + '/' + bookId.toString()
+}
+
+/** 单章正文文件路径（idx 为目录下标，含序章） */
+export function chapterFileOf(bookId : number, idx : number) : string {
+	return chapterDirOf(bookId) + '/' + idx.toString() + '.txt'
+}
+
+/** 分章文件是否就绪（以首章文件存在为准：拆分从 0 开始逐个写，首章就位即代表已拆过） */
+export function chapterFilesReady(bookId : number) : Promise<boolean> {
+	// #ifndef APP
+	return new Promise<boolean>((resolve) => {
+		resolve(false)
+	})
+	// #endif
+	// #ifdef APP
+	return new Promise<boolean>((resolve) => {
+		try {
+			uni.getFileSystemManager().accessSync(chapterFileOf(bookId, 0))
+			resolve(true)
+		} catch (e) {
+			resolve(false)
+		}
+	})
+	// #endif
+}
+
+/** 读取单章正文（失败 reject：调用方按缺章处理，下次开书走整文路径重建） */
+export function readChapterFile(bookId : number, idx : number) : Promise<string> {
+	// #ifndef APP
+	return new Promise<string>((_resolve, reject) => {
+		reject(new Error('chapter files unsupported'))
+	})
+	// #endif
+	// #ifdef APP
+	return new Promise<string>((resolve, reject) => {
+		uni.getFileSystemManager().readFile({
+			filePath: chapterFileOf(bookId, idx),
+			encoding: 'utf-8',
+			success: (res) => {
+				resolve(res.data as string)
+			},
+			fail: (err) => {
+				reject(new Error(err.errMsg))
+			}
+		})
+	})
+	// #endif
+}
+
+/** 删除分章目录（删书 / 正文换代 / 离线书迁移 id 时调用；目录不存在忽略） */
+export function removeChapterFiles(bookId : number) : void {
+	// #ifdef APP
+	try {
+		uni.getFileSystemManager().rmdirSync(chapterDirOf(bookId), true)
+	} catch (e) {
+		// 目录不存在或已删
+	}
+	// #endif
+}
+
+/**
+ * 按目录字符区间拆分整书正文（幂等，先清目录再逐章写）。
+ * 逐章 await 顺序写：单章文件 5~30KB，桥接开销远小于一次整读；每 SPLIT_YIELD_EVERY 章让出事件循环。
+ */
+export async function splitBookToChapters(bookId : number, text : string, chapters : CatalogChapter[]) : Promise<void> {
+	// #ifndef APP
+	return
+	// #endif
+	// #ifdef APP
+	if (chapters.length == 0) {
+		return
+	}
+	removeChapterFiles(bookId)
+	const fsm = uni.getFileSystemManager()
+	const dir = chapterDirOf(bookId)
+	await new Promise<void>((resolve, reject) => {
+		fsm.mkdir({
+			dirPath: dir,
+			recursive: true,
+			success: (_res) => { resolve() },
+			fail: (err) => { reject(new Error(err.errMsg)) }
+		})
+	})
+	for (let i = 0; i < chapters.length; i++) {
+		const c = chapters[i]
+		// 末章 to 可能越过全文末尾（行偏移累计含末尾换行）：先钳界再切
+		const end = c.to > text.length ? text.length : c.to
+		const from = c.from > end ? end : c.from
+		const body = from < end ? text.substring(from, end) : ''
+		const idx = i
+		await new Promise<void>((resolve, reject) => {
+			fsm.writeFile({
+				filePath: chapterFileOf(bookId, idx),
+				data: body,
+				success: (_res) => { resolve() },
+				fail: (err) => { reject(new Error(err.errMsg)) }
+			})
+		})
+		if (i % SPLIT_YIELD_EVERY == SPLIT_YIELD_EVERY - 1) {
+			await new Promise<void>((resolve) => {
+				setTimeout(() => { resolve() }, 0)
+			})
+		}
+	}
+	// #endif
+}

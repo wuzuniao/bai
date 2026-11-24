@@ -11,8 +11,10 @@
 		@touchend="onContentTouchEnd"
 	>
 			<!-- 上下滚动模式：整章连续滚动（滚轮/触摸拖拽，滚动多少显示多少） -->
+			<!-- 分支判定用布尔计算属性 scrollMode（勿改回 pageTurn === '滚动'：vapor 下首次渲染时模板内的中文字面量比较恒为假，
+			     表现为「滚动模式开书时渲染的是翻页分支」，scroll-view 不存在 → 页面既不响应上下滑动也不报错） -->
 			<scroll-view
-				v-if="pageTurn === '滚动'"
+				v-if="scrollMode"
 				class="scroll-mode"
 				direction="vertical"
 				:show-scrollbar="false"
@@ -342,8 +344,14 @@
 	import { useUserStore, avatarSrcOf } from '@/stores/user.uts'
 	import type { LocalBook, BookProgress } from '@/utils/booksDefs.ts'
 	import { findBook, isBookDirty, loadBookProgress, saveBookProgress, updateBookReading, createReadingClock } from '@/utils/books.uts'
-	import type { ParsedChapter } from '@/utils/bookparseDefs.ts'
-	import { parseChapters, readTextFile } from '@/utils/bookparse.uts'
+	import { readTextFile } from '@/utils/bookparse.uts'
+	import type { CatalogChapter } from '@/utils/bookcatalogDefs.ts'
+	import { loadBookCatalog, loadCachedCatalog, chapterTexts } from '@/utils/bookcatalog.uts'
+	import { chapterFilesReady, readChapterFile, splitBookToChapters } from '@/utils/bookchapters.uts'
+	// #ifdef APP-ANDROID
+	// 分页排版缓存落盘（仅引擎初排端有该缓存）
+	import { layoutSignature, loadSavedLayout, saveLayout } from '@/utils/paginationcache.uts'
+	// #endif
 	import type { Chapter, Paragraph, Bookmark, Thought, UnderlineEntry, NoteRecord, ShareQuoteCtx, SelSpan, SpanSeg, TextMetrics, ParaRect, ParaBand, ReaderSettings } from '@/utils/readerTypesDefs.ts'
 	import { fontOptionOf, loadStoredFontKey, setActiveBookId, loadUnderlines, loadThoughts, findUnderlineEntry, loadBookmarks, loadSettings, defaultPageTurn, fallbackPageTurn, buildNoteRecords, buildShareQuoteCtx, fetchNotesToCache, fetchBookmarksToCache, VIRTUAL_BOOK_ID, thoughtAt, spanOfThought, buildSpanSegs } from '@/utils/readerTypes.uts'
 	import type { PageSlice, ParaLineLayout } from '@/utils/paginationDefs.ts'
@@ -1011,18 +1019,129 @@
 	const calibWidth = computed(() : number => bodyW.value - bodySidePaddingPx())
 	/** APP 端 StaticLayout 初排缓存（该端分页/划词的唯一排版真源：真实行数+行边界+行右边界） */
 	const paraLayoutCache = ref<Map<number, ParaLineLayout>>(new Map())
-	/** 全书各章段落（章 id → 段落列表；切章/跨章预渲染按 id 取用） */
-	const chapterParas = ref<Paragraph[][]>([])
-	/** 想法/划线卡片列表（组装规则见 readerTypes.buildNoteRecords：划线派生卡片关联想法、无匹配想法独立成卡、按章/段/位置排序） */
-	const noteRecords = computed(() : NoteRecord[] => {
-		return buildNoteRecords(underlineStore.value, thoughts.value, chapterParas.value)
-	})
-	/** 指定章的段落列表（越界返回空数组） */
-	function paragraphsOf(cid : number) : Paragraph[] {
-		if (cid >= 0 && cid < chapterParas.value.length) {
-			return chapterParas.value[cid]
+	/** 全书各章段落缓存（章 id → 段落列表）：按章惰性取正文——首次访问该章时按目录字符区间切片建段落对象，
+	 *  之后复用。开书不再为全书 1900 章 / 18 万段落建对象（13MB 书实测的主要耗时与内存占用来源）。
+	 *  普通数组（非 ref）：段落构建发生在渲染/分页同步链路内，不需要响应式；依赖章节段落的数据源见 parasEpoch */
+	const chapterParasCache : Paragraph[][] = []
+	/** 各章段落是否已构建（空章与未构建区分；与 chapterParasCache 等长） */
+	const parasLoaded : boolean[] = []
+	/** 分章文件模式下各章正文读取中标记（防并发重复读取；与 chapterParasCache 等长） */
+	const chapterLoading : boolean[] = []
+	/** 分章文件读取失败标记（失败即放弃该章重试：渲染期反复补读会拖慢每一帧，重开书时整文路径会重建） */
+	const chapterLoadFailed : boolean[] = []
+	/** 全文正文与各章字符区间（整文模式由 loadBookContent 注入；段落切段依据） */
+	let bookText = ''
+	let chapterRanges : number[][] = []
+	/** 分章文件模式（APP 端拆分后的书）：正文逐章异步读取，bookText 为空、改由 chapterFileIdx 定位章节文件 */
+	let chapterFilesMode = false
+	/** 阅读页章 id → 目录下标（含序章，hasPreface=false 的旧书剔除序章后整体左移一位） */
+	let chapterFileIdx : number[] = []
+	/** 当前书籍 id/正文大小（分章文件与分页排版缓存的键要素） */
+	let activeBookId = 0
+	let activeBookSize = 0
+	/** 章节段落注入完成计数（普通数组无响应式，依赖章节段落的 computed 显式读取本计数） */
+	const parasEpoch = ref(0)
+	/** 想法/划线卡片组装（epoch 仅用于声明对「章节段落已注入」的依赖：段落缓存为普通数组，不参与响应式追踪） */
+	function buildNoteRecordsByEpoch(epoch : number) : NoteRecord[] {
+		if (epoch < 0) {
+			return [] as NoteRecord[]
 		}
-		return []
+		return buildNoteRecords(underlineStore.value, thoughts.value, chapterParasCache)
+	}
+	/** 想法/划线卡片列表（组装规则见 readerTypes.buildNoteRecords：划线派生卡片关联想法、无匹配想法独立成卡、按章/段/位置排序） */
+	const noteRecords = computed<NoteRecord[]>(() : NoteRecord[] => {
+		return buildNoteRecordsByEpoch(parasEpoch.value)
+	})
+	/** 分章文件模式下补读章节正文（失败按空章保留，下次开书走整文路径重建）；读入后 bump epoch 触发分页/渲染重算 */
+	async function ensureChapterTextsInner(cids : number[]) : Promise<void> {
+		if (!chapterFilesMode) {
+			return
+		}
+		const bid = activeBookId
+		let changed = false
+		for (let i = 0; i < cids.length; i++) {
+			const cid = cids[i]
+			if (cid < 0 || cid >= chapterParasCache.length || parasLoaded[cid] || chapterLoading[cid] || chapterLoadFailed[cid]) {
+				continue
+			}
+			if (bid == 0 || cid >= chapterFileIdx.length) {
+				continue
+			}
+			const idx = chapterFileIdx[cid]
+			chapterLoading[cid] = true
+			try {
+				const raw = await readChapterFile(bid, idx)
+				chapterParasCache[cid] = toParagraphs(chapterTexts(raw, 0, raw.length))
+				parasLoaded[cid] = true
+				changed = true
+			} catch (e) {
+				chapterLoadFailed[cid] = true
+				console.warn('章节正文读取失败，保留空章', cid, e)
+			}
+			chapterLoading[cid] = false
+		}
+		if (changed) {
+			parasEpoch.value++
+		}
+	}
+	/** 补读章节正文（整文模式空操作立即返回） */
+	function ensureChapterTexts(cids : number[]) : Promise<void> {
+		return ensureChapterTextsInner(cids)
+	}
+	/** 指定章的段落列表（越界返回空数组）：整文模式同步切片，分章文件模式首次访问异步补读、本次返回空由 epoch 驱动重算 */
+	function paragraphsOf(cid : number) : Paragraph[] {
+		// 段落缓存为普通数组：读取本计数使分页/渲染对「章节正文异步注入」建立响应式依赖
+		const injectedEpoch = parasEpoch.value
+		if (injectedEpoch < 0) {
+			// 不可达分支，仅用于登记响应式依赖（见上）
+			return [] as Paragraph[]
+		}
+		if (cid < 0 || cid >= chapterParasCache.length) {
+			return [] as Paragraph[]
+		}
+		if (!parasLoaded[cid]) {
+			// 分章文件模式（chapterRanges 为空）：先给空章并异步补读，读入后 epoch 递增驱动重算
+			// （开书/切章路径均已显式 await 补读，此处兜底渲染期的隐式访问）
+			if (chapterFilesMode) {
+				if (cid < chapterFileIdx.length && !chapterLoadFailed[cid]) {
+					ensureChapterTexts([cid])
+					return [] as Paragraph[]
+				}
+				chapterParasCache[cid] = [] as Paragraph[]
+				parasLoaded[cid] = true
+				return chapterParasCache[cid]
+			}
+			// 越界索引在 App 原生端抛 IndexOutOfBoundsException，必须先判界
+			if (cid < chapterRanges.length) {
+				const range = chapterRanges[cid]
+				chapterParasCache[cid] = toParagraphs(chapterTexts(bookText, range[0], range[1]))
+			} else {
+				chapterParasCache[cid] = [] as Paragraph[]
+			}
+			parasLoaded[cid] = true
+		}
+		return chapterParasCache[cid]
+	}
+	/** 预建指定章段落（笔记卡片/首屏分页等需要即时段落的场景先显式触发，避免渲染期隐式构建） */
+	function preloadChapterParas(cids : number[]) : void {
+		for (let i = 0; i < cids.length; i++) {
+			paragraphsOf(cids[i])
+		}
+	}
+	/** 带笔记（划线/想法）的章 id 列表（笔记卡片的引用文本取自对应章段落） */
+	function noteChapterIds() : number[] {
+		const cids : number[] = []
+		for (let i = 0; i < underlineStore.value.length; i++) {
+			cids.push(underlineStore.value[i].cid)
+		}
+		for (let i = 0; i < thoughts.value.length; i++) {
+			cids.push(thoughts.value[i].fromCid)
+		}
+		return cids
+	}
+	/** 预建带笔记的章节段落（整文模式同步完成；分章模式补读后随 epoch 生效） */
+	function preloadNoteChapters() : void {
+		preloadChapterParas(noteChapterIds())
 	}
 	/** 探测前缀文本：段落 [0, chars) + 两个全角空格缩进（与正文段首渲染同参） */
 	function probePrefixText(probe : LayoutProbe) : string {
@@ -1544,30 +1663,59 @@
 	const scrollChapters = ref<number[]>([currentChapterId.value])
 	/** 滚动视口填充进行中标记（防重入：多处滚动序列重置后并发调用） */
 	let fillScrollRunning = false
+	/** 填充看门狗：节点查询回调可能不触发（渲染未就绪），超时解锁以便后续重试（不清会永久卡住填充） */
+	let fillWatchdog = -1
+	/** 结束填充（清看门狗 + 解锁） */
+	function stopFill() : void {
+		if (fillWatchdog >= 0) {
+			clearTimeout(fillWatchdog)
+			fillWatchdog = -1
+		}
+		fillScrollRunning = false
+	}
+	/** 重置看门狗（每步重新计时） */
+	function armFillWatchdog() : void {
+		if (fillWatchdog >= 0) {
+			clearTimeout(fillWatchdog)
+		}
+		fillWatchdog = setTimeout(() : void => {
+			fillWatchdog = -1
+			fillScrollRunning = false
+		}, 1200)
+	}
 	/** 视口填充单步：测量内容高与视口高，不足一屏且有下一章则追加后重测 */
 	function fillScrollStep() : void {
+		armFillWatchdog()
 		const last = scrollChapters.value[scrollChapters.value.length - 1]
 		if (last >= chapters.value.length - 1) {
-			fillScrollRunning = false
+			stopFill()
 			return
 		}
 		uni.createSelectorQuery().select('.scroll-mode-inner').boundingClientRect((res : any) : void => {
 			const inner = res == null ? null : (res as NodeInfo | null)
 			if (inner == null) {
-				fillScrollRunning = false
+				stopFill()
 				return
 			}
 			uni.createSelectorQuery().select('.scroll-mode').boundingClientRect((res : any) : void => {
 				const view = res == null ? null : (res as NodeInfo | null)
-				if (view == null || (inner.height ?? 0) > (view.height ?? 0) + 4) {
-					// 节点未就绪或内容已撑满一屏：结束填充
-					fillScrollRunning = false
+				if (view == null || (view.height ?? 0) <= 0 || (inner.height ?? 0) > (view.height ?? 0) + 4) {
+					// 节点未就绪 / 视口高未测量（0 会让下面的比较恒成立而无限追加） / 内容已撑满一屏：结束填充
+					stopFill()
 					return
 				}
-				scrollChapters.value.push(last + 1)
-				setTimeout(() => {
-					fillScrollStep()
-				}, 50)
+				const next = last + 1
+				// 分章文件模式先补读正文再追加（否则追加的是空章，会短暂显示空内容）
+				ensureChapterTexts([next]).then(() : void => {
+					if (scrollChapters.value.indexOf(next) >= 0) {
+						stopFill()
+						return
+					}
+					scrollChapters.value.push(next)
+					setTimeout(() => {
+						fillScrollStep()
+					}, 50)
+				})
 			}).exec()
 		}).exec()
 	}
@@ -1805,14 +1953,28 @@
 			if (measuringCids.indexOf(cid) < 0) {
 				measuringCids.push(cid)
 			}
+			// 落盘排版命中（同书同正文同排版签名）：直接用上次断行结果 + 章头实测高，免整章 StaticLayout 初排。
+			// 章头高为 0（末次测量未落定）视为未命中：重测一次并回写，避免章首页预算回退到常量估算
+			const sig = layoutSignature(fontSize.value, fontFamily.value, bodyLetterSpacingPx(), calibWidth.value, initWin.pixelRatio)
+			const saved = loadSavedLayout(activeBookId, activeBookSize, cid, sig)
+			if (saved != null && saved.headerH > 0 && saved.layout.lines.length == paras.length) {
+				storeLayout(cid, saved.layout)
+				chapterHeadHCache.value = mapWithEntry(chapterHeadHCache.value, cid, saved.headerH)
+				resolve()
+				return
+			}
 			const texts : string[] = []
 			for (let i = 0; i < paras.length; i++) {
 				texts.push(paras[i].text)
 			}
 			const layout = buildParaLayout(texts, fontSize.value, fontFamily.value, bodyLetterSpacingPx(), calibWidth.value, initWin.pixelRatio)
 			storeLayout(cid, layout)
-			// 章头高度只占章首页预算：与排版并行实测，落定后触发分页重算（标题样式固定，全会话缓存）
+			// 章头高度只占章首页预算：与排版并行实测，落定后落盘排版缓存（含章头高）并触发分页重算
 			measureChapterHeader(cid, epoch).then(() : void => {
+				const cached = paraLayoutCache.value.get(cid)
+				if (epoch == layoutEpoch && cached != null) {
+					saveLayout(activeBookId, activeBookSize, cid, sig, cached, chapterHeadHCache.value.get(cid) ?? 0)
+				}
 				resolve()
 			})
 		})
@@ -1843,8 +2005,8 @@
 		}
 		return p
 	}
-	/** 确保章节实测完成（APP 端引擎断行直读 / 其余端行数+末行探测）；已实测立即返回，在测等待串行链，未测排队执行离屏测量 */
-	function ensureChaptersMeasured(cids : number[]) : Promise<void> {
+	/** 实测排队（同步部分）：收集未测章并入串行测量链 */
+	function measureChaptersQueued(cids : number[]) : Promise<void> {
 		const ids : number[] = []
 		let waitChain = false
 		for (let i = 0; i < cids.length; i++) {
@@ -1874,6 +2036,13 @@
 			return Promise.resolve()
 		}
 		return measureChain
+	}
+	/** 确保章节实测完成（APP 端引擎断行直读 / 其余端行数+末行探测）；已实测立即返回，在测等待串行链，未测排队执行离屏测量。
+	 *  分章文件模式先补齐章节正文（测量需要段落文本，空章不入队） */
+	function ensureChaptersMeasured(cids : number[]) : Promise<void> {
+		return ensureChapterTexts(cids).then(() : Promise<void> => {
+			return measureChaptersQueued(cids)
+		})
 	}
 	const perLineEstimate = computed(() : number => {
 		return Math.max(1, Math.floor((bodyW.value - bodySidePaddingPx()) / fontSize.value))
@@ -2136,10 +2305,29 @@
 		}
 	}
 	clampPageIndex()
-	/** 注入真实书籍数据（章节目录 + 各章段落正文）并重置阅读位置：本地文件解析完成后调用一次，目录、分页、划线/想法/书签渲染全部基于注入后的数据重建 */
-	function loadBookContent(chs : Chapter[], allParas : string[][]) : void {
+	/** 注入真实书籍数据（章节目录 + 各章正文字符区间 / 分章文件下标 + 全文正文，二者取其一）并重置阅读位置：
+	 *  整文模式（Web/小程序/未拆分书）正文一次读入、按区间同步切片；分章文件模式（APP 端）正文逐章异步补读
+	 *  （见 ensureChapterTexts）。目录、分页、划线/想法/书签渲染全部基于注入后的数据重建 */
+	function loadBookContent(chs : Chapter[], text : string, ranges : number[][], fileIdx : number[], filesMode : boolean) : void {
 		chapters.value = chs
-		chapterParas.value = allParas.map((texts : string[]) : Paragraph[] => toParagraphs(texts))
+		bookText = text
+		chapterRanges = ranges
+		chapterFileIdx = fileIdx
+		chapterFilesMode = filesMode
+		// 段落缓存按章重置（与章 id 顺序一一对应；已切段的章随本次注入失效）
+		chapterParasCache.length = 0
+		parasLoaded.length = 0
+		chapterLoading.length = 0
+		chapterLoadFailed.length = 0
+		for (let i = 0; i < chs.length; i++) {
+			chapterParasCache.push([] as Paragraph[])
+			parasLoaded.push(false)
+			chapterLoading.push(false)
+			chapterLoadFailed.push(false)
+		}
+		// 笔记引用文本依赖对应章段落：先预建再发布注入完成（noteRecords 随即重算；分章模式由后续 await 补读生效）
+		preloadNoteChapters()
+		parasEpoch.value++
 		currentChapterId.value = 0
 		pageIndex.value = 0
 		scrollChapters.value = [0]
@@ -2155,8 +2343,43 @@
 		syncFlipIdle()
 		// #endif
 	}
+	/** 后台补拆正文的延迟（首屏分页与首帧渲染完成后再占用 I/O：实测立即拆分会让首屏测量排到写文件之后） */
+	const SPLIT_SCHEDULE_DELAY_MS = 4000
+	/** 目录条目 → 阅读页章列表（章 id 即数组下标；fileIdx 保留目录下标供分章正文文件定位） */
+	type BuiltChapters = {
+		chapters : Chapter[]
+		ranges : number[][]
+		fileIdx : number[]
+	}
+	/** 目录条目构建章节：旧书（导入时未标记序章）剔除解析生成的序章，章 id 与存量进度/划线/书签保持对齐 */
+	function buildChaptersFromCatalog(catalogChapters : CatalogChapter[], hasPreface : boolean) : BuiltChapters {
+		const chs : Chapter[] = []
+		const ranges : number[][] = []
+		const fileIdx : number[] = []
+		for (let i = 0; i < catalogChapters.length; i++) {
+			const c = catalogChapters[i]
+			if (hasPreface != true && c.preface) {
+				continue
+			}
+			chs.push({ id: chs.length, title: c.title, label: c.label, contentTitle: c.contentTitle, active: false } as Chapter)
+			ranges.push([c.from, c.to] as number[])
+			fileIdx.push(i)
+		}
+		return { chapters: chs, ranges: ranges, fileIdx: fileIdx } as BuiltChapters
+	}
+	/** 历史书后台补拆正文：本次开书已用整文内存，拆完下次开书只读当前章（失败仅告警，下次开书重试） */
+	function scheduleChapterSplit(bid : number, catalogChapters : CatalogChapter[], text : string) : void {
+		setTimeout(() : void => {
+			splitBookToChapters(bid, text, catalogChapters).then(() : void => {
+				// 拆分完成：下次开书走分章读取
+			}, (_e : any) : void => {
+				console.warn('分章正文后台写入失败（下次开书重试）', _e)
+			})
+		}, SPLIT_SCHEDULE_DELAY_MS)
+	}
 	/** 排版失效（字号/字体变化）：实测缓存即时清除（分页先按估算渲染），随后重标定并重测当前章邻域、钳制页码 */
 	function invalidateLayoutMeasure() : void {
+
 		layoutEpoch++
 		paraLinesCache.value = new Map()
 		paraTailCache.value = new Map()
@@ -2358,11 +2581,15 @@
 		// 滚动模式按锚点章回写（currentChapterId 是滚动加载推进的「到达章」，非视口顶所在章）
 		updateBookReading(bookId.value, scrollMode.value ? anchorCid : currentChapterId.value)
 	}
-	function saveProgress() : void {
+	/** 进度落盘防抖（翻页/切章/滚动定位都是高频调用：整份书籍列表 JSON 重写 + 云端静默上行不必逐次执行） */
+	const PROGRESS_SAVE_DELAY_MS = 400
+	let progressSaveTimer = -1
+	let progressDirty = false
+	/** 进度实际写入（缓存即写 + 云端静默跟随；滚动模式存「视口顶所在章 + 章内偏移」锚点） */
+	function persistProgressNow() : void {
 		if (bookId.value == VIRTUAL_BOOK_ID) {
 			return
 		}
-		// 滚动模式：存「视口顶所在章 + 章内偏移」锚点，恢复时单章渲染按偏移精确定位
 		if (scrollMode.value) {
 			saveBookProgress(bookId.value, { chapterId: anchorCid, pageIndex: 0, scrollTop: anchorOffset } as BookProgress)
 			return
@@ -2370,8 +2597,37 @@
 		const p = { chapterId: currentChapterId.value, pageIndex: pageIndex.value, scrollTop: scrollModePos.value } as BookProgress
 		saveBookProgress(bookId.value, p)
 	}
+	/** 立即落盘当前进度（防抖窗口外的兜底：退后台/离开页面时调用） */
+	function flushProgress() : void {
+		if (progressSaveTimer >= 0) {
+			clearTimeout(progressSaveTimer)
+			progressSaveTimer = -1
+		}
+		if (!progressDirty) {
+			return
+		}
+		progressDirty = false
+		persistProgressNow()
+	}
+	/** 进度保存（防抖 400ms：连续翻页/切章只在停手后落盘一次；退后台与离开页面走 flushProgress） */
+	function saveProgress() : void {
+		if (bookId.value == VIRTUAL_BOOK_ID) {
+			return
+		}
+		progressDirty = true
+		if (progressSaveTimer >= 0) {
+			return
+		}
+		progressSaveTimer = setTimeout(() : void => {
+			progressSaveTimer = -1
+			if (progressDirty) {
+				progressDirty = false
+				persistProgressNow()
+			}
+		}, PROGRESS_SAVE_DELAY_MS)
+	}
 	onHide(() => {
-		saveProgress()
+		flushProgress()
 		recordReadingSession()
 	})
 	/** 位置映射应用：切换到视口所在章并定位包含目标字符的页（字符位未命中——估算漂移——回退记录段落所在首页） */
@@ -2458,10 +2714,83 @@
 			return
 		}
 		fillScrollRunning = true
+		armFillWatchdog()
 		// 等首帧渲染落地后再测量（滚动序列刚重置时 DOM 尚未更新）
 		setTimeout(() => {
 			fillScrollStep()
 		}, 80)
+	}
+	/** 滚动模式同时挂载的章节上限（到达章前后若干章）：滚动会话持续追加会让已加载章节的 DOM 无限增长 */
+	const SCROLL_WINDOW_MAX = 5
+	/** 收缩进行中标记（矩形测量到列表改写之间防重入） */
+	let trimRunning = false
+	/**
+	 * 滚动窗口收缩：以「到达章」（触底推进的 currentChapterId）为准，只裁头部——保留到达章前 1 章到末尾，
+	 * 总量不超过 SCROLL_WINDOW_MAX 章；裁剪按被裁章实测总高回拨 scroll-top，视口内容保持不动。
+	 * 不裁尾部：尾部是即将阅读的章，裁掉会在继续下滚时反复重读（回滚场景列表可暂时超过上限，触顶后自然收敛）。
+	 * 段落/排版缓存不随收缩清除：划线/想法卡片的引用文本取自对应章段落，清掉会让抽屉里的笔记卡片消失。
+	 */
+	function trimScrollChapters() : void {
+		if (trimRunning) {
+			return
+		}
+		const cids = scrollChapters.value
+		if (cids.length <= SCROLL_WINDOW_MAX) {
+			return
+		}
+		const centerIdx = cids.indexOf(currentChapterId.value)
+		if (centerIdx < 0) {
+			return
+		}
+		// 头部裁剪量取「到达章前 1 章」与「总量上限」的较小值（保证总量不超限），绝不裁到达章
+		const keepFrom = Math.max(0, Math.min(centerIdx - 1, cids.length - SCROLL_WINDOW_MAX))
+		if (keepFrom == 0) {
+			return
+		}
+		const keepTo = cids.length - 1
+		const dropped : number[] = []
+		for (let i = 0; i < keepFrom; i++) {
+			dropped.push(cids[i])
+		}
+		const next : number[] = []
+		for (let i = keepFrom; i <= keepTo; i++) {
+			next.push(cids[i])
+		}
+		trimRunning = true
+		// 追加后立即查询会拿到上一轮渲染的节点数：等本轮渲染落地再测量；看门狗防查询回调不触发时永久锁死
+		const watchdog = setTimeout(() : void => {
+			trimRunning = false
+		}, 1500)
+		setTimeout(() : void => {
+			const total = scrollChapters.value.length
+			const headCid = scrollChapters.value[0]
+			uni.createSelectorQuery().selectAll('.scroll-chapter').boundingClientRect((res : any) : void => {
+				clearTimeout(watchdog)
+				trimRunning = false
+				const rects = res == null ? null : (res as NodeInfo[])
+				// 测量期间序列又被改写：本次放弃（下次触底再收缩），避免丢掉新追加章
+				if (rects == null || rects.length != total || scrollChapters.value.length != total || scrollChapters.value[0] != headCid) {
+					return
+				}
+				let droppedH = 0
+				for (let i = 0; i < dropped.length; i++) {
+					droppedH += rects[i].height ?? 0
+				}
+				const target = Math.max(0, Math.round(scrollModePos.value - droppedH))
+				scrollIntoView.value = ''
+				scrollChapters.value = next
+				scrollModePos.value = target
+				// 裁掉上方内容后原生滚动位置不动 → 显式回拨被裁高度；绑定同值不触发滚动，先偏 1px 再回目标
+				if (scrollModeTop.value == target) {
+					scrollModeTop.value = target + 1
+					setTimeout(() : void => {
+						scrollModeTop.value = target
+					}, 20)
+				} else {
+					scrollModeTop.value = target
+				}
+			}).exec()
+		}, 150)
 	}
 	const drawerOpen = ref(false)
 	/** 系统侧滑/返回键（pages.json swipeBackAsBackPress 把侧滑手势转为本事件）：任一浮层展开时先收浮层回正文，不退出页面 */
@@ -3164,15 +3493,18 @@
 		// 章跳离开原位置：触底态复位（百分比回落实时章序，重新触底时再置真）
 		bookFinished.value = false
 		if (pageTurn.value == '滚动') {
-			applyChapterSwitch(id, atLastPage)
-			if (!atLastPage) {
-				// 滚动模式章跳定位：Web 端 scroll-view 内容替换后滚动位置残留且 scroll-top 同值绑定不再触发，
-				// 落点会停在前章内部；延迟至重置渲染落地后按章锚点定位保证落点为章首
-				//（同书签/划线跳转口径，对其他端为幂等冗余；atLastPage 仍走超大偏移沉底语义）
-				setTimeout(() : void => {
-					scrollIntoView.value = 'scroll-ch-' + id
-				}, 300)
-			}
+			// 分章文件模式先补齐目标章与邻章正文，切章即渲染（否则先短暂空章）
+			ensureChapterTexts([id - 1, id, id + 1]).then(() : void => {
+				applyChapterSwitch(id, atLastPage)
+				if (!atLastPage) {
+					// 滚动模式章跳定位：Web 端 scroll-view 内容替换后滚动位置残留且 scroll-top 同值绑定不再触发，
+					// 落点会停在前章内部；延迟至重置渲染落地后按章锚点定位保证落点为章首
+					//（同书签/划线跳转口径，对其他端为幂等冗余；atLastPage 仍走超大偏移沉底语义）
+					setTimeout(() : void => {
+						scrollIntoView.value = 'scroll-ch-' + id
+					}, 300)
+				}
+			})
 			return
 		}
 		ensureChaptersMeasured([id]).then(() => {
@@ -3204,33 +3536,52 @@
 	function showToast(msg: string) : void {
 		toastRef.value?.$callMethod('show', msg)
 	}
-	/** 滚动到底：自动加载下一章；末章给出到底提示 */
+	/** 滚动到底：自动加载下一章；末章给出到底提示（分章文件模式先补读章节正文，避免追加空章） */
 	function onScrollToLower() : void {
 		const last = scrollChapters.value[scrollChapters.value.length - 1]
-		if (last < chapters.value.length - 1) {
-			const next = last + 1
+		if (last >= chapters.value.length - 1) {
+			bookFinished.value = true
+			showToast(t('reader.lastChapter'))
+			return
+		}
+		const next = last + 1
+		// 触底事件可能连发：目标章已在序列中或补读中即忽略
+		if (scrollChapters.value.indexOf(next) >= 0) {
+			return
+		}
+		ensureChapterTexts([next]).then(() : void => {
+			if (scrollChapters.value.indexOf(next) >= 0) {
+				return
+			}
 			scrollChapters.value.push(next)
 			currentChapterId.value = next
 			saveProgress()
-		} else {
-			bookFinished.value = true
-			showToast(t('reader.lastChapter'))
-		}
+			trimScrollChapters()
+		})
 	}
-	/** 滚动到顶：自动前插上一章；首章给出到顶提示 */
+	/** 滚动到顶：自动前插上一章；首章给出到顶提示（分章文件模式先补读章节正文） */
 	function onScrollToUpper() : void {
 		const first = scrollChapters.value[0]
-		if (first > 0) {
+		if (first <= 0) {
+			showToast(t('reader.firstChapter'))
+			return
+		}
+		const prev = first - 1
+		if (scrollChapters.value.indexOf(prev) >= 0) {
+			return
+		}
+		ensureChapterTexts([prev]).then(() : void => {
+			if (scrollChapters.value.indexOf(prev) >= 0) {
+				return
+			}
 			scrollIntoView.value = ''
-			scrollChapters.value.unshift(first - 1)
-			currentChapterId.value = first - 1
+			scrollChapters.value.unshift(prev)
+			currentChapterId.value = prev
 			saveProgress()
 			setTimeout(() => {
 				scrollIntoView.value = 'scroll-ch-' + first
 			}, 50)
-		} else {
-			showToast(t('reader.firstChapter'))
-		}
+		})
 	}
 	/** 读取本地书籍文件并解析注入（云端笔记先行落缓存）；失败（书被删/文件被清理）提示后返回书架 */
 	async function openLocalBook(bid : number) : Promise<void> {
@@ -3274,15 +3625,35 @@
 				}, 60)
 			})
 			try {
-				const text = await readTextFile(book.path)
-				const parsed = parseChapters(text, book.title)
-				// 旧书（导入时未标记序章）：剔除新解析生成的序章，章 id 与存量进度/划线/书签保持对齐
-				const chaptersParsed = book.hasPreface == true ? parsed : parsed.filter((c : ParsedChapter) : boolean => !c.preface)
-				const chs = chaptersParsed.map((c, i) : Chapter => {
-					return { id: i, title: c.title, label: c.label, contentTitle: c.contentTitle, active: false } as Chapter
-				})
-				loadBookContent(chs, chaptersParsed.map((c) : string[] => c.paragraphs))
-				restoreProgress(book.id)
+				activeBookId = book.id
+				activeBookSize = book.size
+				// 目录缓存 + 分章正文（APP 端读过一次即拆好）：命中则开书不读整本、不扫描全文
+				const cached = loadCachedCatalog(book.id, book.size, book.chapterCount)
+				let filesReady = false
+				if (cached != null) {
+					filesReady = await chapterFilesReady(book.id)
+				}
+				if (cached != null && filesReady) {
+					const built = buildChaptersFromCatalog(cached, book.hasPreface)
+					loadBookContent(built.chapters, '', [] as number[][], built.fileIdx, true)
+					// 进度恢复要校验页码（页序由章内段落决定）：先按上次阅读章补读正文再恢复，否则按空章钳成首页
+					const saved = loadBookProgress(book.id)
+					const firstCid = saved != null ? saved.chapterId : 0
+					await ensureChapterTexts([firstCid - 1, firstCid, firstCid + 1])
+					restoreProgress(book.id)
+					await ensureChapterTexts(noteChapterIds())
+				} else {
+					// 整文路径（Web/小程序 / 未拆分的历史书）：整读一次 + 目录缓存命中即免扫描
+					const text = await readTextFile(book.path)
+					const catalog = loadBookCatalog(text, book.title, book.id, book.size, book.chapterCount)
+					const built = buildChaptersFromCatalog(catalog.chapters, book.hasPreface)
+					loadBookContent(built.chapters, text, built.ranges, built.fileIdx, false)
+					restoreProgress(book.id)
+					// 历史书后台补拆：本次已用整文内存，拆完下次开书只读当前章（目录不可缓存的书不拆）
+					if (loadCachedCatalog(book.id, book.size, book.chapterCount) != null) {
+						scheduleChapterSplit(book.id, catalog.chapters, text)
+					}
+				}
 				// #ifdef APP-ANDROID
 				// 雷电冷启动的 windowWidth/windowHeight 不可靠：先等到正文容器实测值，再生成首章与邻章分页。
 				// 实测 Promise 理论上不落定（查询回调未触发）会让 loading 永久滞留，统一限时放行——
@@ -3593,7 +3964,8 @@
 		// 原生翻页引擎释放（作废定时器/动画、恢复被隐藏页层、释放卷曲位图引用）
 		flipNativeDispose()
 		// #endif
-		saveProgress()
+		// 卸载期必须立即落盘：防抖窗口内的最后一次翻页不能在页面销毁后丢失
+		flushProgress()
 		recordReadingSession()
 	})
 	/** 听书悬浮球点击（ReaderControl 上行，功能占位） */

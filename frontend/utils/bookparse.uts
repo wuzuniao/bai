@@ -5,11 +5,18 @@ import { applyRegisteredBook, nextPendingBookId, applyPendingImport, loadBooks, 
 import type { LocalBook } from './booksDefs.ts'
 import { registerBook } from '../api/reading.uts'
 import { fetchDownloadUrl, fetchUploadUrl, fetchCloudObjects } from '../api/cos.uts'
-import { sanitizeTitle, readBookBytes, writeBookBytes, cosPut, cosGetBytesOrNull, isCloudMissingError, CLOUD_MISSING_ERR, downloadBook, booksDir } from './cloudsync.uts'
+import { sanitizeTitle, readBookBytes, writeBookBytes, cosPut, cosGetBytesOrNull, isCloudMissingError, CLOUD_MISSING_ERR, downloadBook } from './cloudsync.uts'
+import { booksDir } from './bookpaths.uts'
 import { hasAccessToken } from './request.uts'
 import { t } from './i18n'
 // 词典注册（导入管线文案）
 import './locales/bookparse.uts'
+// 目录解析与本地缓存（与阅读页共用同一份章节扫描逻辑）
+import type { CatalogChapter } from './bookcatalogDefs.ts'
+import { scanCatalogFromText, saveCatalogForBook } from './bookcatalog.uts'
+// 分章正文（仅 APP 端；目录缓存与正文换代时同步作废旧排版缓存）
+import { splitBookToChapters } from './bookchapters.uts'
+import { clearSavedLayouts } from './paginationcache.uts'
 // #ifdef MP-WEIXIN
 import { decodeGbkBytes } from './gbk'
 // #endif
@@ -23,21 +30,9 @@ import Charset from 'java.nio.charset.Charset'
 import { webFsCopy, webReadTextFile } from './webfs'
 // #endif
 
-/** 序章标签（展示值：解析时按当前语言取词） */
-function prefaceLabel() : string {
-	return t('bookparse.preface')
-}
-
 // 共享类型抽离到 bookparse.ts：UTS 编译器对 type-only 导入会改写为 *.ts 路径（HBuilderX 5.33），
 // 类型留在 .uts 会报“未导出”。本文件导入供内部使用并再导出给调用方。
-import type { ParsedChapter, SyncResult } from './bookparseDefs.ts'
-
-/** 标题行拆分结果（raw=原始行，label=编号前缀，contentTitle=编号后标题） */
-type ParsedTitleParts = {
-	raw : string
-	label : string
-	contentTitle : string
-}
+import type { SyncResult } from './bookparseDefs.ts'
 
 /** 分块读取块大小（字节）：大文件分块读规避整读的内存峰值（uni-app x 官方建议单次读取不超过 16M） */
 const READ_CHUNK_BYTES = 1024 * 1024
@@ -257,108 +252,6 @@ export function readTextFile(path : string) : Promise<string> {
 	// #endif
 }
 
-/** 编号章前缀（第X章/回/节/卷/部/篇/集幕；Chapter n） */
-const RE_NUMBERED = /^第[0-9一二三四五六七八九十百千万零〇两]+\s*[章回节卷部篇集幕]/
-const RE_CHAPTER_EN = /^(Chapter|CHAPTER)\s*\d+/
-/** 常见特殊章（序章/楔子等，仅短行视为标题避免误判正文） */
-const RE_SPECIAL = /^(序章|楔子|引子|前言|序言|尾声|终章|后记|番外|外传|附录)/
-
-/** 章节标题行判定 */
-function isChapterLine(t : string) : boolean {
-	if (t.length > 50) {
-		return false
-	}
-	if (RE_NUMBERED.test(t)) {
-		return true
-	}
-	if (RE_CHAPTER_EN.test(t)) {
-		return true
-	}
-	return RE_SPECIAL.test(t) && t.length <= 30
-}
-
-/** 从标题行拆分章节标签与大标题（无编号章标签=整行） */
-function splitChapterTitle(t : string) : ParsedTitleParts {
-	const m = RE_NUMBERED.exec(t)
-	if (m != null) {
-		// exec 结果元素可空，?? '' 兜底（正则命中时 m[0] 恒非空）
-		const label = m[0] ?? ''
-		const rest = t.substring(label.length).trim().replace(/^[\s．.、:：\-—～~]+/, '').trim()
-		return { raw: t, label: label, contentTitle: rest.length > 0 ? rest : label } as ParsedTitleParts
-	}
-	const mc = RE_CHAPTER_EN.exec(t)
-	if (mc != null) {
-		const label2 = mc[0] ?? ''
-		const rest2 = t.substring(label2.length).trim().replace(/^[\s．.、:：\-—～~]+/, '').trim()
-		return { raw: t, label: label2, contentTitle: rest2.length > 0 ? rest2 : label2 } as ParsedTitleParts
-	}
-	return { raw: t, label: t, contentTitle: t } as ParsedTitleParts
-}
-
-/** 从纯文本解析章节：标题行扫为候选起点，候选间无正文的连续标题（目录块）自动剔除 */
-export function parseChapters(text : string, bookTitle : string) : ParsedChapter[] {
-	const normalized = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
-	const lines = normalized.split('\n')
-	// 候选章节起点（行索引 + 标题拆分）
-	const startIdx : number[] = []
-	const starts : ParsedTitleParts[] = []
-	for (let i = 0; i < lines.length; i++) {
-		const t = lines[i].trim()
-		if (t.length == 0 || !isChapterLine(t)) {
-			continue
-		}
-		startIdx.push(i)
-		starts.push(splitChapterTitle(t))
-	}
-	const result : ParsedChapter[] = []
-	if (startIdx.length == 0) {
-		// 无章节标题：全书单章
-		result.push({ title: bookTitle, label: '', contentTitle: bookTitle, preface: false, paragraphs: collectParagraphs(lines, 0, lines.length) } as ParsedChapter)
-		return result
-	}
-	for (let k = 0; k < startIdx.length; k++) {
-		const from = startIdx[k] + 1
-		const to = k < startIdx.length - 1 ? startIdx[k + 1] : lines.length
-		// 章起点与下一章起点之间无正文 → 目录块标题行：剔除（不生成章，标题行丢弃）
-		let hasBody = false
-		for (let i = from; i < to; i++) {
-			if (lines[i].trim().length > 0) {
-				hasBody = true
-				break
-			}
-		}
-		if (!hasBody) {
-			continue
-		}
-		result.push({ title: starts[k].raw, label: starts[k].label, contentTitle: starts[k].contentTitle, preface: false, paragraphs: collectParagraphs(lines, from, to) } as ParsedChapter)
-	}
-	if (result.length == 0) {
-		// 全部候选均为目录块：按单章兜底
-		result.push({ title: bookTitle, label: '', contentTitle: bookTitle, preface: false, paragraphs: collectParagraphs(lines, 0, lines.length) } as ParsedChapter)
-		return result
-	}
-	// 第一章前的前置内容（书名/作者/简介等）：生成「序」章置于第一章前，进入书籍默认从文件最开始阅读
-	if (startIdx[0] > 0) {
-		const prefaceParas = collectParagraphs(lines, 0, startIdx[0])
-		if (prefaceParas.length > 0) {
-			result.unshift({ title: prefaceLabel(), label: prefaceLabel(), contentTitle: prefaceLabel(), preface: true, paragraphs: prefaceParas } as ParsedChapter)
-		}
-	}
-	return result
-}
-
-/** 收集 [from, to) 行区间内的非空行（trim 后） */
-function collectParagraphs(lines : string[], from : number, to : number) : string[] {
-	const paras : string[] = []
-	for (let i = from; i < to && i < lines.length; i++) {
-		const t = lines[i].trim()
-		if (t.length > 0) {
-			paras.push(t)
-		}
-	}
-	return paras
-}
-
 /** 确保沙盒书籍目录存在（mkdir 的「已存在」错误码各端不一致不可靠，失败后以 access 复验目录实际可达为准） */
 function ensureBooksDir(dir : string) : Promise<void> {
 	// #ifdef WEB
@@ -419,6 +312,25 @@ function titleFromFileName(fileName : string) : string {
 	return title.length > 0 ? title : t('bookparse.untitled')
 }
 
+/**
+ * 目录缓存 + 分章正文落盘（导入/云端恢复登记拿到书籍 id 后调用）：
+ * 目录缓存使首次开书免全书扫描；分章正文让开书只读当前章（仅 APP 端，其余端为空操作）。
+ * 拆分失败不影响导入（下次开书走整文路径并重建），仅告警
+ */
+async function persistCatalogAndChapters(bookId : number, fileSize : number, chapters : CatalogChapter[], text : string) : Promise<void> {
+	if (chapters.length == 0) {
+		return
+	}
+	saveCatalogForBook(bookId, fileSize, chapters)
+	// 正文换代（重导入同名书复用同一 id）：旧排版缓存作废
+	clearSavedLayouts(bookId)
+	try {
+		await splitBookToChapters(bookId, text, chapters)
+	} catch (e) {
+		console.warn('分章正文写入失败（下次开书按整文重建）', e)
+	}
+}
+
 /** 导入一本书：复制落盘解析 → 登录态云端登记（后端分配 id，同名书复用）/ 未登录本地负数 id 落地（登录后同步云端）→ 以 id 命名入库 */
 export async function importBook(fileName : string, tempPath : string, size : number) : Promise<void> {
 	const dot = fileName.lastIndexOf('.')
@@ -438,19 +350,21 @@ export async function importBook(fileName : string, tempPath : string, size : nu
 	await copyToSandbox(tempPath, workPath)
 	let chapterCount = 0
 	let hasPreface = false
+	// txt 目录条目与全文（扫描产物：登记拿到书籍 id 后写入目录缓存并按章拆分正文，首次开书即命中）
+	let catalog : CatalogChapter[] = []
+	let bookText = ''
 	if (ext == 'txt') {
-		// txt：读文本（含编码识别）解析章节
-		let text = ''
+		// txt：读文本（含编码识别）扫描目录
 		try {
-			text = await readTextFile(workPath)
+			bookText = await readTextFile(workPath)
 		} catch (e) {
 			discardSandboxFile(workPath)
 			throw e
 		}
-		const parsed = parseChapters(text, titleFromFileName(fileName))
-		chapterCount = parsed.length
+		catalog = scanCatalogFromText(bookText, titleFromFileName(fileName))
+		chapterCount = catalog.length
 		// 序章存在性导入时固化：打开时据此决定保留序章（新书）或剔除（无序章历史书，保证章 id 与存量进度对齐）
-		hasPreface = parsed.length > 0 && parsed[0].preface
+		hasPreface = catalog.length > 0 && catalog[0].preface
 	} else {
 		// PDF：原文件保留，仅取页数用于书架展示（首次阅读时按页渲染为图片缓存）
 		// #ifdef APP
@@ -505,6 +419,7 @@ export async function importBook(fileName : string, tempPath : string, size : nu
 			discardCrossFormatFile(bodyPath, ext)
 		}
 		applyRegisteredBook(registered!, bodyPath)
+		await persistCatalogAndChapters(bookId, size, catalog, bookText)
 	} else {
 		// 未登录离线导入：本地负数 id 命名正文，元数据仅存本地缓存（登录后书架进入时同步云端）
 		const pendingId = nextPendingBookId(bookTitle)
@@ -517,6 +432,7 @@ export async function importBook(fileName : string, tempPath : string, size : nu
 			discardCrossFormatFile(bodyPath, ext)
 		}
 		applyPendingImport(bookTitle, ext.toUpperCase(), size, chapterCount, hasPreface, bodyPath)
+		await persistCatalogAndChapters(pendingId, size, catalog, bookText)
 	}
 }
 
@@ -596,17 +512,19 @@ async function restoreBookFromCloudInner(title : string, format : string, size :
 	// 元数据解析（与导入管线同口径）
 	let chapterCount = 0
 	let hasPreface = false
+	// txt 目录条目与全文（扫描产物，登记拿到书籍 id 后写入目录缓存并按章拆分）
+	let catalog : CatalogChapter[] = []
+	let bookText = ''
 	if (ext == 'txt') {
-		let text = ''
 		try {
-			text = await readTextFile(workPath)
+			bookText = await readTextFile(workPath)
 		} catch (e) {
 			discardSandboxFile(workPath)
 			return false
 		}
-		const parsed = parseChapters(text, title)
-		chapterCount = parsed.length
-		hasPreface = parsed.length > 0 && parsed[0].preface
+		catalog = scanCatalogFromText(bookText, title)
+		chapterCount = catalog.length
+		hasPreface = catalog.length > 0 && catalog[0].preface
 	} else {
 		// PDF：仅 App 端取页数用于书架展示（其余端 PDF 无法阅读，不恢复）
 		// #ifdef APP
@@ -655,6 +573,7 @@ async function restoreBookFromCloudInner(title : string, format : string, size :
 		discardCrossFormatFile(bodyPath, ext)
 	}
 	applyRegisteredBook(registered!, bodyPath)
+	await persistCatalogAndChapters(bookId, size, catalog, bookText)
 	return true
 }
 

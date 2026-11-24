@@ -20,6 +20,9 @@ import { deleteCloudObject } from '../api/cos.uts'
 import { hasAccessToken } from './request.uts'
 import type { Thought } from './readerTypesDefs.ts'
 import { relocateBookNotes, repushBookNotes, thoughtFromCloud, loadSettings } from './readerTypes.uts'
+import { clearBookCatalog } from './bookcatalog.uts'
+import { removeChapterFiles } from './bookchapters.uts'
+import { clearSavedLayouts } from './paginationcache.uts'
 import { t, tf } from './i18n'
 // 词典注册（书籍数据层文案）
 import './locales/books.uts'
@@ -122,7 +125,8 @@ export function findBook(bookId : number) : LocalBook | null {
 	return i >= 0 ? list[i] : null
 }
 
-/** 本机正文落地回写（云端同步下载后调用；path 为本机字段不参与云端同步） */
+/** 本机正文落地回写（云端同步下载后调用；path 为本机字段不参与云端同步）。
+ *  正文来自云端重下：分章正文与分页排版缓存按旧正文生成，连带目录缓存一并作废，下次开书重建 */
 export function setBookFileLocal(bookId : number, path : string, size : number) : void {
 	const list = loadBooks()
 	const i = findCached(bookId, list)
@@ -132,6 +136,9 @@ export function setBookFileLocal(bookId : number, path : string, size : number) 
 	list[i].path = path
 	list[i].size = size
 	saveBooks(list)
+	clearBookCatalog(bookId)
+	removeChapterFiles(bookId)
+	clearSavedLayouts(bookId)
 }
 
 // ==================== 云端同步（拉取覆盖缓存） ====================
@@ -404,6 +411,11 @@ export function removeBookData(book : LocalBook, deleteCloud : boolean) : void {
 		// COS 对象文件同步清理（幂等；失败不影响业务库删除，后端仅告警）
 		syncQuiet(deleteCloudObject(book.title, book.format.toLowerCase()))
 	}
+	// 目录结构缓存随书清理（重导入同名书复用同一 id 时会按文件大小重新校验覆盖）
+	clearBookCatalog(book.id)
+	// 分章正文目录与分页排版缓存随书清理（可再生的加速产物，正文换代/删书后不得残留）
+	removeChapterFiles(book.id)
+	clearSavedLayouts(book.id)
 	// #ifdef WEB
 	if (book.path.length > 0) {
 		// IndexedDB 键删除（容错忽略），无 PDF 页图缓存目录
@@ -635,6 +647,11 @@ async function migratePendingBook(book : LocalBook, data : UTSJSONObject) : Prom
 		newPath = dirPrefix + newId + '.' + ext
 		await renameSandboxFile(book.path, newPath)
 		discardCrossFormatFile(newPath, ext)
+		// 分章正文/排版缓存按书籍 id 命名，迁 id 后旧目录不可复用（逐章搬运不值当）：清掉待下次开书按整文重建
+		removeChapterFiles(book.id)
+		removeChapterFiles(newId)
+		clearSavedLayouts(book.id)
+		clearSavedLayouts(newId)
 		// #ifndef WEB
 		try {
 			uni.getFileSystemManager().rmdirSync(uni.env.USER_DATA_PATH + '/pdf_cache/' + book.id, true)

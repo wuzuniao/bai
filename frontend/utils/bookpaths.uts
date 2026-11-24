@@ -1,0 +1,22 @@
+/**
+ * 书籍正文存储路径约定（导入管线 / 分章正文 / 云端同步共用，唯一真源）：
+ * 沙盒目录 `uni.env.USER_DATA_PATH/books`；Web 端无沙盒文件系统，为 IndexedDB 键命名空间 `webbooks`
+ * （末段文件名语义与沙盒一致，使 books.uts 里对 path 的字符串运算跨端成立）。
+ * 独立成模块的原因：books.uts 经 cloudsync.uts 间接依赖路径常量，直接放在 cloudsync 会形成
+ * books → bookchapters → cloudsync → books 的循环依赖。
+ */
+
+/** 书籍正文沙盒目录 */
+export function booksDir() : string {
+	// #ifdef WEB
+	return 'webbooks'
+	// #endif
+	// #ifndef WEB
+	return uni.env.USER_DATA_PATH + '/books'
+	// #endif
+}
+
+/** 书籍正文本地路径（下载落盘 / 上传读源共用） */
+export function bookFilePath(bookId : number, format : string) : string {
+	return booksDir() + '/' + bookId.toString() + '.' + format.toLowerCase()
+}

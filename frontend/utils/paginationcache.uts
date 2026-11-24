@@ -1,0 +1,221 @@
+/**
+ * 分页排版缓存落盘（仅 APP-ANDROID）：StaticLayout 初排（真实行数/断点/字缘）实测 3 章约 0.3~0.6s，
+ * 重开同一章时直接复用上次结果，开书即得最终分页。
+ * --------------------------------------------------------------------------
+ * - 键含「排版签名」：书大小（正文换代即失效）+ 章下标 + 字号 + 字体 + 字距 + 内容宽 + 像素比，
+ *   任一项变化自然不命中；同一本书最多保留 MAX_ENTRIES_PER_BOOK 章，超出按写入顺序淘汰最旧
+ * - 值含 lines / lineEnds / lineRights / charX（划线线条带与划词手柄依赖字缘几何）与章头实测高
+ * - 序列化用自定义紧凑文本而非 JSON：实测 JSON.parse 60KB 约 250ms（UTS 侧解析开销），
+ *   而 split+parseFloat 解析同样数据约 20~40ms；字缘值统一位小数取整，体积再降约四成
+ * - 缓存只是加速手段：字段缺失/长度不齐按未命中处理，调用方回退重新初排
+ */
+
+import type { ParaLineLayout } from './paginationDefs.ts'
+
+const CACHE_PREFIX = 'reader_layout_'
+/** 索引键（按书记录已缓存的键，最近写入在末尾；用于淘汰最旧条目） */
+const INDEX_PREFIX = 'reader_layout_idx_'
+/** 单书保留章数（覆盖「当前章 ±2 + 近期来回翻」的使用半径） */
+const MAX_ENTRIES_PER_BOOK = 8
+/** 单章缓存串上限（超长单章不落盘） */
+const MAX_RAW_LEN = 200 * 1024
+/** 值内的段分隔符与矩阵行分隔符（内容只含数字，互不冲突） */
+const FIELD_SEP = '\n'
+const ROW_SEP = ';'
+const VALUE_SEP = ','
+
+/** 落盘条目结构 */
+type SavedLayout = {
+	layout : ParaLineLayout
+	/** 章头实测高（px，0=未实测：重开时重新测量） */
+	headerH : number
+}
+
+/** 排版签名（同签名才可复用断行结果） */
+export function layoutSignature(fontSize : number, fontFamily : string, letterSpacingPx : number, widthPx : number, pixelRatio : number) : string {
+	return fontSize.toString() + '|' + fontFamily + '|' + letterSpacingPx.toString() + '|' + Math.round(widthPx).toString() + '|' + pixelRatio.toString()
+}
+
+/** 单章缓存键 */
+function layoutKey(bookId : number, fileSize : number, cid : number, sig : string) : string {
+	return CACHE_PREFIX + bookId.toString() + '_' + fileSize.toString() + '_' + cid.toString() + '_' + sig
+}
+
+/** 书籍缓存键前缀（含所有正文版本，删除/淘汰按此前缀扫描） */
+function bookKeyPrefix(bookId : number) : string {
+	return CACHE_PREFIX + bookId.toString() + '_'
+}
+
+/** 读取落盘排版（未命中/损坏返回 null） */
+export function loadSavedLayout(bookId : number, fileSize : number, cid : number, sig : string) : SavedLayout | null {
+	let raw = ''
+	try {
+		const stored = uni.getStorageSync(layoutKey(bookId, fileSize, cid, sig))
+		if (typeof stored != 'string' || (stored as string).length == 0) {
+			return null
+		}
+		raw = stored as string
+	} catch (e) {
+		return null
+	}
+	const parts = raw.split(FIELD_SEP)
+	// 5 段：行数 / 行末字符矩阵 / 行右缘矩阵 / 字缘矩阵 / 章头高
+	if (parts.length < 5) {
+		return null
+	}
+	const lines = toIntList(parts[0])
+	const ends = toMatrix(parts[1])
+	const rights = toMatrix(parts[2])
+	const xs = toMatrix(parts[3])
+	const headerH = toFloat(parts[4], 0)
+	// 段落数必须与各行数据对齐，否则视为损坏（分页会按段索引取值）
+	if (lines.length == 0 || ends.length != lines.length || rights.length != lines.length || xs.length != lines.length) {
+		return null
+	}
+	return {
+		layout: { lines: lines, lineEnds: ends, lineRights: rights, charX: xs } as ParaLineLayout,
+		headerH: headerH
+	} as SavedLayout
+}
+
+/** 落盘排版（超长静默跳过） */
+export function saveLayout(bookId : number, fileSize : number, cid : number, sig : string, layout : ParaLineLayout, headerH : number) : void {
+	const raw = layout.lines.join(VALUE_SEP) + FIELD_SEP + matrixText(layout.lineEnds) + FIELD_SEP
+		+ matrixText(layout.lineRights) + FIELD_SEP + matrixText(layout.charX) + FIELD_SEP + headerH.toString()
+	if (raw.length > MAX_RAW_LEN) {
+		return
+	}
+	const key = layoutKey(bookId, fileSize, cid, sig)
+	try {
+		uni.setStorageSync(key, raw)
+	} catch (e) {
+		// 存储满/不可写：仅影响下次重排
+		return
+	}
+	evictOldEntries(bookId, key)
+}
+
+/** 矩阵 → 紧凑文本（行内逗号、行间分号；数值统一位小数，体积与解析成本都更低） */
+function matrixText(rows : number[][]) : string {
+	const out : string[] = []
+	for (let i = 0; i < rows.length; i++) {
+		const row = rows[i]
+		const cells : string[] = []
+		for (let j = 0; j < row.length; j++) {
+			cells.push((Math.round(row[j] * 10) / 10).toString())
+		}
+		out.push(cells.join(VALUE_SEP))
+	}
+	return out.join(ROW_SEP)
+}
+
+/** 整数列表解析（空串返回空数组；非法值按 0） */
+function toIntList(s : string) : number[] {
+	const out : number[] = []
+	if (s.length == 0) {
+		return out
+	}
+	const parts = s.split(VALUE_SEP)
+	for (let i = 0; i < parts.length; i++) {
+		out.push(toInt(parts[i], 0))
+	}
+	return out
+}
+
+/** 小数矩阵解析（行间分号、行内逗号；空行保留为空数组以与段落对齐） */
+function toMatrix(s : string) : number[][] {
+	const out : number[][] = []
+	if (s.length == 0) {
+		return out
+	}
+	const rows = s.split(ROW_SEP)
+	for (let i = 0; i < rows.length; i++) {
+		const row = rows[i]
+		const one : number[] = []
+		if (row.length > 0) {
+			const cells = row.split(VALUE_SEP)
+			for (let j = 0; j < cells.length; j++) {
+				one.push(toFloat(cells[j], 0))
+			}
+		}
+		out.push(one)
+	}
+	return out
+}
+
+/** 文本 → 整数（非法返回兜底值） */
+function toInt(s : string, fallback : number) : number {
+	const v = parseInt(s)
+	return isNaN(v) ? fallback : v
+}
+
+/** 文本 → 小数（非法返回兜底值） */
+function toFloat(s : string, fallback : number) : number {
+	const v = parseFloat(s)
+	return isNaN(v) ? fallback : v
+}
+
+/** 淘汰最旧条目（按书维护键索引，超出上限删最旧） */
+function evictOldEntries(bookId : number, writtenKey : string) : void {
+	const indexKey = INDEX_PREFIX + bookId.toString()
+	const keys : string[] = []
+	let stored = ''
+	try {
+		const v = uni.getStorageSync(indexKey)
+		stored = typeof v == 'string' ? (v as string) : ''
+	} catch (e) {
+		stored = ''
+	}
+	if (stored.length > 0) {
+		const parts = stored.split(FIELD_SEP)
+		for (let i = 0; i < parts.length; i++) {
+			if (parts[i].length > 0 && parts[i] != writtenKey) {
+				keys.push(parts[i])
+			}
+		}
+	}
+	keys.push(writtenKey)
+	while (keys.length > MAX_ENTRIES_PER_BOOK) {
+		const stale = keys.shift()
+		if (stale == null) {
+			break
+		}
+		try {
+			uni.removeStorageSync(stale)
+		} catch (e) {
+			// 忽略
+		}
+	}
+	try {
+		uni.setStorageSync(indexKey, keys.join(FIELD_SEP))
+	} catch (e) {
+		// 忽略
+	}
+}
+
+/** 清理书籍排版缓存（删书/正文换代时调用；按前缀扫描，含历史正文版本） */
+export function clearSavedLayouts(bookId : number) : void {
+	try {
+		uni.removeStorageSync(INDEX_PREFIX + bookId.toString())
+	} catch (e) {
+		// 忽略
+	}
+	const prefix = bookKeyPrefix(bookId)
+	let keys : string[] = []
+	try {
+		const info = uni.getStorageInfoSync()
+		keys = info.keys
+	} catch (e) {
+		return
+	}
+	for (let i = 0; i < keys.length; i++) {
+		const k = keys[i]
+		if (k.length >= prefix.length && k.substring(0, prefix.length) == prefix) {
+			try {
+				uni.removeStorageSync(k)
+			} catch (e) {
+				// 忽略
+			}
+		}
+	}
+}

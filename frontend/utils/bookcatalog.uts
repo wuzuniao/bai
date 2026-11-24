@@ -1,0 +1,308 @@
+// 书籍目录（章节结构）解析与本地缓存：标题行扫描 + 各章正文行区间，正文由阅读页按章惰性切段。
+// 缓存口径：目录结构只与正文文件相关（bookId + 文件字节数 + 章数校验），首次解析后写入本地存储，
+// 后续开书直接读缓存，不再对全书逐行跑正则扫描（13MB/1900 章实测扫描占开书耗时显著一段）。
+
+import type { CatalogChapter, BookCatalog } from './bookcatalogDefs.ts'
+import { t } from './i18n'
+// 词典注册（序章标签）
+import './locales/bookparse.uts'
+
+/** 目录缓存存储键前缀（按书籍 id 隔离，删书时经 clearBookCatalog 清理） */
+const CATALOG_STORAGE_PREFIX = 'book_catalog_'
+/** 缓存结构版本（字段变更时递增，旧版本按未命中处理；2=正文区间由行号改为字符偏移；3=紧凑文本格式） */
+const CATALOG_VERSION = 3
+/** 缓存准入上限：数万章的目录串过大，写存储得不偿失，仅走本次内存 */
+const CATALOG_MAX_CHAPTERS = 8000
+/** 缓存准入长度上限（字符数） */
+const CATALOG_MAX_JSON_LEN = 400 * 1024
+/** 值内字段分隔（'\n'，标题为单行文本不含换行） */
+const FIELD_SEP = '\n'
+/** 标题列表分隔（'\u0001' 控制符，正文里不会出现） */
+const TITLE_SEP = '\u0001'
+const VALUE_SEP = ','
+
+/** 编号章前缀（第X章/回/节/卷/部/篇/集幕；Chapter n） */
+const RE_NUMBERED = /^第[0-9一二三四五六七八九十百千万零〇两]+\s*[章回节卷部篇集幕]/
+const RE_CHAPTER_EN = /^(Chapter|CHAPTER)\s*\d+/
+/** 常见特殊章（序章/楔子等，仅短行视为标题避免误判正文） */
+const RE_SPECIAL = /^(序章|楔子|引子|前言|序言|尾声|终章|后记|番外|外传|附录)/
+
+/** 标题行拆分结果（raw=原始行，label=编号前缀，contentTitle=编号后标题） */
+type ParsedTitleParts = {
+	raw : string
+	label : string
+	contentTitle : string
+}
+
+/** 序章标签（展示值：按当前语言取词） */
+function prefaceLabel() : string {
+	return t('bookparse.preface')
+}
+
+/** 全文按 \n 切分（不做 \r\n 归一：行内残留的 \r 在取文本时由 trim 去掉，省掉整串二次复制）。
+ *  仅在目录缓存未命中（首次解析）时使用，缓存坐标存字符偏移，后续开书不再切分全文。 */
+export function splitBookLines(text : string) : string[] {
+	return text.split('\n')
+}
+
+/** 各行起始字符偏移（末尾多一项为全文长度）：行区间 → 字符偏移换算用 */
+function lineOffsets(lines : string[]) : number[] {
+	const offsets : number[] = []
+	let acc = 0
+	for (let i = 0; i < lines.length; i++) {
+		offsets.push(acc)
+		acc += lines[i].length + 1
+	}
+	offsets.push(acc)
+	return offsets
+}
+
+/** 标题行判定 */
+function isChapterLine(t : string) : boolean {
+	if (t.length > 50) {
+		return false
+	}
+	if (RE_NUMBERED.test(t)) {
+		return true
+	}
+	if (RE_CHAPTER_EN.test(t)) {
+		return true
+	}
+	return RE_SPECIAL.test(t) && t.length <= 30
+}
+
+/** 从标题行拆分章节标签与大标题（无编号章标签=整行） */
+function splitChapterTitle(t : string) : ParsedTitleParts {
+	const m = RE_NUMBERED.exec(t)
+	if (m != null) {
+		// exec 结果元素可空，?? '' 兜底（正则命中时 m[0] 恒非空）
+		const label = m[0] ?? ''
+		const rest = t.substring(label.length).trim().replace(/^[\s．.、:：\-—～~]+/, '').trim()
+		return { raw: t, label: label, contentTitle: rest.length > 0 ? rest : label } as ParsedTitleParts
+	}
+	const mc = RE_CHAPTER_EN.exec(t)
+	if (mc != null) {
+		const label2 = mc[0] ?? ''
+		const rest2 = t.substring(label2.length).trim().replace(/^[\s．.、:：\-—～~]+/, '').trim()
+		return { raw: t, label: label2, contentTitle: rest2.length > 0 ? rest2 : label2 } as ParsedTitleParts
+	}
+	return { raw: t, label: t, contentTitle: t } as ParsedTitleParts
+}
+
+/** 行区间 [from, to) 内是否存在非空行 */
+function hasBodyLine(lines : string[], from : number, to : number) : boolean {
+	const end = Math.min(to, lines.length)
+	for (let i = from; i < end; i++) {
+		if (lines[i].trim().length > 0) {
+			return true
+		}
+	}
+	return false
+}
+
+/**
+ * 扫描章节目录：标题行扫为候选起点，候选间无正文的连续标题（目录块）自动剔除；
+ * 第一章前的非空内容生成「序」章（preface=true）。只产出标题与正文字符区间，不切段落。
+ */
+export function scanChapterList(lines : string[], bookTitle : string) : CatalogChapter[] {
+	const startIdx : number[] = []
+	const starts : ParsedTitleParts[] = []
+	for (let i = 0; i < lines.length; i++) {
+		const t0 = lines[i].trim()
+		if (t0.length == 0 || !isChapterLine(t0)) {
+			continue
+		}
+		startIdx.push(i)
+		starts.push(splitChapterTitle(t0))
+	}
+	const offsets = lineOffsets(lines)
+	const textEnd = offsets.length > 0 ? offsets[offsets.length - 1] : 0
+	const result : CatalogChapter[] = []
+	if (startIdx.length == 0) {
+		// 无章节标题：全书单章
+		result.push({ title: bookTitle, label: '', contentTitle: bookTitle, preface: false, from: 0, to: textEnd } as CatalogChapter)
+		return result
+	}
+	for (let k = 0; k < startIdx.length; k++) {
+		const fromLine = startIdx[k] + 1
+		const toLine = k < startIdx.length - 1 ? startIdx[k + 1] : lines.length
+		// 章起点与下一章起点之间无正文 → 目录块标题行：剔除（不生成章）
+		if (!hasBodyLine(lines, fromLine, toLine)) {
+			continue
+		}
+		result.push({
+			title: starts[k].raw,
+			label: starts[k].label,
+			contentTitle: starts[k].contentTitle,
+			preface: false,
+			from: offsets[fromLine],
+			to: toLine < offsets.length ? offsets[toLine] : textEnd
+		} as CatalogChapter)
+	}
+	if (result.length == 0) {
+		// 全部候选均为目录块：按单章兜底
+		result.push({ title: bookTitle, label: '', contentTitle: bookTitle, preface: false, from: 0, to: textEnd } as CatalogChapter)
+		return result
+	}
+	if (startIdx[0] > 0 && hasBodyLine(lines, 0, startIdx[0])) {
+		const label = prefaceLabel()
+		result.unshift({ title: label, label: label, contentTitle: label, preface: true, from: 0, to: offsets[startIdx[0]] } as CatalogChapter)
+	}
+	return result
+}
+
+/** 取字符区间 [from, to) 内的非空行（trim 后）作为章节段落文本（切片后按 \n 切行，只处理本章内容） */
+export function chapterTexts(text : string, from : number, to : number) : string[] {
+	const paras : string[] = []
+	const end = Math.min(to, text.length)
+	if (from >= end) {
+		return paras
+	}
+	const lines = text.substring(from, end).split('\n')
+	for (let i = 0; i < lines.length; i++) {
+		const t0 = lines[i].trim()
+		if (t0.length > 0) {
+			paras.push(t0)
+		}
+	}
+	return paras
+}
+
+/**
+ * 解析本地存储的目录缓存（版本/文件大小/章数校验不过返回 null）。
+ * 存储格式（紧凑文本，按 '\n' 分段）：版本 / 文件大小 / 标题列表 / 序章标记 / 起始偏移 / 结束偏移；
+ * 标题用 '\u0001' 连接、偏移用 ',' 连接。实测 JSON.parse 20 万字符目录约 380ms，
+ * 同数据 split 解析约 30ms（开书主路径的主要剩余耗时）；章标签与大标题由标题现拆，不再重复存储。
+ */
+function readCatalogCache(bookId : number, fileSize : number, expectCount : number) : CatalogChapter[] | null {
+	let raw = ''
+	try {
+		const stored = uni.getStorageSync(CATALOG_STORAGE_PREFIX + bookId)
+		if (typeof stored != 'string' || (stored as string).length == 0) {
+			return null
+		}
+		raw = stored as string
+	} catch (e) {
+		return null
+	}
+	const parts = raw.split(FIELD_SEP)
+	if (parts.length < 6) {
+		return null
+	}
+	if (parseInt(parts[0]) != CATALOG_VERSION) {
+		return null
+	}
+	if (parseInt(parts[1]) != fileSize) {
+		return null
+	}
+	const titles = parts[2].length == 0 ? ([] as string[]) : parts[2].split(TITLE_SEP)
+	const flags = parts[3]
+	const froms = toNumberList(parts[4])
+	const tos = toNumberList(parts[5])
+	if (titles.length == 0 || froms.length != titles.length || tos.length != titles.length || flags.length != titles.length) {
+		return null
+	}
+	if (expectCount > 0 && titles.length != expectCount) {
+		return null
+	}
+	const chapters : CatalogChapter[] = []
+	const label = prefaceLabel()
+	for (let i = 0; i < titles.length; i++) {
+		// 序章标题按当前语言重生（缓存跨越语言切换时不能沿用旧文案）
+		if (flags.charAt(i) == '1') {
+			chapters.push({ title: label, label: label, contentTitle: label, preface: true, from: froms[i], to: tos[i] } as CatalogChapter)
+			continue
+		}
+		const parsed = splitChapterTitle(titles[i])
+		chapters.push({
+			title: parsed.raw,
+			label: parsed.label,
+			contentTitle: parsed.contentTitle,
+			preface: false,
+			from: froms[i],
+			to: tos[i]
+		} as CatalogChapter)
+	}
+	return chapters
+}
+
+/** 目录缓存写入（超长目录静默跳过，缓存只是加速手段） */
+function saveCatalogCache(bookId : number, fileSize : number, chapters : CatalogChapter[]) : void {
+	if (chapters.length > CATALOG_MAX_CHAPTERS) {
+		return
+	}
+	const titles : string[] = []
+	let flags = ''
+	const froms : string[] = []
+	const tos : string[] = []
+	for (let i = 0; i < chapters.length; i++) {
+		const c = chapters[i]
+		titles.push(c.preface ? '' : c.title)
+		flags += c.preface ? '1' : '0'
+		froms.push(c.from.toString())
+		tos.push(c.to.toString())
+	}
+	const raw = CATALOG_VERSION.toString() + FIELD_SEP + fileSize.toString() + FIELD_SEP
+		+ titles.join(TITLE_SEP) + FIELD_SEP + flags + FIELD_SEP
+		+ froms.join(VALUE_SEP) + FIELD_SEP + tos.join(VALUE_SEP)
+	if (raw.length > CATALOG_MAX_JSON_LEN) {
+		return
+	}
+	try {
+		uni.setStorageSync(CATALOG_STORAGE_PREFIX + bookId, raw)
+	} catch (e) {
+		// 存储满/不可写：仅影响下次开书重新扫描
+	}
+}
+
+/** 逗号分隔数字串 → 数字数组（非法值按 0） */
+function toNumberList(s : string) : number[] {
+	const out : number[] = []
+	if (s.length == 0) {
+		return out
+	}
+	const parts = s.split(VALUE_SEP)
+	for (let i = 0; i < parts.length; i++) {
+		const v = parseInt(parts[i])
+		out.push(isNaN(v) ? 0 : v)
+	}
+	return out
+}
+
+/** 清理书籍目录缓存（删书时调用） */
+export function clearBookCatalog(bookId : number) : void {
+	try {
+		uni.removeStorageSync(CATALOG_STORAGE_PREFIX + bookId)
+	} catch (e) {
+		// 忽略
+	}
+}
+
+/**
+ * 载入书籍目录（缓存命中即跳过全书扫描）：返回章节条目与全文正文。
+ * 未命中时切分全文扫描并写缓存；fileSize/expectCount 为缓存校验依据（expectCount=0 表示不校验章数）。
+ */
+export function loadBookCatalog(text : string, bookTitle : string, bookId : number, fileSize : number, expectCount : number) : BookCatalog {
+	const cached = readCatalogCache(bookId, fileSize, expectCount)
+	if (cached != null) {
+		return { size: fileSize, chapters: cached, text: text } as BookCatalog
+	}
+	const chapters = scanCatalogFromText(text, bookTitle)
+	saveCatalogCache(bookId, fileSize, chapters)
+	return { size: fileSize, chapters: chapters, text: text } as BookCatalog
+}
+
+/** 读取目录缓存（不触发全文扫描；文件字节数/章数校验不过或未命中返回 null）——分章正文模式下开书不再读全文 */
+export function loadCachedCatalog(bookId : number, fileSize : number, expectCount : number) : CatalogChapter[] | null {
+	return readCatalogCache(bookId, fileSize, expectCount)
+}
+
+/** 扫描纯文本得到目录条目（导入/云端恢复建库时用：只需章数与序章标记，不切段落） */
+export function scanCatalogFromText(text : string, bookTitle : string) : CatalogChapter[] {
+	return scanChapterList(splitBookLines(text), bookTitle)
+}
+
+/** 目录写入缓存（导入/云端恢复登记拿到书籍 id 后调用，首次开书即命中缓存，省掉一次全书扫描） */
+export function saveCatalogForBook(bookId : number, fileSize : number, chapters : CatalogChapter[]) : void {
+	saveCatalogCache(bookId, fileSize, chapters)
+}

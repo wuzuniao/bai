@@ -15,18 +15,21 @@
 				<text :class="drawerTab === 'bookmark' ? 'drawer-tab-title' : 'drawer-tab-plain'">{{ t('readercomp.tabBookmark') }}</text>
 			</view>
 		</view>
-		<scroll-view class="drawer-list" direction="vertical" :show-scrollbar="false" :scroll-into-view="catalogAnchor">
-			<!-- 目录页（当前阅读章节蓝色高亮由 activeChapterId 驱动；懒渲染：抽屉关闭时卸载，长篇数百章不常驻 DOM，打开时按 activeChapterId 重建） -->
+		<scroll-view class="drawer-list" direction="vertical" :show-scrollbar="false" :scroll-top="catalogScrollTop" @scroll="onDrawerScroll">
+			<!-- 目录页（当前阅读章节蓝色高亮由 activeChapterId 在模板内比较驱动；虚拟列表：只挂载滚动窗口内的固定行高行，
+			     长篇 1900+ 章不再整表创建节点；顶部/底部占位行撑住总高度，滚动位置按行高换算即为当前章所在行） -->
 			<view v-if="open && drawerTab === 'catalog'">
+				<view :style="'height:' + catalogTopPad + 'px'"></view>
 				<view
-					v-for="(ch, ci) in displayChapters"
+					v-for="ch in catalogWindow"
 					:key="ch.id"
-					class="chapter-item"
-					:id="'catalog-ch-' + ch.id"
+					class="chapter-row"
+					:style="'height:' + catalogRowH + 'px'"
 					@click="onSelectChapter(ch)"
 				>
-					<text class="chapter-item-text" :class="ch.active ? 'chapter-item-text-active' : ''" :style="'color:' + (ch.active ? theme.activeBlue : theme.chapterTextColor)">{{ ch.title }}</text>
+					<text class="chapter-row-text" :class="ch.id == activeChapterId ? 'chapter-row-text-active' : ''" :style="'color:' + (ch.id == activeChapterId ? theme.activeBlue : theme.chapterTextColor)">{{ ch.title }}</text>
 				</view>
+				<view :style="'height:' + catalogBottomPad + 'px'"></view>
 			</view>
 			<!-- 想法/划线页（懒渲染同目录页）：划线记录卡片（宿主 notes 随划线与取消划线实时同步） -->
 			<view v-else-if="open && drawerTab === 'note'">
@@ -64,6 +67,7 @@
 	import { spacedChapterTitle } from '@/utils/readerTypes.uts'
 	import type { ReaderTheme } from '@/utils/themeDefs.ts'
 	import BookmarkPanel from '@/components/reader/BookmarkPanel.uvue'
+	import { rpxToPx } from '@/utils/layout.uts'
 	import { t } from '@/utils/i18n.uts'
 	// 词典注册（阅读器组件文案）
 	import '@/utils/locales/readercomp.uts'
@@ -79,6 +83,9 @@
 	 * 对齐原 v-if 卸载重挂的交互节奏。
 	 * 懒渲染：目录页/想法页内容随 open 条件挂载（长篇数百章不常驻 DOM，
 	 * computed 无订阅即不重算）；书签页保持常挂载（书签增删 ref 链常可用）。
+	 * 目录虚拟列表：固定行高 + 滚动窗口渲染（1900+ 章只挂载窗口内 40 行），
+	 * 当前章定位按「行下标 × 行高」写入 scroll-top（scroll-into-view 在长篇列表上会因
+	 * 节点未就位而定位失败/错位，故不再使用）。
 	 */
 	const props = defineProps<{
 		/** 抽屉可见状态（宿主 v-show 控制显隐；转可见时重置页签/排序） */
@@ -109,34 +116,130 @@
 	const drawerTab = ref('catalog')
 	const orderDesc = ref(false)
 
-	/** 目录定位锚点（scroll-into-view）：打开/切回目录页签时定位到当前阅读章 */
-	const catalogAnchor = ref('')
+	/** 目录虚拟列表行高（px，与样式 chapter-row 高度 92rpx 同口径）：虚拟窗口与定位都按它换算。
+	 *  冷启动窗口宽为 0 的端（部分模拟器）rpxToPx 会返回 0，取下限避免行高归零导致整表塌陷 */
+	const catalogRowH = Math.max(28, rpxToPx(92))
+	/** 窗口内渲染行数（可视约 11 行，余量覆盖快速滚动与不同面板高度） */
+	const CATALOG_WINDOW_ROWS = 40
+	/** 窗口起点按行数对齐的粒度：滚动偏移落在同一段内不触发重渲染 */
+	const CATALOG_WINDOW_STEP = 6
+	/** 程序化滚动位置（绑定 scroll-top；只在定位时写入） */
+	const catalogScrollTop = ref(0)
+	/** 窗口起点依据的偏移（程序化定位值 + 滚动事件实时值） */
+	const catalogOffset = ref(0)
+	/** 视图实际滚动位置（仅滚动事件写入，用于校验定位是否真正生效） */
+	const catalogViewTop = ref(0)
 
-	/** 定位到当前阅读章：先清空再延迟设值，确保懒渲染 DOM 就绪后 scroll-into-view 才可靠触发 */
-	function locateCatalogAnchor() : void {
-		catalogAnchor.value = ''
-		setTimeout(() : void => {
-			catalogAnchor.value = 'catalog-ch-' + props.activeChapterId
-		}, 300)
-	}
-
-	/** 目录正/倒序展示（排序指示用单个 ↑/↓（不用 ⇅/⇵ 等合体双箭头字形：两端均只显示一个箭头、宽度恒定，全端一致）；当前阅读章节蓝色高亮由 activeChapterId 驱动） */
-	const displayChapters = computed<Chapter[]>(() : Chapter[] => {
-		const marked = props.chapters.map((c : Chapter) : Chapter => {
-			return { id: c.id, title: spacedChapterTitle(c.title), label: c.label, contentTitle: c.contentTitle, active: c.id == props.activeChapterId } as Chapter
+	/** 目录行基础数据（标题补空格等展示加工只在章节列表变化时做一次：不随当前章变化/排序重算全书行） */
+	const catalogRowSource = computed<Chapter[]>(() : Chapter[] => {
+		return props.chapters.map((c : Chapter) : Chapter => {
+			return { id: c.id, title: spacedChapterTitle(c.title), label: c.label, contentTitle: c.contentTitle, active: false } as Chapter
 		})
-		if (!orderDesc.value) {
-			return marked
+	})
+	/** 目录展示顺序（排序指示用单个 ↑/↓（不用 ⇅/⇵ 等合体双箭头字形：两端均只显示一个箭头、宽度恒定，全端一致）；
+	 *  倒序只反转数组引用，不重建行；当前阅读章高亮由模板比较 activeChapterId 决定 */
+	const catalogRows = computed<Chapter[]>(() : Chapter[] => {
+		const rows = catalogRowSource.value
+		return orderDesc.value ? rows.slice().reverse() : rows
+	})
+	/** 虚拟窗口起点（行下标）：按滚动偏移整除行高后按步长对齐，并保证窗口不越过末尾 */
+	const catalogWindowStart = computed<number>(() : number => {
+		const len = catalogRows.value.length
+		if (len <= CATALOG_WINDOW_ROWS) {
+			return 0
 		}
-		return marked.slice().reverse()
+		const raw = Math.floor(catalogOffset.value / catalogRowH / CATALOG_WINDOW_STEP) * CATALOG_WINDOW_STEP
+		const maxStart = len - CATALOG_WINDOW_ROWS
+		return Math.max(0, Math.min(raw, maxStart))
+	})
+	/** 窗口内渲染的目录行 */
+	const catalogWindow = computed<Chapter[]>(() : Chapter[] => {
+		const rows = catalogRows.value
+		const start = catalogWindowStart.value
+		return rows.slice(start, Math.min(rows.length, start + CATALOG_WINDOW_ROWS))
+	})
+	/** 窗口上方/下方占位高度（撑住列表总高，行位置由固定行高换算） */
+	const catalogTopPad = computed<number>(() : number => catalogWindowStart.value * catalogRowH)
+	const catalogBottomPad = computed<number>(() : number => {
+		return Math.max(0, catalogRows.value.length - catalogWindowStart.value - catalogWindow.value.length) * catalogRowH
 	})
 
-	/** 抽屉页签切换（切回目录页签时重新定位到当前阅读章） */
+	/** 定位校验：视图实际滚动位置与目标偏差超 2px 时重新触发一次滚动（防止首个 scroll-top 被布局钳制吞掉） */
+	function verifyCatalogAnchor(y : number) : void {
+		if (!props.open || drawerTab.value != 'catalog') {
+			return
+		}
+		if (Math.abs(catalogViewTop.value - y) <= 2) {
+			return
+		}
+		catalogScrollTop.value = y == 0 ? 1 : y - 1
+		setTimeout(() : void => {
+			catalogScrollTop.value = y
+		}, 20)
+	}
+
+	/** 滚动到指定行（行顶对齐视口顶）：同步窗口起点与 scroll-top，首帧即定位到位（不再依赖 scroll-into-view 的异步时机） */
+	function jumpCatalogTo(idx : number) : void {
+		const len = catalogRows.value.length
+		if (len == 0) {
+			return
+		}
+		const row = Math.max(0, Math.min(idx, len - 1))
+		const y = row * catalogRowH
+		catalogOffset.value = y
+		if (catalogScrollTop.value == y) {
+			// 绑定值与目标相同（用户手动滚过目录后再次打开、连续切换排序）：同值写入不触发滚动，
+			// 先偏 1px 让视图先落位，下一轮再回目标
+			catalogScrollTop.value = y == 0 ? 1 : y - 1
+			setTimeout(() : void => {
+				catalogScrollTop.value = y
+			}, 20)
+		} else {
+			catalogScrollTop.value = y
+		}
+		// 抽屉首次挂载时列表内容可能尚未完成布局，scroll-top 会被钳制在 0：
+		// 布局稳定后按视图实际位置校验一次，未到位则重新触发（同值不触发故先偏 1px）
+		setTimeout(() : void => {
+			verifyCatalogAnchor(y)
+		}, 80)
+	}
+
+	/** 定位到当前阅读章：在展示顺序中查其行下标后滚动（正序下标=cid，倒序需反查） */
+	function locateCatalogAnchor() : void {
+		const rows = catalogRows.value
+		let idx = 0
+		for (let i = 0; i < rows.length; i++) {
+			if (rows[i].id == props.activeChapterId) {
+				idx = i
+				break
+			}
+		}
+		jumpCatalogTo(idx)
+	}
+
+	/** 目录滚动：记录实时偏移驱动虚拟窗口重算（其他页签的滚动不影响目录） */
+	function onDrawerScroll(e : UniScrollEvent) : void {
+		if (!props.open || drawerTab.value != 'catalog') {
+			return
+		}
+		const top = e.detail.scrollTop
+		catalogViewTop.value = top
+		if (Math.abs(top - catalogOffset.value) < 0.5) {
+			return
+		}
+		catalogOffset.value = top
+	}
+
+	/** 抽屉页签切换（切回目录页签时重新定位到当前阅读章；切走时把列表复位到顶部） */
 	function switchDrawerTab(tab : string) : void {
 		drawerTab.value = tab
 		if (tab == 'catalog') {
 			locateCatalogAnchor()
+			return
 		}
+		catalogOffset.value = 0
+		catalogViewTop.value = 0
+		catalogScrollTop.value = 0
 	}
 
 	/** 目录页签排序箭头：阻止冒泡（防触发父级页签切换）后切换正/倒序（重排后重新定位当前章） */
@@ -248,15 +351,25 @@
 		flex: 1;
 	}
 
-	.chapter-item {
-		padding: 27rpx 38rpx;
+	/* 目录行（虚拟列表）：高度固定为 92rpx（与脚本 catalogRowH 同值，单行居中），
+	   行高即窗口换算与定位的唯一依据，改样式必须同步改脚本常量 */
+	.chapter-row {
+		flex-direction: row;
+		align-items: center;
+		padding-left: 38rpx;
+		padding-right: 38rpx;
 	}
 
-	.chapter-item-text {
+	.chapter-row-text {
+		flex: 1;
 		font-size: 29rpx;
+		line-height: 38rpx;
+		/* 定高行内单行展示：超长标题省略，不换行撑破行高 */
+		lines: 1;
+		text-overflow: ellipsis;
 	}
 
-	.chapter-item-text-active {
+	.chapter-row-text-active {
 		font-weight: 600;
 	}
 

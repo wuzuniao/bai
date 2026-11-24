@@ -9,6 +9,7 @@
  */
 import type { LocalBook } from './booksDefs.ts'
 import { setBookFileLocal } from './books.uts'
+import { bookFilePath } from './bookpaths.uts'
 import { fetchDownloadUrl } from '../api/cos.uts'
 // #ifdef WEB
 import { webFsGet, webFsPut } from './webfs'
@@ -24,21 +25,6 @@ export function sanitizeTitle(value : string) : string {
 		}
 	}
 	return cleaned.trim()
-}
-
-/** 书籍正文沙盒目录（与导入管线同名约定；Web 端无沙盒文件系统，为 IndexedDB 键命名空间，末段文件名语义与沙盒一致） */
-export function booksDir() : string {
-	// #ifdef WEB
-	return 'webbooks'
-	// #endif
-	// #ifndef WEB
-	return uni.env.USER_DATA_PATH + '/books'
-	// #endif
-}
-
-/** 书籍正文本地路径（与导入管线同名约定，下载落盘 / 上传读源共用） */
-export function bookFilePath(bookId : number, format : string) : string {
-	return booksDir() + '/' + bookId.toString() + '.' + format.toLowerCase()
 }
 
 /** 读取本地正文文件字节（上传源；Web 端为 IndexedDB 键，文件缺失 reject） */
