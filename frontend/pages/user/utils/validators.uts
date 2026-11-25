@@ -56,7 +56,7 @@ export function validateConfirmPassword(v : string, reference : string) : string
 	if (v.length == 0) {
 		return t('validator.confirmEmpty')
 	}
-	if (v !== reference) {
+	if (v != reference) {
 		return t('validator.pwdMismatch')
 	}
 	return ''

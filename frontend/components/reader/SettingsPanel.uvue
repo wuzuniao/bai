@@ -27,11 +27,11 @@
 					v-for="(f, fi) in fontOptions"
 					:key="f.key"
 					class="page-turn-btn font-option"
-					:class="pendingFontKey === f.key ? 'page-turn-active' : 'page-turn-idle'"
-					:style="pendingFontKey === f.key ? '' : 'background-color:' + theme.controlBg + ';border-color:' + theme.controlBorder"
+					:class="pendingFontKey == f.key ? 'page-turn-active' : 'page-turn-idle'"
+					:style="pendingFontKey == f.key ? '' : 'background-color:' + theme.controlBg + ';border-color:' + theme.controlBorder"
 					@click="selectFont(f.key)"
 				>
-					<text class="page-turn-text" :class="pendingFontKey === f.key ? 'page-turn-text-active' : ''" :style="pendingFontKey === f.key ? '' : 'color:' + theme.controlText">{{ f.label }}</text>
+					<text class="page-turn-text" :class="pendingFontKey == f.key ? 'page-turn-text-active' : ''" :style="pendingFontKey == f.key ? '' : 'color:' + theme.controlText">{{ f.label }}</text>
 				</view>
 			</view>
 			<view class="font-save-row">
@@ -49,12 +49,12 @@
 				<view class="swatch-group">
 					<view
 						class="swatch swatch-white"
-						:class="selectedBg === READER_THEME_LIGHT.readerBg ? 'swatch-active' : ''"
+						:class="selectedBg == READER_THEME_LIGHT.readerBg ? 'swatch-active' : 'swatch-idle'"
 						@click="changeReaderBg(READER_THEME_LIGHT.readerBg)"
 					></view>
 					<view
 						class="swatch swatch-milky"
-						:class="selectedBg === READER_THEME_PAPER.readerBg ? 'swatch-active' : ''"
+						:class="selectedBg == READER_THEME_PAPER.readerBg ? 'swatch-active' : 'swatch-idle'"
 						@click="changeReaderBg(READER_THEME_PAPER.readerBg)"
 					></view>
 				</view>
@@ -147,7 +147,8 @@
 	fontSize.value = savedSettings.fontSize
 	pageTurn.value = pageTurnModes.indexOf(savedSettings.pageTurn) >= 0 ? savedSettings.pageTurn : fallbackPageTurn()
 	themeKey.value = savedSettings.theme
-	selectedBg.value = readerThemeOf(savedSettings.theme).readerBg
+	/** 夜间是叠加态：背景色板不跟随夜间底色（否则两枚纸色块都判不中，暗色下选中态不可见），回落到白色纸 */
+	selectedBg.value = savedSettings.theme == 'night' ? READER_THEME_LIGHT.readerBg : readerThemeOf(savedSettings.theme).readerBg
 	// 字体沿用独立 key（历史版本存储结构不变）
 	fontKey.value = loadStoredFontKey()
 	savedFontKey.value = fontKey.value
@@ -206,7 +207,10 @@
 	/** 日/夜切换（宿主三项导航经 ref 调用：真源唯一写入口，保证持久化与上行一致） */
 	function setTheme(key : string) : void {
 		themeKey.value = key
-		selectedBg.value = readerThemeOf(key).readerBg
+		/** 切夜间不写背景选中值：保留当前纸色高亮（夜间只是暗色叠加，色板仍指白天纸色） */
+		if (key != 'night') {
+			selectedBg.value = readerThemeOf(key).readerBg
+		}
 		saveSettings({ fontSize: fontSize.value, pageTurn: pageTurn.value, theme: themeKey.value, fontKey: fontKey.value } as ReaderSettings)
 		emitChange()
 	}
@@ -417,14 +421,19 @@
 		border-radius: $bai-rounded-pill;
 	}
 
+	/* 色块底色即其代表的阅读背景（白纸/米黄纸）：白纸块在暗色面板下须有白填充才可辨 */
 	.swatch-white {
-		border: 1px solid $bai-pale;
+		background-color: $bai-canvas;
 	}
 
 	.swatch-milky {
 		/* App 原生端 gap 不生效（规范 3.4）：两色块间距改 margin */
 		margin-left: 23rpx;
 		background-color: $bai-paper;
+	}
+
+	/* 空闲/选中互斥：边框只由状态类声明，底座类不写边框，避免与选中态的 4rpx 正蓝描边并存 */
+	.swatch-idle {
 		border: 1px solid $bai-pale;
 	}
 

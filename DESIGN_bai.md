@@ -16,8 +16,8 @@ colors:
   canvas: "#ffffff"
   canvas-soft: "#f4f4f2"
   surface-form: "#fafaf8"
-  positive: "#1e40af"
-  positive-deep: "#1e3a8a"
+  positive: "#0066ff"
+  positive-deep: "#0052cc"
   warning: "#ffd11a"
   warning-deep: "#b86700"
   warning-content: "#4a3b1c"
@@ -360,8 +360,8 @@ components:
 - **弱文本色**（`{colors.mute}` — `#868685`）：最低优先级的文本 —— 说明文字、占位符、细则。
 
 ### 语义色
-- **正向**（`{colors.positive}` — `#1e40af`）：成功指示色（深蓝）。在黑白主调中承担唯一的正向色相 —— 黑色承载交互，蓝色承载确认。
-- **正向深**（`{colors.positive-deep}` — `#1e3a8a`）：按下的正向状态 / 正向徽章背景。
+- **正向**（`{colors.positive}` — `#0066ff`）：成功指示色（正蓝）。在黑白主调中承担唯一的正向色相 —— 黑色承载交互，蓝色承载确认。
+- **正向深**（`{colors.positive-deep}` — `#0052cc`）：按下的正向状态 / 正向徽章背景（由正向压暗一档所得）。
 - **警示**（`{colors.warning}` — `#ffd11a`）：提醒指示色。
 - **警示深**（`{colors.warning-deep}` — `#b86700`）：按下的警示状态。
 - **警示内容色**（`{colors.warning-content}` — `#4a3b1c`）：警示表层上的文本色。

@@ -5,15 +5,15 @@
 				v-for="(item, index) in items"
 				:key="item.key"
 				class="nav-btn"
-				:class="item.key === active ? 'nav-btn-active' : 'nav-btn-idle'"
+				:class="item.key == active ? 'nav-btn-active' : 'nav-btn-idle'"
 				@click="onTap(index)"
 			>
 				<image
 					class="nav-icon"
-					:src="item.key === active ? item.iconActive : item.icon"
+					:src="item.key == active ? item.iconActive : item.icon"
 					:style="'width:' + item.iconWidth + 'rpx;height:' + item.iconHeight + 'rpx'"
 				/>
-				<text class="nav-text" :class="item.key === active ? 'nav-text-active' : ''">{{ navText(item.key) }}</text>
+				<text class="nav-text" :class="item.key == active ? 'nav-text-active' : ''">{{ navText(item.key) }}</text>
 			</view>
 		</view>
 	</view>
@@ -56,10 +56,10 @@
 
 	/** 导航项文案（渲染期取词，随语言切换刷新） */
 	function navText(key: string) : string {
-		if (key === 'home') {
+		if (key == 'home') {
 			return t('nav.home')
 		}
-		if (key === 'bookshelf') {
+		if (key == 'bookshelf') {
 			return t('nav.bookshelf')
 		}
 		return t('nav.mine')
@@ -75,7 +75,7 @@
 	function onTap(index: number) : void {
 		// 每次点击均通知页面（如书架页借此关闭浮层菜单）
 		emit('change', index)
-		if (items[index].key === props.active) {
+		if (items[index].key == props.active) {
 			return
 		}
 		// 统一经 reLaunch 进入目标页：关闭全部页面后重开目标，任一入口均为全新实例、

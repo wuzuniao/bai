@@ -21,7 +21,7 @@ export const READER_THEME_LIGHT: ReaderTheme = {
 	/** 控制栏纯白（与正文画布色区分；无投影，纯色即区分手段） */
 	menuTopBg: '#ffffff',
 	menuBottomBg: '#ffffff',
-	activeBlue: '#1e40af',
+	activeBlue: '#0066ff',
 	/** 书签遮罩：浅色纸面上用深色半透明，白字白图标清晰 */
 	maskBg: 'rgba(14, 15, 12, 0.65)',
 	maskTextColor: '#ffffff',
@@ -50,7 +50,7 @@ export const READER_THEME_NIGHT: ReaderTheme = {
 	/** 控制框面板比暗底（#121212）提亮一档，避免与页面背景融合 */
 	menuTopBg: 'rgba(44, 44, 44, 0.98)',
 	menuBottomBg: 'rgba(44, 44, 44, 0.98)',
-	activeBlue: '#60a5fa',
+	activeBlue: '#66a6ff',
 	/** 书签遮罩：暗色纸面上用浅色半透明进行视觉区分，深色文字 */
 	maskBg: 'rgba(244, 244, 242, 0.9)',
 	maskTextColor: '#0e0f0c',
@@ -80,7 +80,7 @@ export const READER_THEME_PAPER: ReaderTheme = {
 	/** 控制栏纯白（与暖米黄纸面区分；无投影，纯色即区分手段） */
 	menuTopBg: '#ffffff',
 	menuBottomBg: '#ffffff',
-	activeBlue: '#1e40af',
+	activeBlue: '#0066ff',
 	maskBg: 'rgba(14, 15, 12, 0.65)',
 	maskTextColor: '#ffffff',
 	popoverBg: '#0e0f0c',

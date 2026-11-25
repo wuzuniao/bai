@@ -223,6 +223,8 @@
 	const SHARE_QUOTE = 'rgba($bai-ink, 0.25)'
 	const SHARE_META = 'rgba($bai-ink, 0.45)'
 	const SHARE_CANVAS_BG = '#ffffff'
+	/** 想法块正蓝（与 SCSS 令牌 $bai-positive 同值：画布绘制无法引用 SCSS 变量） */
+	const SHARE_THOUGHT = '#0066ff'
 	/** 段落间距（px，正文段间距 40rpx 换算） */
 	const SHARE_PARA_GAP = 20.0
 	/** 小间距（px，23rpx 间距换算，390 基准 ÷2）：引文块/想法块/出处行之间距 */
@@ -461,7 +463,7 @@
 
 	/** 绘制想法块（蓝色） */
 	function drawShareThoughtBlock(ctx : CanvasRenderingContext2D, thL : string[], top : number) : void {
-		drawCanvasLines(ctx, thL, SHARE_TEXT_X, top, SHARE_LINE_H, '12.5px sans-serif', '#1e40af', SHARE_BASE12)
+		drawCanvasLines(ctx, thL, SHARE_TEXT_X, top, SHARE_LINE_H, '12.5px sans-serif', SHARE_THOUGHT, SHARE_BASE12)
 	}
 
 	/** 绘制出处（左对齐，与预览一致） */

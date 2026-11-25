@@ -4,21 +4,21 @@
 			<view class="settings-grip"></view>
 		</view>
 		<view class="drawer-header">
-			<view class="drawer-tab-gap" :class="drawerTab === 'catalog' ? 'drawer-tab-active' : ''" @click="switchDrawerTab('catalog')">
-				<text :class="drawerTab === 'catalog' ? 'drawer-tab-title' : 'drawer-tab-plain'">{{ t('readercomp.tabCatalog') }}</text>
-				<text v-if="drawerTab === 'catalog'" class="drawer-tab-sort" @click="onSortTap">{{ orderDesc ? '↓' : '↑' }}</text>
+			<view class="drawer-tab-gap" :class="drawerTab == 'catalog' ? 'drawer-tab-active' : ''" @click="switchDrawerTab('catalog')">
+				<text :class="drawerTab == 'catalog' ? 'drawer-tab-title' : 'drawer-tab-plain'">{{ t('readercomp.tabCatalog') }}</text>
+				<text v-if="drawerTab == 'catalog'" class="drawer-tab-sort" @click="onSortTap">{{ orderDesc ? '↓' : '↑' }}</text>
 			</view>
-			<view class="drawer-tab-gap" :class="drawerTab === 'note' ? 'drawer-tab-active' : ''" @click="switchDrawerTab('note')">
-				<text :class="drawerTab === 'note' ? 'drawer-tab-title' : 'drawer-tab-plain'">{{ t('readercomp.tabNotes') }}</text>
+			<view class="drawer-tab-gap" :class="drawerTab == 'note' ? 'drawer-tab-active' : ''" @click="switchDrawerTab('note')">
+				<text :class="drawerTab == 'note' ? 'drawer-tab-title' : 'drawer-tab-plain'">{{ t('readercomp.tabNotes') }}</text>
 			</view>
-			<view :class="drawerTab === 'bookmark' ? 'drawer-tab-active' : ''" @click="switchDrawerTab('bookmark')">
-				<text :class="drawerTab === 'bookmark' ? 'drawer-tab-title' : 'drawer-tab-plain'">{{ t('readercomp.tabBookmark') }}</text>
+			<view :class="drawerTab == 'bookmark' ? 'drawer-tab-active' : ''" @click="switchDrawerTab('bookmark')">
+				<text :class="drawerTab == 'bookmark' ? 'drawer-tab-title' : 'drawer-tab-plain'">{{ t('readercomp.tabBookmark') }}</text>
 			</view>
 		</view>
 		<scroll-view class="drawer-list" direction="vertical" :show-scrollbar="false" :scroll-top="catalogScrollTop" @scroll="onDrawerScroll">
 			<!-- 目录页（当前阅读章节蓝色高亮由 activeChapterId 在模板内比较驱动；虚拟列表：只挂载滚动窗口内的固定行高行，
 			     长篇 1900+ 章不再整表创建节点；顶部/底部占位行撑住总高度，滚动位置按行高换算即为当前章所在行） -->
-			<view v-if="open && drawerTab === 'catalog'">
+			<view v-if="open && drawerTab == 'catalog'">
 				<view :style="'height:' + catalogTopPad + 'px'"></view>
 				<view
 					v-for="ch in catalogWindow"
@@ -32,7 +32,7 @@
 				<view :style="'height:' + catalogBottomPad + 'px'"></view>
 			</view>
 			<!-- 想法/划线页（懒渲染同目录页）：划线记录卡片（宿主 notes 随划线与取消划线实时同步） -->
-			<view v-else-if="open && drawerTab === 'note'">
+			<view v-else-if="open && drawerTab == 'note'">
 				<view v-if="notes.length == 0" class="bookmark-empty">
 					<text class="bookmark-empty-text" :style="'color:' + theme.mutedColor">{{ t('readercomp.noUnderlines') }}</text>
 				</view>

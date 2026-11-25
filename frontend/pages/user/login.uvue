@@ -2,7 +2,7 @@
 	<PageShell title="" desc="" :center="true">
 				<!-- 微信一键登录卡片（仅微信小程序端展示） -->
 				<!-- #ifdef MP-WEIXIN -->
-				<view v-if="loginMode === 'wechat'" class="login-page__card">
+				<view v-if="loginMode == 'wechat'" class="login-page__card">
 					<text class="login-page__title">{{ t('login.title') }}</text>
 					<view class="login-page__wechat-btn" @click="handleWechatLogin">
 						<image class="login-page__wechat-icon" src="/static/icons/wechat-login.png" mode="aspectFit" />
@@ -20,7 +20,7 @@
 
 				<!-- App 端指纹一键登录卡片（仅 App 端：设备支持指纹 + 本地存在凭证 + 已开启开关时展示） -->
 				<!-- #ifdef APP -->
-				<view v-if="loginMode === 'fingerprint' && biometricVisible" class="login-page__card">
+				<view v-if="loginMode == 'fingerprint' && biometricVisible" class="login-page__card">
 					<text class="login-page__title">{{ t('login.title') }}</text>
 					<view class="login-page__wechat-btn" @click="handleFingerprintLogin">
 						<image class="login-page__wechat-icon" src="/static/icons/dl_fingerprint.png" mode="aspectFit" />
@@ -37,7 +37,7 @@
 				<!-- #endif -->
 
 				<!-- 主登录卡片（账号密码登录；微信端切换或注册页跳转时展示） -->
-				<view v-if="loginMode === 'normal'" class="login-page__card">
+				<view v-if="loginMode == 'normal'" class="login-page__card">
 					<text class="login-page__title">{{ t('login.welcome') }}</text>
 
 					<view class="login-page__form">
@@ -74,7 +74,7 @@
 				</view>
 
 				<!-- 底部注册链接 -->
-					<view v-if="loginMode === 'normal'" class="login-page__footer">
+					<view v-if="loginMode == 'normal'" class="login-page__footer">
 						<text class="login-page__footer-text">{{ t('login.noAccount') }}</text>
 						<text class="login-page__footer-link" @click="goRegister">{{ t('login.goRegister') }}</text>
 					</view>

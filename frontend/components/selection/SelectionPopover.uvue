@@ -1048,17 +1048,17 @@
 	function onAction(e : any, action : string) : void {
 		const pe = e as UniPointerEvent
 		pe.stopPropagation()
-		if (action === 'copy') {
+		if (action == 'copy') {
 			doCopy()
-		} else if (action === 'idea') {
+		} else if (action == 'idea') {
 			// 打开想法编辑器（子组件内聚：输入/保存/同步划线），编辑期间保留选区
 			thoughtPanelRef.value?.$callMethod('openEditor', props.text)
-		} else if (action === 'underline') {
+		} else if (action == 'underline') {
 			doUnderline()
-		} else if (action === 'query') {
+		} else if (action == 'query') {
 			emit('toast', t('sel.queryTodo'))
 			delayDismiss()
-		} else if (action === 'share') {
+		} else if (action == 'share') {
 			shareCardRef.value?.$callMethod('open')
 		}
 	}

@@ -2111,7 +2111,7 @@
 		return line
 	}
 	/** 单条装饰区间的逐行线条带：区间∩切片按行拆分，行内 x 取 charX 字符边界，y 置行底
-	 *  （band 占 [行底-4, 行底-2]，与首页诗 band 的 bottom 2px 口径一致）。
+	 *  （1px 细线：band 占 [行底-3, 行底-2]，与首页诗 band 的 bottom 2px + height 1px 口径一致）。
 	 *  关键：charX 按行重启（续行首字 x=0），带若结束于行末，cx[行末+1] 取到的是下一行首字的
 	 *  x=0，xEnd≤xStart 会让该行带被整条丢弃（表现为「只有每段最后一行有线」）——
 	 *  行末字符的右界必须改用 lineRights[行]（StaticLayout 真实行右缘） */
@@ -2149,14 +2149,14 @@
 			if (xEnd <= xStart) {
 				continue
 			}
-			const top = r * m.lineH + m.lineH - 4
+			const top = r * m.lineH + m.lineH - 3
 			bands.push({
-				style: 'left:' + xStart + 'px;top:' + top + 'px;width:' + (xEnd - xStart) + 'px;height:2px',
+				style: 'left:' + xStart + 'px;top:' + top + 'px;width:' + (xEnd - xStart) + 'px;height:1px',
 				thought: thought
 			} as ParaBand)
 		}
 	}
-	/** 段落装饰线条带：想法=正蓝 2px、划线=弱灰 2px，置于所在行底部（与首页诗 band 同视觉）。
+	/** 段落装饰线条带：想法=正蓝 1px、划线=弱灰 1px，置于所在行底部（与首页诗 band 同视觉）。
 	 *  App 原生端 text-decoration-color 不支持（想法与划线的线色无法区分），改由 charX 逐字几何
 	 *  逐行计算带状；非 App 端返回空数组（线条由 .para-underlined/.para-thought 着色） */
 	function paraBands(item : PageItem, cid : number) : ParaBand[] {
@@ -4200,7 +4200,7 @@
 	/* 段落想法/划线的行底线条带（App 端：charX 逐行计算，与首页诗 band 同视觉——想法=正蓝、划线=弱灰） */
 	.para-note-band {
 		position: absolute;
-		height: 2px;
+		height: 1px;
 		background-color: $bai-mute;
 	}
 

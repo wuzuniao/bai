@@ -27,7 +27,7 @@
 								v-for="item in avatarOptions"
 								:key="item.key"
 								class="profile-page__avatar-option"
-								:class="selectedAvatar === item.key ? 'profile-page__avatar-option--selected' : ''"
+								:class="selectedAvatar == item.key ? 'profile-page__avatar-option--selected' : ''"
 								@click="onSelectAvatar(item.key)"
 							>
 								<image class="profile-page__avatar-image" :src="item.src" mode="aspectFit" />

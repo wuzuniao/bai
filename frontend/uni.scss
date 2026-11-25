@@ -19,8 +19,8 @@ $bai-pale: #e9e9e6;            // 浅灰（柔和描边/次级胶囊底）
 $bai-canvas: #ffffff;          // 画布：卡片纯白
 $bai-canvas-soft: #f4f4f2;     // 柔和画布：页面雾灰白
 $bai-surface-form: #fafaf8;    // 表单面板：卡片与页面底之间的暖灰白（对齐 yao 表单面板角色）
-$bai-positive: #1e40af;        // 正向深蓝
-$bai-positive-deep: #1e3a8a;   // 正向深（按下/正向徽章底）
+$bai-positive: #0066ff;        // 正向蓝（成功/确认）
+$bai-positive-deep: #0052cc;   // 正向深（按下/正向徽章底）
 $bai-warning: #ffd11a;         // 警示黄
 $bai-warning-deep: #b86700;    // 警示深（按下/警示徽章/铜币文字）
 $bai-warning-content: #4a3b1c; // 警示表层文字
@@ -31,7 +31,7 @@ $bai-negative-bg: #320707;     // 负向提示框底
 $bai-accent-orange: #ffc091;   // 强调橙（插画/定价，第三层级）
 
 /* 语义色浅底（DESIGN_bai.md 派生 tint，用于选中/今日等浅色底） */
-$bai-positive-tint: #eef3fe;
+$bai-positive-tint: #eef4ff;
 $bai-warning-tint: #fff9db;
 
 /* 阅读纸张色（阅读场景专用，与 utils/theme.uts READER_THEME_PAPER 保持一致） */
@@ -50,7 +50,7 @@ $bai-rounded-pill: 9999px; // 状态胶囊/圆形
 
 /* ─── 字体族（DESIGN_bai.md typography；小程序端降级系统字体） ─── */
 $bai-font-ui: 'Source Han Sans SC', 'Noto Sans SC', sans-serif; // 界面思源黑体
-$bai-font-serif: 'Songti SC', 'Noto Serif SC', serif;           // 诗句正文宋体（仅诗句）
+$bai-font-serif: 'Source Han Serif SC', 'Noto Serif SC', '思源宋体', 'Songti SC', 'STSong', 'SimSun', serif; // 宋体栈：思源宋体优先，回落标准宋体
 $bai-font-pinyin: 'Source Han Sans SC', 'Noto Sans SC', 'Noto Sans', sans-serif; // 诗词拼音注音（黑体拉丁/音标字形完整，防回退错位）
 
 /* ─── 阴影（层级规范：静态卡片无阴影靠表层对比；以下仅浮层/悬浮件提升阴影） ─── */

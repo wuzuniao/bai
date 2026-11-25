@@ -977,11 +977,12 @@
 	}
 
 	/* 行内装饰条带：划线/想法的连续下划线（贴汉字行盒底，想法条带后渲染覆盖划线；几何由 bandStyle 计算。
-	 *  高度用 2px 固定值：原 3rpx≈1.9px 处于 H5 亚像素临界，不同行渲染粗细不一） */
+	 *  高度用 1px 固定值（细线口径）：不用 rpx——3rpx≈1.9px 处于 H5 亚像素临界，行间粗细不一；
+	 *  bottom 保持 2px，线条底缘定位不随线宽变化） */
 	.poem-line-band {
 		position: absolute;
 		bottom: 2px;
-		height: 2px;
+		height: 1px;
 	}
 
 	.poem-line-band-underline {

@@ -336,9 +336,18 @@
 		justify-content: center;
 	}
 
+	/* 「听」字用宋体栈（思源宋体优先、回落标准宋体）：App 端 font-family 不支持逗号回退栈、
+	   只接受系统已有的单个字体名（官方文档），故单写 serif（系统衬线，Android=Noto Serif CJK，
+	   即思源宋体字形）；其余端走令牌 $bai-font-serif 的完整回退链 */
 	.listen-text {
 		font-size: 54rpx;
 		font-weight: 900;
+		/* #ifdef APP-ANDROID || APP-IOS || APP-HARMONY */
+		font-family: serif;
+		/* #endif */
+		/* #ifndef APP-ANDROID || APP-IOS || APP-HARMONY */
+		font-family: $bai-font-serif;
+		/* #endif */
 	}
 
 	/* 底部三项导航（Stitch: 三等分，图标 20px + 文字 11px） */

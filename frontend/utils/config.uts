@@ -17,17 +17,17 @@
 // auth 统一认证服务基础地址（登录/注册/资料等用户接口直连此域名，本项目后端不转发）。
 // 发行（production）走生产 HTTPS 域名；开发（运行）按平台连本地认证服务（11000）。
 // #ifdef APP-ANDROID
-export const AUTH_BASE_URL: string = process.env.NODE_ENV === 'production'
+export const AUTH_BASE_URL: string = process.env.NODE_ENV == 'production'
 	? 'https://auth.wuzuniao.com'
 	: 'http://172.16.1.2:11000'
 // #endif
 // #ifdef APP-HARMONY
-export const AUTH_BASE_URL: string = process.env.NODE_ENV === 'production'
+export const AUTH_BASE_URL: string = process.env.NODE_ENV == 'production'
 	? 'https://auth.wuzuniao.com'
 	: 'http://10.0.2.2:11000'
 // #endif
 // #ifndef APP-ANDROID || APP-HARMONY
-export const AUTH_BASE_URL: string = process.env.NODE_ENV === 'production'
+export const AUTH_BASE_URL: string = process.env.NODE_ENV == 'production'
 	? 'https://auth.wuzuniao.com'
 	: 'http://localhost:11000'
 // #endif
@@ -38,17 +38,17 @@ export const AUTH_CLIENT_ID: string = 'bai'
 // 本项目业务后端基础地址（书架/阅读元数据/偏好直连此域名，需携带登录令牌）。
 // 发行（production）走生产 HTTPS 域名；开发（运行）按平台连本地后端（11001）。
 // #ifdef APP-ANDROID
-export const API_BASE_URL: string = process.env.NODE_ENV === 'production'
+export const API_BASE_URL: string = process.env.NODE_ENV == 'production'
 	? 'https://bai.wuzuniao.com'
 	: 'http://172.16.1.2:11001'
 // #endif
 // #ifdef APP-HARMONY
-export const API_BASE_URL: string = process.env.NODE_ENV === 'production'
+export const API_BASE_URL: string = process.env.NODE_ENV == 'production'
 	? 'https://bai.wuzuniao.com'
 	: 'http://10.0.2.2:11001'
 // #endif
 // #ifndef APP-ANDROID || APP-HARMONY
-export const API_BASE_URL: string = process.env.NODE_ENV === 'production'
+export const API_BASE_URL: string = process.env.NODE_ENV == 'production'
 	? 'https://bai.wuzuniao.com'
 	: 'http://localhost:11001'
 // #endif
