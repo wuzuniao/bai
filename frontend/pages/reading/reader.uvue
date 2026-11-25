@@ -118,20 +118,22 @@
 						</view>
 					</view>
 					<!-- #ifdef APP-ANDROID -->
-					<!-- 覆盖模式遮罩（App 原生管线）：暗化被覆盖的当前页，alpha 由 flipengine 原生驱动（前翻/回翻同口径） -->
-					<view v-if="pageTurn === '覆盖' && flipDir != 0" id="flip-cover-mask" class="page-cover-mask" :style="'background-color:' + coverMaskBg"></view>
+					<!-- 覆盖模式遮罩（App 原生管线）：暗化被覆盖的当前页，alpha 由 flipengine 原生驱动（前翻/回翻同口径）。
+					     opacity:0 为挂载初值：遮罩随手势开始才挂载，原生 view 默认 alpha=1，
+					     而挂载同帧的 applyCoverMask 取不到视图，会在首帧整页闪一下暗色（松手后每次重新按住都复现） -->
+					<view v-if="pageTurn == '覆盖' && flipDir != 0" id="flip-cover-mask" class="page-cover-mask" :style="'background-color:' + coverMaskBg + ';opacity:0'"></view>
 					<!-- #endif -->
 					<!-- #ifndef APP-ANDROID -->
 					<!-- 覆盖模式回翻遮罩（仅回翻）：盖在当前页上，随上一页覆盖进度由浅入深；上一页保持高亮 -->
-					<view v-if="pageTurn === '覆盖' && flipDir == -1 && hasPrevPage" class="page-cover-mask" :class="flipSettling ? 'page-cover-mask-settle' : ''" :style="'background-color:' + coverMaskBg + ';opacity:' + coverCurrentMaskOpacity"></view>
+					<view v-if="pageTurn == '覆盖' && flipDir == -1 && hasPrevPage" class="page-cover-mask" :class="flipSettling ? 'page-cover-mask-settle' : ''" :style="'background-color:' + coverMaskBg + ';opacity:' + coverCurrentMaskOpacity"></view>
 					<!-- #endif -->
 				</view>
 				<!-- 上一页常驻层：非跟手时停在屏外预渲染，回翻跟手时作为目标层滑入（首次翻到新页无渲染空白） -->
 				<view v-if="hasPrevPage" id="flip-layer-prev" class="page-layer" :class="flipSettling ? 'page-layer-settle' : ''" :style="'background-color:' + readerBg + ';' + prevLayerStyle">
 					<!-- #ifdef APP-IOS || APP-HARMONY -->
 					<!-- 仿真卷曲（APP 端真实实现）：回翻时前缘为卷起纸筒弧面 + 落在下层的投影 -->
-					<view v-if="pageTurn === '仿真' && flipDir == -1 && flipOffset > 0" class="page-curl-roller page-curl-roller-right"></view>
-					<view v-if="pageTurn === '仿真' && flipDir == -1 && flipOffset > 0" class="page-curl-shadow page-curl-shadow-right"></view>
+					<view v-if="pageTurn == '仿真' && flipDir == -1 && flipOffset > 0" class="page-curl-roller page-curl-roller-right"></view>
+					<view v-if="pageTurn == '仿真' && flipDir == -1 && flipOffset > 0" class="page-curl-shadow page-curl-shadow-right"></view>
 					<!-- #endif -->
 					<view class="content-inner" :style="'padding-top:' + contentTopPx + 'px;padding-bottom:' + contentBottomPx + 'px'">
 						<view v-if="prevPageIndex === 0" class="chapter-header">
@@ -173,8 +175,8 @@
 				<view v-if="hasNextPage" id="flip-layer-next" class="page-layer" :class="flipSettling ? 'page-layer-settle' : ''" :style="'background-color:' + readerBg + ';' + nextLayerStyle">
 					<!-- #ifdef APP-IOS || APP-HARMONY -->
 					<!-- 仿真卷曲（APP 端真实实现）：前翻时前缘为卷起纸筒弧面 + 落在下层的投影 -->
-					<view v-if="pageTurn === '仿真' && flipDir == 1 && flipOffset > 0" class="page-curl-roller page-curl-roller-left"></view>
-					<view v-if="pageTurn === '仿真' && flipDir == 1 && flipOffset > 0" class="page-curl-shadow page-curl-shadow-left"></view>
+					<view v-if="pageTurn == '仿真' && flipDir == 1 && flipOffset > 0" class="page-curl-roller page-curl-roller-left"></view>
+					<view v-if="pageTurn == '仿真' && flipDir == 1 && flipOffset > 0" class="page-curl-shadow page-curl-shadow-left"></view>
 					<!-- #endif -->
 					<view class="content-inner" :style="'padding-top:' + contentTopPx + 'px;padding-bottom:' + contentBottomPx + 'px'">
 						<view v-if="nextPageIndex === 0" class="chapter-header">
@@ -213,7 +215,7 @@
 					</view>
 					<!-- #ifndef APP-ANDROID -->
 					<!-- 覆盖模式滑入遮罩（仅前翻）：盖在滑入的下一页上的均匀暗层，出现越多遮罩越浅，落定归零 -->
-					<view v-if="pageTurn === '覆盖' && flipDir == 1" class="page-cover-mask" :class="flipSettling ? 'page-cover-mask-settle' : ''" :style="'background-color:' + coverMaskBg + ';opacity:' + coverNextMaskOpacity"></view>
+					<view v-if="pageTurn == '覆盖' && flipDir == 1" class="page-cover-mask" :class="flipSettling ? 'page-cover-mask-settle' : ''" :style="'background-color:' + coverMaskBg + ';opacity:' + coverNextMaskOpacity"></view>
 					<!-- #endif -->
 				</view>
 				<!-- #ifdef APP-ANDROID -->
@@ -2444,6 +2446,11 @@
 	const currentPageItems = computed(() : PageItem[] => {
 		return pageItemsAt(pageIndex.value)
 	})
+	/**
+	 * 当前翻页模式。
+	 * 与字面量比较一律用 `==`：`===` 对 String 存在引用比较行为（实测），模式从存储/云端偏好恢复时
+	 * 与模板字面量 `===` 恒为假 —— 覆盖遮罩与仿真卷曲整组不渲染（见 utils/readerTypes 的设置真源）
+	 */
 	const pageTurn = ref(defaultPageTurn())
 	/** 当前页层样式（几何规则见 utils/flipstyle.uts，随翻页模式/方向/位移变化） */
 	const currentLayerStyle = computed(() : string => flipCurrentLayerStyle(pageTurn.value, flipDir.value, flipOffset.value, flipActive.value, flipSettling.value))

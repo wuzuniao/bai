@@ -67,11 +67,11 @@
 					v-for="(m, mi) in pageTurnModes"
 					:key="mi"
 					class="page-turn-btn page-turn-gap"
-					:class="pageTurn === m ? 'page-turn-active' : 'page-turn-idle'"
-					:style="pageTurn === m ? '' : 'background-color:' + theme.controlBg + ';border-color:' + theme.controlBorder"
+					:class="pageTurn == m ? 'page-turn-active' : 'page-turn-idle'"
+					:style="pageTurn == m ? '' : 'background-color:' + theme.controlBg + ';border-color:' + theme.controlBorder"
 					@click="selectPageTurn(m)"
 				>
-					<text class="page-turn-text" :class="pageTurn === m ? 'page-turn-text-active' : ''" :style="pageTurn === m ? '' : 'color:' + theme.controlText">{{ modeLabel(m) }}</text>
+					<text class="page-turn-text" :class="pageTurn == m ? 'page-turn-text-active' : ''" :style="pageTurn == m ? '' : 'color:' + theme.controlText">{{ modeLabel(m) }}</text>
 				</view>
 			</view>
 		</view>
@@ -124,7 +124,7 @@
 	const themeKey = ref('light')
 	/** 正文字号（12-36） */
 	const fontSize = ref(18)
-	/** 当前翻页模式 */
+	/** 当前翻页模式（模板选中态比较用 `==`：存储恢复的字符串用 `===` 与字面量判否，会四模式全不选中） */
 	const pageTurn = ref(defaultPageTurn())
 	/** 当前生效字体 key（预览期间可能领先于已保存值） */
 	const fontKey = ref('sourcehan')

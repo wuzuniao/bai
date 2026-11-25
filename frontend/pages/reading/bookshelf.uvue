@@ -61,13 +61,13 @@
 				<!-- 编辑工具行：卡片样式选择 + 批量删除 -->
 				<view v-if="editMode" class="edit-tools">
 					<view class="edit-styles">
-						<view class="style-btn" :class="shelfStyle === 'plain' ? 'style-btn-on' : ''" @click="setStyle('plain')">
+						<view class="style-btn" :class="shelfStyle == 'plain' ? 'style-btn-on' : ''" @click="setStyle('plain')">
 							<view class="style-dot style-dot-light"></view>
-							<text class="style-btn-text" :class="shelfStyle === 'plain' ? 'style-btn-text-on' : ''">{{ t('bookshelf.stylePlain') }}</text>
+							<text class="style-btn-text" :class="shelfStyle == 'plain' ? 'style-btn-text-on' : ''">{{ t('bookshelf.stylePlain') }}</text>
 						</view>
-						<view class="style-btn" :class="shelfStyle === 'photo' ? 'style-btn-on' : ''" @click="setStyle('photo')">
+						<view class="style-btn" :class="shelfStyle == 'photo' ? 'style-btn-on' : ''" @click="setStyle('photo')">
 							<view class="style-dot style-dot-dark"></view>
-							<text class="style-btn-text" :class="shelfStyle === 'photo' ? 'style-btn-text-on' : ''">{{ t('bookshelf.stylePhoto') }}</text>
+							<text class="style-btn-text" :class="shelfStyle == 'photo' ? 'style-btn-text-on' : ''">{{ t('bookshelf.stylePhoto') }}</text>
 						</view>
 					</view>
 					<view v-if="selectedKeys.length > 0" class="edit-delete" @click="deleteSelected">
@@ -93,7 +93,7 @@
 							<!-- 书籍封面（包装层承载右下角勾选点） -->
 							<view class="cover-wrap">
 								<!-- 白卡样式 -->
-								<view v-if="shelfStyle === 'plain'" class="cover-plain">
+								<view v-if="shelfStyle == 'plain'" class="cover-plain">
 									<text class="cover-plain-title">{{ book.title }}</text>
 									<text class="cover-plain-format">{{ book.format }}</text>
 								</view>
@@ -106,8 +106,8 @@
 									</view>
 								</view>
 								<!-- 状态角标（仅本地=「本地」/ 仅云端=「云端」/ 本地云端都有=无角标：水印式低对比小字；plain 右下与格式水印对位（编辑模式避让勾选点隐藏）、photo 左上避让右上水印） -->
-								<view v-if="badgeOf(book) !== '' && (shelfStyle !== 'plain' || !editMode)" class="cloud-badge" :class="shelfStyle === 'plain' ? 'cloud-badge-plain' : 'cloud-badge-photo'">
-									<text class="cloud-badge-text" :class="shelfStyle === 'plain' ? 'cloud-badge-text-plain' : 'cloud-badge-text-photo'">{{ badgeOf(book) === 'local' ? t('bookshelf.local') : t('bookshelf.cloud') }}</text>
+								<view v-if="badgeOf(book) != '' && (shelfStyle != 'plain' || !editMode)" class="cloud-badge" :class="shelfStyle == 'plain' ? 'cloud-badge-plain' : 'cloud-badge-photo'">
+									<text class="cloud-badge-text" :class="shelfStyle == 'plain' ? 'cloud-badge-text-plain' : 'cloud-badge-text-photo'">{{ badgeOf(book) == 'local' ? t('bookshelf.local') : t('bookshelf.cloud') }}</text>
 								</view>
 								<!-- 编辑勾选点（封面右下角） -->
 								<view
@@ -169,7 +169,7 @@
 				class="menu-item"
 				@click="onSelectSort(opt)"
 			>
-				<text class="menu-item-text" :class="currentSort === opt ? 'menu-item-text-active' : ''">{{ sortLabel(opt) }}</text>
+				<text class="menu-item-text" :class="currentSort == opt ? 'menu-item-text-active' : ''">{{ sortLabel(opt) }}</text>
 			</view>
 		</view>
 		<!-- 加号浮动菜单（Stitch: 导入书籍 / 云端同步（会员可见）/ 编辑书架，右对齐悬浮） -->
