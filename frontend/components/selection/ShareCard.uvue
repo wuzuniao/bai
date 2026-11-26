@@ -2,7 +2,9 @@
 	<view class="share-root">
 		<!-- 分享卡片预览（头像半出卡片顶部正中/产品名/引文分段排版与正文同参/想法预览限高滚动；导出为全量长图；分享按钮仅微信端） -->
 		<view v-if="shareOpen" class="share-mask" @click="closeShare">
-			<view class="share-pop">
+			<!-- 阻止冒泡：卡片/按钮上的点击不得穿透到遮罩触发 closeShare —— 否则点「微信分享」时
+			     会先清空待用封面（coverUrl/上行路径归空），onShareAppMessage 取不到图而回落默认封面 -->
+			<view class="share-pop" @click.stop>
 				<view class="share-card">
 					<text class="share-card-app">{{ t('sel.appName') }}</text>
 					<scroll-view direction="vertical" class="share-card-scroll" :style="'max-height:' + shareCardMaxH + 'px'">
@@ -31,7 +33,13 @@
 						<text class="share-action-text">{{ t('sel.saveImage') }}</text>
 					</view>
 					<!-- #ifdef MP-WEIXIN -->
-					<button class="share-action share-action-share" open-type="share">
+					<!-- 封面未就绪时禁用：确保点开转发时 imageUrl 已就绪（否则微信抓不到图 → 卡片无封面） -->
+					<button
+						class="share-action share-action-share"
+						:class="shareActionReady ? '' : 'share-action-pending'"
+						:disabled="!shareActionReady"
+						open-type="share"
+					>
 						<text class="share-action-text share-action-text-primary">{{ t('sel.share') }}</text>
 					</button>
 					<!-- #endif -->
@@ -61,10 +69,12 @@
 	 * 隐藏 canvas（.in 自身实例）按排版常量绘制全量长图（与预览 CSS 逐项换算）并
 	 * 存相册；微信端经 button open-type=share 转发（触发宿主页面 onShareAppMessage）。
 	 * 打开经 ref 调 open()（无选区快照时忽略），提示经 emit('toast') 上行；
-	 * 微信端打开预览时即预生成 5:4 转发封面并上传后端换取服务端 URL（微信真机
-	 * 不接受本地临时文件路径作转发封面），经 emit('shareImage') 上行供宿主页面
-	 * onShareAppMessage 作为转发封面（关闭预览时上行空串清除；上传失败回落本地
-	 * 路径——开发者工具可用、真机由静态兜底图收口）；
+	 * 微信端转发封面链路：打开预览即预生成 5:4 封面 → 上传后端换取 URL → downloadFile
+	 * 回取成本地文件后定格（本地文件无需微信在发送瞬间抓网络图，快速分享不丢封面；
+	 * 回取失败回落服务端 URL）。经 emit('shareImage') 上行供宿主 onShareAppMessage 使用，
+	 * 关闭预览时仅上行空串（本机封面保留，同一内容 10 分钟内再次打开直接复用）。
+	 * 预览内点击须阻断冒泡（见模板），否则点分享按钮会先关预览清空封面；封面未就绪时
+	 * 分享按钮禁用，避免分享出无封面卡片；
 	 * 宿主另经 ref coverImagePath() 直读当前封面路径（emit 事件链在真机
 	 * 不可靠，ref 链与 beginSelection 同机制、真机已验证）。
 	 */
@@ -86,6 +96,20 @@
 	let coverExportRetried = false
 	/** 最终分享用封面路径（服务端 URL 优先，上传失败回落本地临时路径；''=未定） */
 	const coverUrl = ref('')
+	/** 当前分享内容签名（封面生成目标；与 coverReadySign 相同即直接复用已生成封面，不再重绘+重传） */
+	let coverSign = ''
+	/** 已就绪封面对应的内容签名（coverUrl 非空时有效） */
+	let coverReadySign = ''
+	/** 封面就绪时刻（本地临时文件有生命周期，复用只在 10 分钟窗口内，超时重新生成） */
+	let coverReadyAt : number = 0
+	/** 封面复用有效期（ms） */
+	const COVER_REUSE_WINDOW_MS : number = 600000.0
+	/** 封面生成失败（放行分享按钮，避免一直不可点——此时分享用静态兜底封面） */
+	const coverFailed = ref(false)
+	/** 封面已就绪（未就绪禁用分享按钮：避免点太快时分享出无封面卡片） */
+	const coverReady = computed(() : boolean => coverUrl.value.length > 0)
+	/** 分享按钮可点（封面就绪，或生成失败放行） */
+	const shareActionReady = computed(() : boolean => coverReady.value || coverFailed.value)
 	/** 打开分享时的内容快照（渲染与绘制共用非空数据） */
 	const shareData = ref<ShareQuoteCtx>({
 		farBefore: '',
@@ -163,12 +187,13 @@
 		return paras
 	})
 
-	/** 打开分享预览（宿主气泡分享按钮调用；无选区快照时忽略） */
-	function open() : void {
-		const c = props.shareCtx
-		if (c == null) {
-			return
-		}
+	/** 分享内容签名（封面复用判据：同书名/章/上下文/引文/想法即视为同一张封面） */
+	function shareContentSign(c : ShareQuoteCtx) : string {
+		return c.bookTitle + '|' + c.source + '|' + c.farBefore + c.nearBefore + '|' + c.quote + '|' + c.nearAfter + c.farAfter + '|' + c.thoughtText
+	}
+
+	/** 应用分享内容快照（预览渲染与封面绘制共用） */
+	function applyShareCtx(c : ShareQuoteCtx) : void {
 		shareData.value = {
 			farBefore: c.farBefore,
 			nearBefore: c.nearBefore,
@@ -179,29 +204,49 @@
 			source: c.source,
 			bookTitle: c.bookTitle
 		} as ShareQuoteCtx
+	}
+
+	/** 打开分享预览（宿主气泡分享按钮调用；无选区快照时忽略） */
+	function open() : void {
+		const c = props.shareCtx
+		if (c == null) {
+			return
+		}
+		applyShareCtx(c)
 		shareOpen.value = true
 		// #ifdef MP-WEIXIN
-		// 打开预览即后台预生成分享封面图（用户点击分享按钮时已就绪；先生清空旧图防上一次选区残留）
+		const sign = shareContentSign(c)
+		// 同一内容已有封面（上次打开生成过且仍在复用窗口内）：直接复用，省掉重绘+上传+回取的等待——
+		// 「多次分享点太快丢封面」的主因就是每次打开都清空重生成
+		const reusable = coverUrl.value.length > 0 && sign.length > 0 && coverReadySign == sign &&
+			Date.now() - coverReadyAt < COVER_REUSE_WINDOW_MS
+		if (reusable) {
+			coverSign = sign
+			emit('shareImage', coverUrl.value)
+			return
+		}
 		emit('shareImage', '')
 		coverExportRetried = false
+		coverSign = sign
+		coverFailed.value = false
 		coverUrl.value = ''
+		// 生成失败由 settle/失败回调置 coverFailed 放行分享按钮，不会永久禁用
 		preGenerateShareImage()
 		// #endif
 	}
 
 	function closeShare() : void {
 		shareOpen.value = false
-		// #ifdef MP-WEIXIN
-		coverUrl.value = ''
-		// #endif
-		// 关闭预览即清除待用封面（避免后续右上角菜单转发误用本次引文图）
+		// 仅上行空串（避免后续右上角菜单转发误用本次引文图）；本机封面缓存保留，
+		// 同一内容再次打开可即时复用，不再经历生成/上传/回取的空窗期
 		emit('shareImage', '')
 	}
 
 	/** 当前分享用封面路径（''=未定；服务端 URL 优先。供宿主 ref 直读——emit 事件链
-	 *  在真机不可靠，ref 链与 beginSelection 同机制、真机已验证） */
+	 *  在真机不可靠，ref 链与 beginSelection 同机制、真机已验证）。
+	 *  预览已关闭时返回空：封面缓存保留供下次复用，但不得被右上角菜单转发误用 */
 	function coverImagePath() : string {
-		return coverUrl.value
+		return shareOpen.value ? coverUrl.value : ''
 	}
 
 	/** 绘制排版常量（与预览 CSS 逐项换算：rpx 值减半为 px） */
@@ -523,7 +568,7 @@
 			success: (res2) => {
 				if (forShare) {
 					console.log('转发封面已生成', res2.tempFilePath)
-					uploadCover(res2.tempFilePath)
+					uploadCover(res2.tempFilePath, coverSign)
 					return
 				}
 				uni.saveImageToPhotosAlbum({
@@ -549,6 +594,8 @@
 						return
 					}
 					console.warn('转发封面导出重试仍失败', err != null ? err.errMsg : '')
+					// 置失败态放行分享按钮（否则未就绪会一直禁用）；转发按静态兜底封面走
+					coverFailed.value = true
 					emit('toast', t('sel.coverFailExport'))
 					emit('shareImage', '')
 					return
@@ -572,7 +619,30 @@
 	const COVER_QUOTE_MAX_BOTTOM = 336.0
 	const COVER_LINE_H = 26.0
 
-	/** 绘制转发封面主体（背景/顶带/产品名/引文主体折行截断/出处；头像由 drawCoverLogo 补画） */
+	/** 转发封面文字运行段：与预览同构（远/近语境渐出 + 大引号 + 选中文本加粗），字号按封面栅格放大 */
+	function buildCoverRuns() : ShareRun[] {
+		const runs : ShareRun[] = [] as ShareRun[]
+		const d = shareData.value
+		if (d.farBefore.length > 0) {
+			runs.push({ text: d.farBefore, fs: 14.0, bold: false, color: SHARE_FAR } as ShareRun)
+		}
+		if (d.nearBefore.length > 0) {
+			runs.push({ text: d.nearBefore, fs: 14.0, bold: false, color: SHARE_NEAR } as ShareRun)
+		}
+		runs.push({ text: '“', fs: 18.0, bold: true, color: SHARE_QUOTE } as ShareRun)
+		runs.push({ text: d.quote, fs: 16.0, bold: true, color: SHARE_INK } as ShareRun)
+		runs.push({ text: '”', fs: 18.0, bold: true, color: SHARE_QUOTE } as ShareRun)
+		if (d.nearAfter.length > 0) {
+			runs.push({ text: d.nearAfter, fs: 14.0, bold: false, color: SHARE_NEAR } as ShareRun)
+		}
+		if (d.farAfter.length > 0) {
+			runs.push({ text: d.farAfter, fs: 14.0, bold: false, color: SHARE_FAR } as ShareRun)
+		}
+		return runs
+	}
+
+	/** 绘制转发封面主体（背景/顶带/产品名/上下文+引文折行截断/出处；头像由 drawCoverLogo 补画）。
+	 *  文字块与预览卡同构：引文前后带渐出上下文（分享封面缺上下文会被误读为断章） */
 	function drawCoverComposition(ctx : CanvasRenderingContext2D) : void {
 		ctx.fillStyle = SHARE_CANVAS_BG
 		ctx.fillRect(0, 0, COVER_W, COVER_H)
@@ -583,18 +653,17 @@
 		ctx.textAlign = 'center'
 		ctx.fillText(t('sel.appName'), COVER_W / 2, COVER_NAME_Y)
 		ctx.textAlign = 'left'
-		// 引文主体（仅选中文本含引号；折行后按可用高度截断，截断行以省略号收尾）
-		const lines = wrapCanvasLines(ctx, '“' + shareData.value.quote + '”', COVER_W - COVER_PAD * 2, 'bold 16px sans-serif')
+		// 文字块（上下文渐出 + 引号 + 选中文本；折行后按可用高度截断，截断行以省略号收尾）
+		const lines = layoutShareRuns(ctx, buildCoverRuns(), COVER_W - COVER_PAD * 2)
 		const maxLines = Math.floor((COVER_QUOTE_MAX_BOTTOM - COVER_QUOTE_TOP) / COVER_LINE_H)
 		const truncated = lines.length > maxLines
 		const shown = truncated ? lines.slice(0, maxLines) : lines
-		ctx.fillStyle = SHARE_INK
-		ctx.font = 'bold 16px sans-serif'
-		let top = COVER_QUOTE_TOP
-		for (let i = 0; i < shown.length; i++) {
-			ctx.fillText(shown[i] + (truncated && i == shown.length - 1 ? '…' : ''), COVER_PAD, top)
-			top += COVER_LINE_H
+		if (truncated && shown.length > 0) {
+			// 截断行追加省略号（同一行内最后一个运行段之后）
+			const lastRuns = shown[shown.length - 1].runs
+			lastRuns.push({ text: '…', fs: 14.0, bold: false, color: SHARE_NEAR } as ShareRun)
 		}
+		drawRenderLines(ctx, shown, COVER_PAD, COVER_QUOTE_TOP, COVER_LINE_H)
 		ctx.fillStyle = SHARE_NEAR
 		ctx.font = '11px sans-serif'
 		ctx.fillText('《' + shareData.value.bookTitle + '》 · ' + shareData.value.source, COVER_PAD, COVER_H - 24.0)
@@ -755,21 +824,24 @@
 		// #endif
 	}
 
-	/** 封面最终路径定格（服务端 URL 优先，上传失败回落本地）：就绪上行事件供宿主消费 */
-	function settleCover(p : string) : void {
+	/** 封面最终路径定格：记下内容签名与就绪时刻（供同一内容再次打开时复用）并上行事件 */
+	function settleCover(p : string, sign : string) : void {
 		coverUrl.value = p
+		coverReadySign = sign
+		coverReadyAt = Date.now()
+		coverFailed.value = false
 		emit('shareImage', p)
 	}
 
 	/**
 	 * 上传封面到后端换取服务端 URL（微信真机不接受本地临时文件路径作转发封面，
 	 * 网络图片路径两端通用）；成功→URL 定格，未登录/失败→回落本地路径定格
-	 * （开发者工具可用本地路径，真机回落静态兜底图）
+	 * （开发者工具可用本地路径，真机回落静态兜底图）；sign 为本次封面内容签名
 	 */
-	function uploadCover(localPath : string) : void {
+	function uploadCover(localPath : string, sign : string) : void {
 		const token = getAccessToken()
 		if (token.length == 0) {
-			settleCover(localPath)
+			settleCover(localPath, sign)
 			return
 		}
 		const header = {} as UTSJSONObject
@@ -790,7 +862,7 @@
 							const dataObj = data == null ? null : data as UTSJSONObject
 							const p = dataObj == null ? '' : (dataObj.getString('path') ?? '')
 							if (p.length > 0) {
-								settleCover(API_BASE_URL + p)
+								settleServerCover(API_BASE_URL + p, sign)
 								return
 							}
 						}
@@ -800,11 +872,35 @@
 				} else {
 					console.warn('转发封面上传失败', res.statusCode, res.data)
 				}
-				settleCover(localPath)
+				settleCover(localPath, sign)
 			},
 			fail: (err) => {
 				console.warn('转发封面上传请求失败', err.errMsg)
-				settleCover(localPath)
+				settleCover(localPath, sign)
+			}
+		})
+	}
+
+	/**
+	 * 服务端封面回取为本地临时文件后再定格：网络 URL 交给微信时由微信在「发送转发」瞬间抓取，
+	 * 用户挑好友点得快就抓不到 → 卡片封面空白（快速分享丢封面的典型现象）。先落地本地则读文件无需网络。
+	 * 回取失败（未配 downloadFile 合法域名/弱网）回落服务端 URL，行为与改造前一致。
+	 */
+	function settleServerCover(url : string, sign : string) : void {
+		uni.downloadFile({
+			url: url,
+			timeout: 5000,
+			success: (res) => {
+				if (res.statusCode >= 200 && res.statusCode < 300 && res.tempFilePath.length > 0) {
+					settleCover(res.tempFilePath, sign)
+					return
+				}
+				console.warn('转发封面回取失败，沿用服务端 URL', res.statusCode, url)
+				settleCover(url, sign)
+			},
+			fail: (err) => {
+				console.warn('转发封面回取失败，沿用服务端 URL（检查小程序后台 downloadFile 合法域名）', err.errMsg, url)
+				settleCover(url, sign)
 			}
 		})
 	}
@@ -814,12 +910,14 @@
 		const proxy = self == null ? null : self.proxy
 		if (proxy == null) {
 			console.warn('转发封面预生成失败：组件实例不可用')
+			coverFailed.value = true
 			emit('toast', t('sel.coverFailCanvas'))
 			return
 		}
 		uni.createSelectorQuery().in(proxy).select('#share-canvas').fields({ node: true, size: true }, (res : any) : void => {
 			if (res == null || res.node == null) {
 				console.warn('转发封面预生成失败：画布节点查询为空', JSON.stringify(res))
+				coverFailed.value = true
 				emit('toast', t('sel.coverFailCanvas'))
 				return
 			}
@@ -992,6 +1090,11 @@
 
 	.share-action-text-primary {
 		color: $bai-on-primary;
+	}
+
+	/* 封面生成中（未就绪）的分享按钮：禁用 + 弱化，提示稍候而非点了没反应 */
+	.share-action-pending {
+		opacity: 0.45;
 	}
 
 	/* 分享卡片绘制画布（移出屏幕外，仅用于导出图片） */

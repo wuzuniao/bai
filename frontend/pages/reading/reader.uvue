@@ -1618,7 +1618,9 @@
 	}
 	onShareAppMessage(() : CustomShareContent => {
 		// 气泡分享卡片预生成的 5:4 引文封面优先作为封面（组装逻辑收口 utils/shareCover.uts）
-		return buildShareAppContent('《' + bookTitle.value + '》' + chapterAt(currentChapterId.value).title, '/pages/reading/reader', () : string => shareCoverPath())
+		// 落地页固定首页：书籍正文只存本机沙盒，分享出的阅读页路径在他人设备上无书可读（空白页），
+		// 书名/章节只留在转发标题里
+		return buildShareAppContent('《' + bookTitle.value + '》' + chapterAt(currentChapterId.value).title, '/pages/index/index', () : string => shareCoverPath())
 	})
 	onShareTimeline(() => {
 		return { title: t('reader.shareTitle'), imageUrl: '/static/share-cover.png' }
@@ -2800,6 +2802,15 @@
 		}, 150)
 	}
 	const drawerOpen = ref(false)
+	/** 异常退出阅读页：有上一页则返回，无页面栈（分享落地/朋友圈分享/浏览器直达）则回首页——不停在空白阅读页 */
+	function backOrHome() : void {
+		const pages = getCurrentPages()
+		if (pages.length > 1) {
+			uni.navigateBack({ delta: 1 })
+		} else {
+			uni.reLaunch({ url: '/pages/index/index' })
+		}
+	}
 	/** 系统侧滑/返回键（pages.json swipeBackAsBackPress 把侧滑手势转为本事件）：任一浮层展开时先收浮层回正文，不退出页面 */
 	onBackPress((options : OnBackPressOptions) : boolean => {
 		// #ifdef WEB
@@ -2834,7 +2845,7 @@
 		window.history.back()
 		return
 		// #endif
-		uni.navigateBack()
+		backOrHome()
 	}
 	/** 设置面板开关（Stitch: 展开时隐藏顶栏与听书球） */
 	function toggleSettings() : void {
@@ -3590,20 +3601,20 @@
 			}, 50)
 		})
 	}
-	/** 读取本地书籍文件并解析注入（云端笔记先行落缓存）；失败（书被删/文件被清理）提示后返回书架 */
+	/** 读取本地书籍文件并解析注入（云端笔记先行落缓存）；失败（书被删/文件被清理/他人分享的本机无此书）提示后离开 */
 	async function openLocalBook(bid : number) : Promise<void> {
 		const book : LocalBook | null = findBook(bid)
 		if (book == null) {
 			showToast(t('reader.bookMissingOrDeleted'))
 			setTimeout(() => {
-				uni.navigateBack()
+				backOrHome()
 			}, 1200)
 			return
 		}
 		if (book.path.length == 0) {
 			showToast(t('reader.fileMissing'))
 			setTimeout(() => {
-				uni.navigateBack()
+				backOrHome()
 			}, 1200)
 			return
 		}
@@ -3703,9 +3714,10 @@
 	onLoad((options : OnLoadOptions) : void => {
 		const bid = options['bookId']
 		const bidNum = bid != null ? parseInt(bid) : 0
-		// 0/非法为异常入参；负数 id 为离线导入待同步书籍，正常打开
+		// 0/非法为异常入参（分享落地/朋友圈分享等）；负数 id 为离线导入待同步书籍，正常打开
 		if (bidNum == 0 || isNaN(bidNum)) {
 			showToast(t('reader.bookMissing'))
+			backOrHome()
 			return
 		}
 		openLocalBook(bidNum)

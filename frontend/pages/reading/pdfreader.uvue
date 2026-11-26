@@ -102,7 +102,8 @@
 	// 微信小程序分享：转发好友与朋友圈（封面统一 /static/share-cover.png，复制自 yao 项目）
 	// #ifdef MP-WEIXIN
 	onShareAppMessage(() => {
-		return { title: t('pdfreader.title'), imageUrl: '/static/share-cover.png' }
+		// 落地页固定首页：PDF 页需书籍参数，他人设备无此书（正文只存本机），默认落地即空白页
+		return { title: t('pdfreader.title'), path: '/pages/index/index', imageUrl: '/static/share-cover.png' }
 	})
 	onShareTimeline(() => {
 		return { title: t('pdfreader.title'), imageUrl: '/static/share-cover.png' }
@@ -184,13 +185,22 @@
 		pageItems.value = items
 	}
 
+	/** 异常退出 PDF 阅读页：有上一页则返回，无页面栈（分享落地/浏览器直达）则回首页——不停在空白阅读页 */
+	function backOrHome() : void {
+		const pages = getCurrentPages()
+		if (pages.length > 1) {
+			uni.navigateBack({ delta: 1 })
+		} else {
+			uni.reLaunch({ url: '/pages/index/index' })
+		}
+	}
 	/** 打开 PDF 书：校验 → 恢复布局参数 → 补渲染缺失页 → 构建页列表 → 定位恢复进度 */
 	async function openPdfBook(bid : number) : Promise<void> {
 		const book = findBook(bid)
 		if (book == null || book.format != 'PDF') {
 			uni.showToast({ title: t('reader.bookMissingOrDeleted'), icon: 'none' })
 			setTimeout(() => {
-				uni.navigateBack()
+				backOrHome()
 			}, 1200)
 			return
 		}
@@ -256,11 +266,11 @@
 		}
 		const bid = options['bookId']
 		const bidNum = bid != null ? parseInt(bid) : 0
-		// 0/非法为异常入参；负数 id 为离线导入待同步书籍，正常打开
+		// 0/非法为异常入参（分享落地/朋友圈分享等）；负数 id 为离线导入待同步书籍，正常打开
 		if (bidNum == 0 || isNaN(bidNum)) {
 			uni.showToast({ title: t('reader.bookMissing'), icon: 'none' })
 			setTimeout(() => {
-				uni.navigateBack()
+				backOrHome()
 			}, 1200)
 			return
 		}
@@ -364,9 +374,9 @@
 	}
 	// #endif
 
-	/** 返回书架 */
+	/** 返回书架（无页面栈时回首页兜底） */
 	function goBack() : void {
-		uni.navigateBack()
+		backOrHome()
 	}
 </script>
 
