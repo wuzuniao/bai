@@ -653,6 +653,10 @@
 		} else {
 			maxRow = Math.max(0, Math.ceil(len / m.perLine) - 1)
 		}
+		// 精确数据（charX 逐字左缘 + lineEnds 真实行断点，段落坐标）：App 端取 StaticLayout 缓存，
+		// 小程序/H5 等端取离屏逐字探针实测（见 reader 的 measureParaCharGeom）
+		const cxN = pr.charX
+		const endsN = pr.lineEnds
 		// 行映射按端点边界取整：起点柄锚在行顶（触点所在行）、终点柄锚在行底（触点上一行），
 		// 触点恰在边界上时归入手柄当前所在行，拖动首帧不会跳到相邻行
 		let row : number
@@ -661,19 +665,21 @@
 		} else {
 			row = Math.floor((py - pr.top) / m.lineH)
 		}
-		row = Math.max(0, Math.min(row, maxRow))
+		// 行上限：有真实断行时以实测行数（切片口径）为准——真实每行容量受标点禁则/半角字符影响，
+		// 按 perLine 估算的行数可能少于真实行数，沿用估算上限会把底部若干行压到上一行
+		let rowMax = maxRow
+		if (endsN != null && endsN.length > 0) {
+			rowMax = Math.max(0, endsN.length - 1 - absLineOf(pr.from, endsN))
+		}
+		row = Math.max(0, Math.min(row, rowMax))
 
 		let effOrigin = pr.origin
 		let effCharIdx = 0
 		let snapX = 0
 		let lineTop = 0
 		let preciseDone = false
-		// #ifdef APP-ANDROID || APP-IOS || APP-HARMONY
-		// 精确路径：charX（逐字左缘，段落坐标含缩进）+ lineEnds（行断点）由宿主从 StaticLayout 缓存下发。
-		// 触点 px 相对段落文本原点，在触点所在行的可见字符区间内找所属字格——窄引号/标点的
-		// 真实推进宽在此生效，拖动预览与松手落定完全一致（无松手跳变）
-		const cxN = pr.charX
-		const endsN = pr.lineEnds
+		// 精确路径：触点 px 相对段落文本原点，在触点所在行的可见字符区间内找所属字格——
+		// 窄引号/标点的真实推进宽与真实换行在此生效，拖动预览与松手落定完全一致（无松手跳变、无累积偏差）
 		if (cxN != null && endsN != null) {
 			const paraLine = Math.max(0, Math.min(absLineOf(pr.from, endsN) + row, endsN.length - 1))
 			const cell = charCellAt(px - pr.left, cxN, endsN, pr.lineRights, paraLine, pr.from, pr.from + len - 1, isEnd)
@@ -684,7 +690,6 @@
 				preciseDone = true
 			}
 		}
-		// #endif
 		if (!preciseDone) {
 			// 均匀字格口径（首页诗/无逐字缓存的端）：首行触点先扣除缩进宽（两个全角空格）；
 			// 字距：App 原生端左对齐恒为自然字距，非 App 端首行/末行自然字距、中间满行两端对齐拉伸

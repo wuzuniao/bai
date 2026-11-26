@@ -140,12 +140,29 @@ export type ParaRect = {
 	/** 合并行后段所属段 origin（宽屏合并行=前段 origin+1；-1=无合并） */
 	secondOrigin : number
 	/** 段落逐字符左缘（px，段落坐标含缩进：charX[k]=第 k 字左界、charX[段长]=末字右界；
-	 *  App 端 StaticLayout 逐字缓存下发，首页诗/其余端为 null——null 时拖动退回均匀字格口径） */
+	 *  App 端 StaticLayout 逐字缓存下发、非 APP 端由离屏逐字探针实测下发（见 ParaGeom），
+	 *  首页诗等无实测数据的端点为 null——null 时拖动退回均匀字格口径） */
 	charX : number[] | null
 	/** 段落逐行末字符下标（段落坐标，与 charX 配合做触点→字符逆映射）；null=无精确数据 */
 	lineEnds : number[] | null
 	/** 段落逐行真实右缘（px，段落坐标；行末字符的右界必须取它——charX[行末+1] 是下一行首字 x=0） */
 	lineRights : number[] | null
+}
+
+/** 段落逐字几何（非 APP-ANDROID 端离屏逐字探针实测，字段口径与 App 端 StaticLayout 同构：
+ *  真实换行 + 逐字左缘，供划词长按定位与手柄拖动做精确行列换算；均匀字格口径在标点禁则/半角字符下每行偏 1 字、段尾累计偏 3~4 字） */
+export type ParaGeom = {
+	/** 逐字左缘（px，段落坐标含首行缩进：charX[k]=段内第 k 字左界、charX[段长]=末字右界） */
+	charX : number[]
+	/** 逐行末字符下标（段内坐标，-1 表示该行只含缩进空格） */
+	lineEnds : number[]
+	/** 逐行真实右缘（px，段落坐标；行末字符右界不能取 charX[行末+1]） */
+	lineRights : number[]
+}
+
+/** 逐字几何探针段落（非 APP-ANDROID 端屏外渲染项：单字符数组，逐字 text 的 v-for 源与实测矩形切分依据） */
+export type CharProbePara = {
+	chars : string[]
 }
 
 /** 段落想法/划线的行底线条带（App 端按 charX 逐行渲染；非 App 端线条由 text-decoration 着色，不产生带） */

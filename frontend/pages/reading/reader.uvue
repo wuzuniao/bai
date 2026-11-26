@@ -337,6 +337,16 @@
 			>
 				<text class="measure-text" :style="novelTextStyle">　　{{ probePrefixText(probe) }}</text>
 			</view>
+			<!-- #ifndef APP-ANDROID -->
+			<!-- 划词逐字几何探针（非 APP 端）：把「本次拖动可达的段落」（分页=当前页全部段落、滚动=被触段落邻域）
+			     按「两全角空格 + 逐字 text」与正文同宽同款式屏外渲染（每段独立块，断行与正文一致），
+			     一次查询取全部逐字左缘与真实换行（行数已由整段离屏实测标定，交叉校验防逐字渲染换行不等价）。
+			     均匀字格口径按 perLine 均分，标点禁则/半角字符使真实每行容量 ≠ perLine，段尾累计偏差可达 3~4 字。
+			     逐字节点不写内联样式（字号/字体由父级 novel-text 继承）：节点数可达数千，逐节点 style 会显著拖慢首次渲染 -->
+			<view v-for="(cp, cpi) in charProbeParas" :key="'cp' + cpi" class="char-probe-para">
+				<text class="novel-text" :style="novelTextStyle"><text class="char-probe">　　</text><text v-for="(ch, ci) in cp.chars" :key="ci" class="char-probe">{{ ch }}</text></text>
+			</view>
+			<!-- #endif -->
 		</view>
 	</view>
 </template>
@@ -354,7 +364,7 @@
 	// 分页排版缓存落盘（仅引擎初排端有该缓存）
 	import { layoutSignature, loadSavedLayout, saveLayout } from '@/utils/paginationcache.uts'
 	// #endif
-	import type { Chapter, Paragraph, Bookmark, Thought, UnderlineEntry, NoteRecord, ShareQuoteCtx, SelSpan, SpanSeg, TextMetrics, ParaRect, ParaBand, ReaderSettings } from '@/utils/readerTypesDefs.ts'
+	import type { Chapter, Paragraph, Bookmark, Thought, UnderlineEntry, NoteRecord, ShareQuoteCtx, SelSpan, SpanSeg, TextMetrics, ParaRect, ParaBand, ParaGeom, CharProbePara, ReaderSettings } from '@/utils/readerTypesDefs.ts'
 	import { fontOptionOf, loadStoredFontKey, setActiveBookId, loadUnderlines, loadThoughts, findUnderlineEntry, loadBookmarks, loadSettings, defaultPageTurn, fallbackPageTurn, buildNoteRecords, buildShareQuoteCtx, fetchNotesToCache, fetchBookmarksToCache, VIRTUAL_BOOK_ID, thoughtAt, spanOfThought, buildSpanSegs } from '@/utils/readerTypes.uts'
 	import type { PageSlice, ParaLineLayout } from '@/utils/paginationDefs.ts'
 	import { computePageBreaks, computePageBreaksMeasured, computePageBreaksExact, readerLineHeightPx, readerParagraphGapPx } from '@/utils/pagination.uts'
@@ -1021,6 +1031,24 @@
 	const calibWidth = computed(() : number => bodyW.value - bodySidePaddingPx())
 	/** APP 端 StaticLayout 初排缓存（该端分页/划词的唯一排版真源：真实行数+行边界+行右边界） */
 	const paraLayoutCache = ref<Map<number, ParaLineLayout>>(new Map())
+	/** 非 APP-ANDROID 端段落逐字几何缓存（离屏逐字探针实测，键=「章-id-段下标」；排版失效（字号/字体/宽变化）即清空）：
+	 *  划词长按定位与手柄拖动的真实行列换算真源——均匀字格口径以 perLine 均分，真实换行容量受标点禁则/半角字符影响，段尾累计偏差 3~4 字 */
+	const paraCharGeomCache = new Map<string, ParaGeom>()
+	/** 逐字探针渲染项（按段分组，空=未挂载；一批测完整页即卸） */
+	const charProbeParas = ref<CharProbePara[]>([])
+	/** 逐字探针代次（并发/重入判定：仅最新批次的查询结果生效，且只由它卸载探针） */
+	const charProbeSeq = ref(0)
+	/** 单段逐字节点上限：超长段落一次性挂载逐字节点代价过高，改用均匀字格口径（读数精度退让） */
+	const CHAR_PROBE_MAX_LEN = 800
+	/** 单批（=一次拖动可达范围）逐字节点总量上限：分页取当前页全部段落、滚动模式取邻域段落，超预算的段落回退均匀字格
+	 *  （一页正文通常 300~500 字，1200 足够覆盖；节点过多会拖慢一次 boundingClientRect 查询） */
+	const CHAR_PROBE_MAX_TOTAL = 1200
+	/** 滚动模式的探针邻域半径（段）：拖动只可能在视口内跨段，取被触段落前后若干段即可覆盖 */
+	const CHAR_PROBE_NEIGHBOR = 6
+	/** 逐字探针查询轮询上限（40ms 间隔：整批逐字节点首次 setData 在微信端可达上百毫秒，快设备首查即中，慢设备约 320ms 后放弃回退） */
+	const CHAR_PROBE_MAX_ATTEMPT = 7
+	/** 长按定位等待探针上限（ms）：超时先按估算字符建立选区（不卡交互），探针在后台继续并落缓存供随后拖动使用 */
+	const CHAR_PROBE_WAIT_MS = 250
 	/** 全书各章段落缓存（章 id → 段落列表）：按章惰性取正文——首次访问该章时按目录字符区间切片建段落对象，
 	 *  之后复用。开书不再为全书 1900 章 / 18 万段落建对象（13MB 书实测的主要耗时与内存占用来源）。
 	 *  普通数组（非 ref）：段落构建发生在渲染/分页同步链路内，不需要响应式；依赖章节段落的数据源见 parasEpoch */
@@ -2228,6 +2256,204 @@
 		const sliceIdx = row == 0 ? col : firstCap + (row - 1) * m.perLine + col
 		return Math.min(sliceIdx, sliceLen - 1) + from
 	}
+	/** 逐字矩形 → 段落几何（口径与 App 端 StaticLayout 一致：charX 第 k 字左界=charX[k]、末字右界=charX[段长]，
+	 *  lineEnds 为段内末字符下标）。base 为本段在批量查询结果中的窗口起点——每段 n+1 个节点：
+	 *  1 个缩进节点（两个全角空格同在一个 text 内，与正文渲染同构）+ n 个逐字节点。
+	 *  行归组按行盒顶（同行为同一 top）；数据不自洽（末行不含段末字符）返回 null */
+	function buildParaGeom(rects : NodeInfo[], base : number, n : number, lineH : number) : ParaGeom | null {
+		const x0 = rects[base].left ?? 0
+		const xs : number[] = []
+		for (let k = 0; k < n; k++) {
+			xs.push((rects[base + 1 + k].left ?? 0) - x0)
+		}
+		xs.push((rects[base + n].right ?? 0) - x0)
+		const ends : number[] = []
+		const rights : number[] = []
+		let rowTop = rects[base].top ?? 0
+		let rowRight = 0
+		for (let i = base + 1; i <= base + n; i++) {
+			const t = rects[i].top ?? 0
+			if (Math.abs(t - rowTop) > lineH * 0.5) {
+				// 前一节点（i-1）为上一行末节点，窗口首节点是缩进 → 段内字符下标 = (i-1)-base-1
+				ends.push(i - base - 2)
+				rights.push(rowRight - x0)
+				rowTop = t
+				rowRight = 0
+			}
+			const r = rects[i].right ?? 0
+			if (r > rowRight) {
+				rowRight = r
+			}
+		}
+		ends.push(n - 1)
+		rights.push(rowRight - x0)
+		if (ends[ends.length - 1] != n - 1) {
+			return null
+		}
+		return { charX: xs, lineEnds: ends, lineRights: rights } as ParaGeom
+	}
+	/** 逐字探针批量查询（30ms 轮询：探针节点经 setData 异步渲染，总节点数不符视为未就绪）。
+	 *  结果按段切窗逐段落缓存；与整段离屏行数实测交叉校验：逐字节点若改变换行（行数不符）即弃用该段，回退均匀字格口径 */
+	function charProbeAttempt(cid : number, origins : number[], lens : number[], seq : number, attempt : number, done : (v : void) => void) : void {
+		setTimeout(() : void => {
+			if (charProbeSeq.value != seq) {
+				// 已有新批次接管：旧查询作废（探针卸载由新批次负责）
+				done()
+				return
+			}
+			uni.createSelectorQuery().selectAll('.char-probe').boundingClientRect((res : any) : void => {
+				if (charProbeSeq.value != seq) {
+					done()
+					return
+				}
+				const rects = res == null ? null : (res as NodeInfo[])
+				let want = 0
+				for (let i = 0; i < lens.length; i++) {
+					want += lens[i] + 1
+				}
+				if (rects == null || rects.length != want) {
+					if (attempt < CHAR_PROBE_MAX_ATTEMPT) {
+						charProbeAttempt(cid, origins, lens, seq, attempt + 1, done)
+						return
+					}
+					charProbeParas.value = [] as CharProbePara[]
+					done()
+					return
+				}
+				charProbeParas.value = [] as CharProbePara[]
+				const lines = measuredLinesOf(cid)
+				const lineH = readerLineHeightPx(fontSize.value)
+				let base = 0
+				for (let i = 0; i < origins.length; i++) {
+					const n = lens[i]
+					const geom = buildParaGeom(rects, base, n, lineH)
+					base += n + 1
+					if (geom == null) {
+						continue
+					}
+					const o = origins[i]
+					if (lines != null && o < lines.length && lines[o] > 0 && lines[o] != geom.lineEnds.length) {
+						continue
+					}
+					paraCharGeomCache.set(cid + '-' + o, geom)
+				}
+				done()
+			}).exec()
+		}, 40)
+	}
+	/** 逐字几何批量预热（非 APP 端）：把本次拖动可达的段落按段屏外逐字渲染，一次查询测全部。
+	 *  已缓存段落跳过；单段超长（节点开销）与批次超预算的段落跳过（调用方回退均匀字格口径） */
+	function measureParaCharGeomBatch(cid : number, origins : number[], done : (v : void) => void) : void {
+		// #ifdef APP-ANDROID
+		// App 端几何来自 StaticLayout 初排缓存（paraLayoutCache），不启用 DOM 探针
+		done()
+		return
+		// #endif
+		// #ifndef APP-ANDROID
+		const paras = paragraphsOf(cid)
+		const todo : number[] = []
+		const lens : number[] = []
+		const items : CharProbePara[] = []
+		let total = 0
+		for (let i = 0; i < origins.length; i++) {
+			const o = origins[i]
+			if (o < 0 || o >= paras.length || todo.indexOf(o) >= 0) {
+				continue
+			}
+			if (paraCharGeomCache.get(cid + '-' + o) != null) {
+				continue
+			}
+			const text = paras[o].text
+			const n = text.length
+			if (n == 0 || n > CHAR_PROBE_MAX_LEN || total + n > CHAR_PROBE_MAX_TOTAL) {
+				continue
+			}
+			const chars : string[] = []
+			for (let k = 0; k < n; k++) {
+				chars.push(text.substring(k, k + 1))
+			}
+			todo.push(o)
+			lens.push(n)
+			items.push({ chars: chars } as CharProbePara)
+			total += n
+		}
+		if (todo.length == 0) {
+			done()
+			return
+		}
+		charProbeSeq.value = charProbeSeq.value + 1
+		const seq = charProbeSeq.value
+		charProbeParas.value = items
+		charProbeAttempt(cid, todo, lens, seq, 0, done)
+		// #endif
+	}
+	/** 段落逐字几何（划词长按与手柄拖动前预热）：批量实测「本次拖动可达的段落」（list 由宿主按页/邻域组装，
+	 *  被触段落排首位），完成后返回被触段落的几何；未覆盖到/测量失败的段落由调用方回退均匀字格口径 */
+	function measureParaCharGeom(cid : number, origin : number, list : number[]) : Promise<ParaGeom | null> {
+		// #ifdef APP-ANDROID
+		// App 端几何来自 StaticLayout 初排缓存（paraLayoutCache），不启用 DOM 探针
+		return new Promise<ParaGeom | null>((resolve : (v : ParaGeom | null) => void) : void => {
+			resolve(null)
+		})
+		// #endif
+		// #ifndef APP-ANDROID
+		return new Promise<ParaGeom | null>((resolve : (v : ParaGeom | null) => void) : void => {
+			measureParaCharGeomBatch(cid, list, (_v : void) : void => {
+				resolve(paraCharGeomCache.get(cid + '-' + origin))
+			})
+		})
+		// #endif
+	}
+	/** 等待探针结果至多 waitMs（超时返回 null）：长按定位不因探针首次渲染慢而卡住交互，
+	 *  探针在后台继续轮询并落缓存，随后拖动（≥300ms 后开始）仍可用精确几何 */
+	function geomWithTimeout(p : Promise<ParaGeom | null>, waitMs : number) : Promise<ParaGeom | null> {
+		return new Promise<ParaGeom | null>((resolve : (v : ParaGeom | null) => void) : void => {
+			let settled = false
+			const timer = setTimeout(() : void => {
+				if (!settled) {
+					settled = true
+					resolve(null)
+				}
+			}, waitMs)
+			p.then((g : ParaGeom | null) : void => {
+				if (!settled) {
+					settled = true
+					clearTimeout(timer)
+					resolve(g)
+				}
+			})
+		})
+	}
+	/** 触点 → 段内字符索引（实测几何口径）：y 定切片内行号并按切片起始行平移，x 在该行可见字区间内
+	 *  按真实字左缘归属（触点落在字格内，floor 语义与长按选中一致） */
+	function charIndexOfGeom(geom : ParaGeom, rect : NodeInfo, clientX : number, clientY : number, from : number, to : number) : number {
+		const lineH = readerLineHeightPx(fontSize.value)
+		const ends = geom.lineEnds
+		// 切片首末字符所在的整段行号（切片行号需按起始行平移；行上限取切片末字符所在行，不用估算行数）
+		let absBase = 0
+		while (absBase < ends.length - 1 && from > ends[absBase]) {
+			absBase++
+		}
+		let absLast = absBase
+		while (absLast < ends.length - 1 && to > ends[absLast]) {
+			absLast++
+		}
+		const row = Math.max(0, Math.min(Math.floor((clientY - (rect.top ?? 0)) / lineH), Math.max(0, absLast - absBase)))
+		const absRow = absBase + row
+		const rowStart = absRow == 0 ? 0 : ends[absRow - 1] + 1
+		const rowEnd = ends[absRow]
+		const kStart = Math.max(rowStart, from)
+		const kEnd = Math.min(rowEnd, to)
+		if (kEnd < kStart) {
+			return Math.max(from, Math.min(to, rowStart))
+		}
+		const px = clientX - (rect.left ?? 0)
+		let k = kStart
+		while (k < kEnd && px >= geom.charX[k + 1]) {
+			k++
+		}
+		return k
+	}
 	/** 指定章的分页结果（跨章预渲染取相邻章末页/首页用）：APP 端引擎断行即真源（断点恒落在真实行边界），
 	 *  其余实测行数就绪走实测分页（切断段末行未探测时回退段均估算）；均未就绪回退字数估算（perLine 标定口径） */
 	function chapterBreaks(cid : number) : PageSlice[][] {
@@ -2388,6 +2614,7 @@
 		paraLinesCache.value = new Map()
 		paraTailCache.value = new Map()
 		paraLayoutCache.value = new Map()
+		paraCharGeomCache.clear()
 		// 旧字号的每行字数不得参与新字号的首轮回退分页
 		perLineExact.value = 0
 		if (relayoutTimer >= 0) {
@@ -2448,6 +2675,31 @@
 	const currentPageItems = computed(() : PageItem[] => {
 		return pageItemsAt(pageIndex.value)
 	})
+	/** 逐字探针可达段落清单（划词预热用）：分页模式=当前页全部段落（跨行拖动常跨段，整页一次测完）；
+	 *  滚动模式=被触段落 + 前后 CHAR_PROBE_NEIGHBOR 段（拖动只可能在视口内跨段）。被触段落排首位保证预算优先 */
+	function charProbeOrigins(cid : number, origin : number, paged : boolean) : number[] {
+		const list : number[] = []
+		list.push(origin)
+		if (paged) {
+			const items = currentPageItems.value
+			for (let i = 0; i < items.length; i++) {
+				if (items[i].origin != origin) {
+					list.push(items[i].origin)
+				}
+			}
+		} else {
+			const count = paragraphsOf(cid).length
+			for (let d = 1; d <= CHAR_PROBE_NEIGHBOR; d++) {
+				if (origin + d < count) {
+					list.push(origin + d)
+				}
+				if (origin - d >= 0) {
+					list.push(origin - d)
+				}
+			}
+		}
+		return list
+	}
 	/**
 	 * 当前翻页模式。
 	 * 与字面量比较一律用 `==`：`===` 对 String 存在引用比较行为（实测），模式从存储/云端偏好恢复时
@@ -3003,6 +3255,28 @@
 				if (toLayout != null && s.toOrigin < toLayout.charX.length) {
 					toCharX = toLayout.charX[s.toOrigin]
 				}
+				// 非 APP 端：逐字探针几何兜底（锚点矩形不可用/缺失时，手柄按真实行边界与字左缘估算，不再退回均分字格）
+				const fromGeom = paraCharGeomCache.get(s.fromCid + '-' + s.fromOrigin)
+				if (fromGeom != null) {
+					if (fromEnds == null) {
+						fromEnds = fromGeom.lineEnds
+					}
+					if (fromCharX == null) {
+						fromCharX = fromGeom.charX
+					}
+				}
+				const toGeom = paraCharGeomCache.get(s.toCid + '-' + s.toOrigin)
+				if (toGeom != null) {
+					if (toEnds == null) {
+						toEnds = toGeom.lineEnds
+					}
+					if (toRights == null) {
+						toRights = toGeom.lineRights
+					}
+					if (toCharX == null) {
+						toCharX = toGeom.charX
+					}
+				}
 				popoverRef.value?.$callMethod('setAnchors', s, anchorStart, anchorEnd, fromPara, toPara, fromSlice, toSlice, fromEnds, toEnds, toRights, fromCharX, toCharX)
 			}
 			// Android 起止字符锚点现在为真实字符分段，可尝试实测；矩形不可用时由真实行边界兜底。
@@ -3085,6 +3359,19 @@
 						if (lay != null && o < lay.lineRights.length && lay.lineRights[o].length > 0) {
 							prights = lay.lineRights[o]
 						}
+						// 非 APP 端：逐字探针几何（长按时已预热，拖动即时可用；无实测数据回退均匀字格）
+						const geom = paraCharGeomCache.get(cid + '-' + o)
+						if (geom != null) {
+							if (cx == null) {
+								cx = geom.charX
+							}
+							if (pends == null) {
+								pends = geom.lineEnds
+							}
+							if (prights == null) {
+								prights = geom.lineRights
+							}
+						}
 						dragParaRects.push({
 							cid: cid,
 							origin: o,
@@ -3129,6 +3416,19 @@
 					if (lay != null && it.origin < lay.lineRights.length && lay.lineRights[it.origin].length > 0) {
 						prights = lay.lineRights[it.origin]
 					}
+					// 非 APP 端：逐字探针几何（长按时已预热，拖动即时可用；无实测数据回退均匀字格）
+					const geom = paraCharGeomCache.get(currentChapterId.value + '-' + it.origin)
+					if (geom != null) {
+						if (cx == null) {
+							cx = geom.charX
+						}
+						if (pends == null) {
+							pends = geom.lineEnds
+						}
+						if (prights == null) {
+							prights = geom.lineRights
+						}
+					}
 					dragParaRects.push({
 						cid: currentChapterId.value,
 						origin: it.origin,
@@ -3162,59 +3462,68 @@
 		// 滚动模式自动加载相邻章后 currentChapterId 可能跳变，而视口停留内容仍属原章：
 		// 长按段落时把当前章同步为被长按段落所在章，保证选区渲染的章匹配条件成立（用户在哪里操作，哪里即当前阅读章）
 		const spanCid = cid >= 0 ? cid : currentChapterId.value
-		uni.createSelectorQuery().select(selectionParaId(pi, cid)).boundingClientRect((res : any) : void => {
-			const rect = res == null ? null : (res as NodeInfo | null)
-			if (rect == null) {
-				return
-			}
-			// 段落文本按被长按段落所在章取（滚动模式多章渲染下 pi 属于 spanCid 章）；长按字符在整段坐标上计算（切片内索引加 from 偏移）
-			const p = paragraphsOf(spanCid)[pi]
-			const sliceLen = to - from + 1
-			// 触点相对段落文本区 → 行列估算字符索引（换算公式与分页排版同源，见 charIndexOfRect）
-			const charIdx = charIndexOfRect(rect, clientX, clientY, from, to)
-			if (spanCid != currentChapterId.value) {
-				currentChapterId.value = spanCid
-				saveProgress()
-			}
-			// 长按位置落在已有想法区间：恢复该想法的完整选区（含划线区域）；
-			// 落在已有划线区间：恢复划线完整选区（与想法恢复同口径，长按即选中划线部分）；
-			// 否则选中触点所在字符（单字起选，左右手柄可逐字拖动扩展/收缩）
-			const hit = thoughtAt(thoughts.value, spanCid, pi, charIdx)
-			let span : SelSpan | null = null
-			if (hit != null) {
-				span = spanOfThought(hit)
-			}
-			if (span == null) {
-				const uEntry = findUnderlineEntry(underlineStore.value, spanCid, pi)
-				if (uEntry != null) {
-					for (const u of uEntry.ranges) {
-						if (charIdx >= u[0] && charIdx <= u[1]) {
-							span = {
-								fromCid: spanCid,
-								fromOrigin: pi,
-								fromStart: u[0],
-								toCid: spanCid,
-								toOrigin: pi,
-								toEnd: u[1]
-							} as SelSpan
-							break
+		// 逐字几何预热（非 APP 端）：整页（滚动模式=邻域）一次性屏外逐字实测，结果缓存供随后拖动复用——
+		// 跨段落拖动因此同样有精确几何；先测几何再查段落矩形，命中实测几何按真实字左缘归属触点字符，
+		// 未命中（超长段落/预算不足/探针失败）回退均匀字格估算
+		geomWithTimeout(measureParaCharGeom(spanCid, pi, charProbeOrigins(spanCid, pi, cid < 0)), CHAR_PROBE_WAIT_MS).then((geom : ParaGeom | null) : void => {
+			uni.createSelectorQuery().select(selectionParaId(pi, cid)).boundingClientRect((res : any) : void => {
+				const rect = res == null ? null : (res as NodeInfo | null)
+				if (rect == null) {
+					return
+				}
+				// 段落文本按被长按段落所在章取（滚动模式多章渲染下 pi 属于 spanCid 章）；长按字符在整段坐标上计算（切片内索引加 from 偏移）
+				const p = paragraphsOf(spanCid)[pi]
+				const sliceLen = to - from + 1
+				// 触点相对段落文本区 → 字符索引（实测几何口径优先，回退行列估算：估算在真实换行下段尾累计偏差 3~4 字）
+				let charIdx = charIndexOfRect(rect, clientX, clientY, from, to)
+				const geomHit = geom
+				if (geomHit != null) {
+					charIdx = charIndexOfGeom(geomHit, rect, clientX, clientY, from, to)
+				}
+				if (spanCid != currentChapterId.value) {
+					currentChapterId.value = spanCid
+					saveProgress()
+				}
+				// 长按位置落在已有想法区间：恢复该想法的完整选区（含划线区域）；
+				// 落在已有划线区间：恢复划线完整选区（与想法恢复同口径，长按即选中划线部分）；
+				// 否则选中触点所在字符（单字起选，左右手柄可逐字拖动扩展/收缩）
+				const hit = thoughtAt(thoughts.value, spanCid, pi, charIdx)
+				let span : SelSpan | null = null
+				if (hit != null) {
+					span = spanOfThought(hit)
+				}
+				if (span == null) {
+					const uEntry = findUnderlineEntry(underlineStore.value, spanCid, pi)
+					if (uEntry != null) {
+						for (const u of uEntry.ranges) {
+							if (charIdx >= u[0] && charIdx <= u[1]) {
+								span = {
+									fromCid: spanCid,
+									fromOrigin: pi,
+									fromStart: u[0],
+									toCid: spanCid,
+									toOrigin: pi,
+									toEnd: u[1]
+								} as SelSpan
+								break
+							}
 						}
 					}
 				}
-			}
-			if (span == null) {
-				span = {
-					fromCid: spanCid,
-					fromOrigin: pi,
-					fromStart: charIdx,
-					toCid: spanCid,
-					toOrigin: pi,
-					toEnd: charIdx
-				} as SelSpan
-			}
-			// 选区状态与手柄/气泡在气泡组件内建立（锚点实测由组件发起请求、宿主查询回传）；起点段长按本页切片长度与偏移传（手柄估算的切片口径）
-			popoverRef.value?.$callMethod('beginSelection', span, rect.left ?? 0, rect.top ?? 0, clientX, Math.min(sliceLen, p.text.length - from), from)
-		}).exec()
+				if (span == null) {
+					span = {
+						fromCid: spanCid,
+						fromOrigin: pi,
+						fromStart: charIdx,
+						toCid: spanCid,
+						toOrigin: pi,
+						toEnd: charIdx
+					} as SelSpan
+				}
+				// 选区状态与手柄/气泡在气泡组件内建立（锚点实测由组件发起请求、宿主查询回传）；起点段长按本页切片长度与偏移传（手柄估算的切片口径）
+				popoverRef.value?.$callMethod('beginSelection', span, rect.left ?? 0, rect.top ?? 0, clientX, Math.min(sliceLen, p.text.length - from), from)
+			}).exec()
+		})
 	}
 	/** 长按段落：触点位置估算字符索引并选中该字符（单字起选，手柄逐字拖动扩展；cid=-1 为分页模式，滚动模式传段落所在章 id）；
 	 *  from/to 为本页渲染的整段字符切片区间（流式分页段落可跨页），切片内行列换算后加 from 偏移对齐划线/想法的整段坐标 */
