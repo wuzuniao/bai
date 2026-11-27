@@ -6,8 +6,10 @@
  * 方案：按模板 id 取原生 ViewGroup（UniElement.getAndroidView，vdom Android 4.25+）：
  * - 跟手/落定：直接 setTranslationX 或 ViewPropertyAnimator（原生属性动画）驱动；
  *   定时器到点仅做状态提交，提交前以 token 防竞态（新手势/卸载即作废旧动画）；
- * - 仿真：截取移动页位图（View.draw → Bitmap），用 Canvas 逐条带变形绘制卷曲 +
- *   折缝阴影，经浮层 view 的原生 background(BitmapDrawable) 呈现；
+ * - 仿真：截取移动页位图（View.draw → Bitmap），按「弯曲折缝 + 圆柱卷筒」重投影整页
+ *   （Canvas.drawBitmapMesh：纸面沿折缝法向卷成半径 R 的卷筒，滚动角超过 π/2 的纸面被
+ *   卷筒自身遮挡而不可见），再沿同一族同心圆弧叠明暗（折缝投影 / 卷筒接触阴影 / 剪影高光），
+ *   折缝、卷筒前缘与全部阴影天然随折缝弯曲；经浮层 view 的原生 background(BitmapDrawable) 呈现；
  * - 覆盖：原生 alpha 暗化「被覆盖的当前页」（前翻/回翻同口径）。
  * 模板契约 id：flip-layer-current / flip-layer-prev / flip-layer-next /
  * flip-cover-mask / flip-curl-overlay（改名须同步本文件与 reader 模板）。
@@ -19,12 +21,13 @@ import ViewGroup from 'android.view.ViewGroup'
 import Bitmap from 'android.graphics.Bitmap'
 import Canvas from 'android.graphics.Canvas'
 import Paint from 'android.graphics.Paint'
-import Rect from 'android.graphics.Rect'
 import RectF from 'android.graphics.RectF'
 import Color from 'android.graphics.Color'
 import DisplayMetrics from 'android.util.DisplayMetrics'
 import BitmapDrawable from 'android.graphics.drawable.BitmapDrawable'
 import PathInterpolator from 'android.view.animation.PathInterpolator'
+import { computeCurlGeom, curlShadeBands, curlProjectedR, CURL_SETTLE_SWEEP } from '@/utils/curlgeom.uts'
+import type { CurlGeom, CurlShadeBand } from '@/utils/curlgeom.uts'
 
 /** 翻页图层/遮罩/卷曲浮层的模板 id（模板改名须同步） */
 const LAYER_CURRENT_ID = 'flip-layer-current'
@@ -36,10 +39,9 @@ const OVERLAY_ID = 'flip-curl-overlay'
 /** 落定补间时长（ms）：与 CSS 版 0.28s 同节奏；状态提交定时器再多 20ms 余量 */
 const SETTLE_MS = 280
 const COMMIT_DELAY_MS = 300
-/** 卷曲圆柱半径（原生 px，按页宽比例兜底）与条带数 */
-const CURL_RADIUS_MIN = 24
-const CURL_RADIUS_RATIO = 0.075
-const CURL_SLICES = 20
+/** 卷曲重投影网格格数：横向密度决定卷筒带内压缩纹理的平滑度 */
+const CURL_MESH_COLS = 28
+const CURL_MESH_ROWS = 30
 
 /** 回弹/落定补间曲线（对齐 CSS cubic-bezier(0.16,1,0.3,1)） */
 const SETTLE_CURVE = new PathInterpolator(0.16.toFloat(), 1.0.toFloat(), 0.3.toFloat(), 1.0.toFloat())
@@ -60,10 +62,8 @@ let bmpPaint : Paint | null = null
 let shadePaint : Paint | null = null
 let bmpW = 0
 let bmpH = 0
-/** 复用绘制矩形（避免逐帧分配） */
-const srcRect = new Rect(0, 0, 1, 1)
-const dstRect = new RectF()
-const shadeRect = new RectF()
+/** 复用的圆弧包围盒（drawArc 用，避免逐帧分配） */
+const arcRect = new RectF()
 /** 卷曲状态与动画令牌（令牌变化即作废旧定时器回调） */
 let curlOn = false
 let curlDir = 1
@@ -72,8 +72,17 @@ let settleTimer = -1
 /** 回翻落定后浮层延迟隐藏（位图与新当前页同源，避免内容切换闪帧）；期间 reset 不得提前隐藏 */
 let holdOverlay = false
 
-/** 卷曲期间的纸面底色（取自源位图页边像素，背面折叠块用纯色纸面，避免镜像文字造成叠字观感） */
+/** 卷曲期间的纸面底色（取自源位图页边像素，剪影高光由它提亮得到） */
 let paperColor = 0
+/** 触点纵向位置（0-1 的页高比例）：折痕经过该高度，随手指上下移动 */
+let curlFingerRatio = 0.5
+/** 起手触点所在半区（0=上角 / 1=下角）：决定折痕绕哪个页角卷，起手后固定 */
+let curlCornerRatio = 0.5
+
+/** 折缝圆弧（圆心 C、半径 r）与卷筒半径 R：逐帧按拖动进度重算，单位均为页位图像素 */
+let geom : CurlGeom = { cx: 0.0, cy: 0.0, foldR: 1.0, curlR: 1.0, arcStart: 0.0, arcSweep: Math.PI * 2.0, flap: 0.0 } as CurlGeom
+/** 重投影网格顶点（长度 = (列+1)×(行+1)×2，按页尺寸复用） */
+let meshVerts : FloatArray | null = null
 
 /** 模板 id → 原生 ViewGroup（未挂载/非 view 组件返回 null） */
 function nativeViewById(id : string) : ViewGroup | null {
@@ -157,6 +166,7 @@ function releaseBitmaps() : void {
 	dstCanvas = null
 	bmpPaint = null
 	shadePaint = null
+	meshVerts = null
 	bmpW = 0
 	bmpH = 0
 }
@@ -182,7 +192,9 @@ function ensureBitmaps(w : number, h : number) : boolean {
 	bmpPaint = bp
 	const sp = new Paint()
 	sp.setAntiAlias(true)
+	sp.setStyle(Paint.Style.STROKE)
 	shadePaint = sp
+	meshVerts = new FloatArray(((CURL_MESH_COLS + 1) * (CURL_MESH_ROWS + 1) * 2).toInt())
 	bmpW = w
 	bmpH = h
 	return true
@@ -208,107 +220,88 @@ function hideOverlay() : void {
 	}
 }
 
-/** 绘制单条卷曲带：源条带 → 屏幕投影（θ 越过 π/2 后镜像为纸张背面）+ 背光渐变 */
-function drawCurlSlice(canvas : Canvas, bmp : Bitmap, bp : Paint, sp : Paint, sx0 : number, sx1 : number, dx0 : number, dx1 : number, h : number, theta : number, thetaMax : number) : void {
-	const sl = Math.min(sx0, sx1)
-	const sr = Math.max(sx0, sx1)
-	if (sr - sl < 1.0) {
-		return
-	}
-	const dl = Math.min(dx0, dx1)
-	const dw = Math.abs(dx1 - dx0)
-	if (dw < 0.5) {
-		return
-	}
-	srcRect.set(Math.round(sl).toInt(), 0, Math.round(sr).toInt(), h.toInt())
-	dstRect.set(0.0.toFloat(), 0.0.toFloat(), dw.toFloat(), h.toFloat())
-	// 源条带与投影条带方向不一致时镜像绘制（纸张背面）
-	const mirror = (sx1 >= sx0) != (dx1 >= dx0)
-	canvas.save()
-	if (mirror) {
-		// 背面（θ 越过 π/2）：以纸面纯色填充卷曲带，不绘镜像正文（避免正反文字叠影）
-		dstRect.set(dl.toFloat(), 0.0.toFloat(), (dl + dw).toFloat(), h.toFloat())
-		sp.setColor(paperColor.toInt())
-		canvas.drawRect(dstRect, sp)
-	} else {
-		canvas.translate(dl.toFloat(), 0.0.toFloat())
-		dstRect.set(0.0.toFloat(), 0.0.toFloat(), dw.toFloat(), h.toFloat())
-		canvas.drawBitmap(bmp, srcRect, dstRect, bp)
-	}
-	canvas.restore()
-	// 背光：折缝处最深、向卷曲前缘变浅
-	const ratio = thetaMax > 0 ? Math.min(1.0, theta / thetaMax) : 0.0
-	const alpha = Math.round(80.0 * (1.0 - ratio)) + 10
-	shadeRect.set(dl.toFloat(), 0.0.toFloat(), (dl + dw).toFloat(), h.toFloat())
-	sp.setColor(Color.argb(Math.min(160, alpha).toInt(), 0, 0, 0))
-	canvas.drawRect(shadeRect, sp)
-}
-
-/** 绘制折缝投在静态底页上的暗带（三段递减） */
-function drawCurlShadow(canvas : Canvas, sp : Paint, fold : number, radius : number, h : number) : void {
-	for (let i = 0; i < 3; i = i + 1) {
-		const x0 = fold + radius * (i + 1) / 3.0
-		const x1 = fold + radius * (i + 2) / 3.0
-		shadeRect.set(x0.toFloat(), 0.0.toFloat(), x1.toFloat(), h.toFloat())
-		sp.setColor(Color.argb((40 - i * 12).toInt(), 0, 0, 0))
-		canvas.drawRect(shadeRect, sp)
-	}
+/** 折缝圆弧与卷边几何：公式与常量在 utils/curlgeom.uts（与 iOS/鸿蒙 canvas 引擎共用同一套） */
+function computeFoldGeom(dir : number, offset : number, w : number, h : number) : void {
+	geom = computeCurlGeom(dir, offset, w, h, curlFingerRatio * h, curlCornerRatio)
 }
 
 /**
- * 绘制当前卷曲帧：
- * - 前翻：当前页右缘卷起，平铺源 [0,fold]、卷曲源 [fold,fold+Rθ]，露出下层下一页；
- * - 回翻：上一页右段平铺（源 [w-fold,w] → 屏幕 [0,fold]），隐藏左段（源 [0,w-fold]）卷起。
+ * 卷曲重投影网格：离折缝 d（0=折缝，向外为正）的纸面卷到半径 r - R·sin(d/R)，
+ * d 处连续、d = πR/2 处为剪影（滚过该角的纸面被卷筒自身遮挡，全部并到剪影上）。
+ * 网格源坐标为均匀切分（drawBitmapMesh 约定），只写投影后的目标坐标。
  */
+function buildCurlMesh(w : number, h : number) : void {
+	const verts = meshVerts
+	if (verts == null) {
+		return
+	}
+	const cw = w / CURL_MESH_COLS
+	const ch = h / CURL_MESH_ROWS
+	const invR = 1.0 / geom.curlR
+	let idx = 0
+	for (let j = 0; j <= CURL_MESH_ROWS; j = j + 1) {
+		const sy = ch * j
+		for (let i = 0; i <= CURL_MESH_COLS; i = i + 1) {
+			const sx = cw * i
+			const vx = sx - geom.cx
+			const vy = sy - geom.cy
+			const dist = Math.sqrt(vx * vx + vy * vy)
+			const d = geom.foldR - dist
+			const vi = idx.toInt()
+			if (d > 0.0 && dist > 0.0001) {
+				// 卷筒表面 → 翻过卷筒顶的纸背（铺到折痕内侧），统一由 curlProjectedR 给出投影半径
+				const rho = curlProjectedR(geom, d)
+				verts[vi] = (geom.cx + vx / dist * rho).toFloat()
+				verts[vi + 1] = (geom.cy + vy / dist * rho).toFloat()
+			} else {
+				verts[vi] = sx.toFloat()
+				verts[vi + 1] = sy.toFloat()
+			}
+			idx = idx + 2
+		}
+	}
+}
+
+/** 沿折缝弧画一条带（半径=距圆心距离，故天然随折缝弯曲，不会出现竖直条带） */
+function strokeArcBand(canvas : Canvas, p : Paint, band : CurlShadeBand) : void {
+	if (band.radius <= 0.0 || band.width <= 0.0) {
+		return
+	}
+	const rr = band.radius.toFloat()
+	arcRect.set(geom.cx.toFloat() - rr, geom.cy.toFloat() - rr, geom.cx.toFloat() + rr, geom.cy.toFloat() + rr)
+	p.setColor(Color.argb(Math.round(band.a * 255.0).toInt(), band.r.toInt(), band.g.toInt(), band.b.toInt()))
+	p.setStrokeWidth(band.width.toFloat())
+	canvas.drawArc(arcRect, (geom.arcStart * 180.0 / Math.PI).toFloat(), (geom.arcSweep * 180.0 / Math.PI).toFloat(), false, p)
+}
+
+/** 卷曲明暗：弧带清单由 curlgeom 统一给出（三端同一批参数），本端只负责逐条描边 */
+function drawCurlShading(canvas : Canvas, p : Paint, w : number) : void {
+	const bands = curlShadeBands(geom, w,
+		Color.red(paperColor.toInt()) * 1.0, Color.green(paperColor.toInt()) * 1.0, Color.blue(paperColor.toInt()) * 1.0)
+	for (let i = 0; i < bands.length; i = i + 1) {
+		strokeArcBand(canvas, p, bands[i])
+	}
+}
+
+/** 绘制当前卷曲帧（前翻：当前页自右缘卷起；回翻：上一页自左缘卷起，几何左右镜像） */
 function renderCurl(dir : number, offset : number, pageW : number) : void {
 	const canvas = dstCanvas
 	const bmp = srcBmp
 	const dst = dstBmp
 	const bp = bmpPaint
 	const sp = shadePaint
-	if (!curlOn || canvas == null || bmp == null || dst == null || bp == null || sp == null || pageW <= 0 || bmpW <= 0) {
+	const verts = meshVerts
+	if (!curlOn || canvas == null || bmp == null || dst == null || bp == null || sp == null || verts == null || pageW <= 0 || bmpW <= 0) {
 		return
 	}
 	const wf = bmpW * 1.0
-	const h = bmpH
-	const offN = Math.min(wf, Math.max(0.0, offset * bmpW / pageW))
+	const hf = bmpH * 1.0
+	const offN = Math.max(0.0, offset * bmpW / pageW)
 	dst.eraseColor(Color.TRANSPARENT)
-	const radius = Math.max(CURL_RADIUS_MIN * 1.0, Math.round(bmpW * CURL_RADIUS_RATIO) * 1.0)
-	const fold = dir == 1 ? wf - offN : offN
-	const remain = wf - fold
-	const thetaMax = Math.min(Math.PI, remain / radius)
-	// 前翻折缝抵达左缘（翻页完成帧）：整页已翻出屏幕，保持浮层全透明（露出下层新页）。
-	// 若继续按条带绘制，θ 越过 π/2 的背面条带会在左缘残留一条纸色竖带，造成「页面未覆盖全屏」与落定跳变。
-	if (dir == 1 && fold < 1.0) {
-		return
-	}
-	// 平铺段
-	if (fold > 1.0) {
-		if (dir == 1) {
-			srcRect.set(0, 0, Math.round(fold).toInt(), h.toInt())
-			dstRect.set(0.0.toFloat(), 0.0.toFloat(), fold.toFloat(), h.toFloat())
-		} else {
-			srcRect.set(Math.round(wf - fold).toInt(), 0, bmpW.toInt(), h.toInt())
-			dstRect.set(0.0.toFloat(), 0.0.toFloat(), fold.toFloat(), h.toFloat())
-		}
-		canvas.drawBitmap(bmp, srcRect, dstRect, bp)
-	}
-	// 卷曲条带（前翻源自折缝向右、回翻源自折缝向左，均向折缝外卷起）；
-	// 前翻折缝贴近左缘时不再画背面条带：θ 越过 π/2 的纸色条带会残留在左缘，
-	// 观感上像「页面未覆盖左边缘」，提前一帧让位给下层新页更平滑
-	const stripsVisible = !(dir == 1 && fold < radius * 0.8)
-	if (stripsVisible) {
-		for (let j = 0; j < CURL_SLICES; j = j + 1) {
-			const t0 = thetaMax * j / CURL_SLICES
-			const t1 = thetaMax * (j + 1) / CURL_SLICES
-			const sx0 = dir == 1 ? fold + radius * t0 : wf - fold - radius * t0
-			const sx1 = dir == 1 ? fold + radius * t1 : wf - fold - radius * t1
-			const dx0 = fold + radius * Math.sin(t0)
-			const dx1 = fold + radius * Math.sin(t1)
-			drawCurlSlice(canvas, bmp, bp, sp, sx0, sx1, dx0, dx1, h, t0, thetaMax)
-		}
-		drawCurlShadow(canvas, sp, fold, radius, h)
-	}
+	computeFoldGeom(dir, offN, wf, hf)
+	buildCurlMesh(wf, hf)
+	canvas.drawBitmapMesh(bmp, CURL_MESH_COLS.toInt(), CURL_MESH_ROWS.toInt(), verts, 0, null, 0, bp)
+	drawCurlShading(canvas, sp, wf)
 	const ov = overlayView
 	if (ov != null) {
 		ov.invalidate()
@@ -385,9 +378,10 @@ function runCurlTick(myToken : number, dir : number, from : number, to : number,
 	finishCurl(commit, done)
 }
 
-/** 卷曲结算补间：JS 步进驱动原生 Canvas 绘制（缓动 ease-out-cubic，token 防竞态） */
+/** 卷曲结算补间：JS 步进驱动原生 Canvas 绘制（缓动 ease-out-cubic，token 防竞态）。
+ *  提交时折缝整条扫过对侧页缘（CURL_SETTLE_SWEEP 倍页宽），前翻末段再整层淡出收边。 */
 function startCurlSettle(myToken : number, dir : number, from : number, pageW : number, commit : boolean, done : () => void) : void {
-	const to = commit ? pageW : 0
+	const to = commit ? pageW * CURL_SETTLE_SWEEP : 0
 	const start = Date.now()
 	runCurlTick(myToken, dir, from, to, pageW, start, commit, done)
 }
@@ -449,8 +443,11 @@ export function flipNativeBegin(mode : string, dir : number, pageW : number) : v
 	renderCurl(dir, 0, pageW)
 }
 
-/** 跟手：按模式直接写原生位移/遮罩/卷曲帧（不触发 Vue 重渲染） */
-export function flipNativeFollow(mode : string, dir : number, offset : number, pageW : number) : void {
+/** 跟手：按模式直接写原生位移/遮罩/卷曲帧（不触发 Vue 重渲染）。
+ *  fingerRatio 为触点纵坐标占页高比例（0-1）：折缝在该高度鼓出，随手上下移动。 */
+export function flipNativeFollow(mode : string, dir : number, offset : number, pageW : number, fingerRatio : number, cornerRatio : number) : void {
+	curlFingerRatio = isNaN(fingerRatio) ? 0.5 : Math.max(0.0, Math.min(1.0, fingerRatio))
+	curlCornerRatio = isNaN(cornerRatio) ? 0.5 : Math.max(0.0, Math.min(1.0, cornerRatio))
 	resolveLayers()
 	const w = layerWidth()
 	if (w <= 0 || pageW <= 0) {
@@ -506,7 +503,7 @@ export function flipNativeSettle(mode : string, dir : number, offset : number, p
 		return
 	}
 	const curlFallback = mode == '仿真' && !curlOn
-	flipNativeFollow(mode, dir, offset, pageW)
+	flipNativeFollow(mode, dir, offset, pageW, curlFingerRatio, curlCornerRatio)
 	const w = layerWidth()
 	if (w <= 0) {
 		// 视图暂不可用（布局未就绪）：下一轮直接提交，保持交互可用

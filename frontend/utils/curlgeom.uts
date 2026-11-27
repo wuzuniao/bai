@@ -1,0 +1,196 @@
+/**
+ * 仿真卷曲几何（跨端共享纯计算，不含任何平台 API）：
+ * 折缝圆弧 + 圆柱卷筒投影 + 明暗弧带清单。
+ *
+ * Android 由 flipengine.uts 用 drawBitmapMesh 逐顶点重投影整页；
+ * iOS / 鸿蒙由 flipcanvas.uts 用 canvas 环带缩放（同一族弧、同一批明暗参数）逼近，
+ * 两端共用本文件的公式与常量，避免卷曲形态随端漂移。
+ *
+ * 模型：折缝是一条过「页上缘端点 A」「手指高度处的折点 M」「页下缘端点 B」的圆弧
+ * （三点定圆）——手指停在哪一高度，折缝就在那一高度鼓出，A/B 只作为折缝与页缘的交点，
+ * 不再充当枢轴；纸面按到折缝的距离 d 沿法向卷成半径 R 的**细卷边**，
+ * 投影半径 r - R·sin(d/R)，d ≥ πR/2 的纸面被卷边自身遮挡（剪影），
+ * 故页面上只留一条随手指弯曲的卷边线，其余露出下层新页。
+ */
+
+/** 卷筒半径（页宽比例）：按需求已取消折痕外侧的卷筒（置 0），折痕处只保留细线收口 */
+export const CURL_RADIUS_RATIO = 0.0
+/** 卷筒半径达到满值所需的拖动进度（缓入，避免起手瞬间冒出卷筒） */
+export const CURL_RAMP_RATIO = 0.16
+/** 可见卷曲角上限：滚过 π/2 的纸面被卷筒自身遮挡，不再可见 */
+export const CURL_PHI_MAX = Math.PI * 0.5
+/** 折痕弧半径 = 「页角→触点」距离 × 本系数：越小折痕随手指弯得越明显 */
+export const CURL_BEND_RATIO = 1.2
+/** 翻过来的纸背在折痕内侧铺开的深度（页宽比例）：太小像卷曲、太大会整页重影 */
+export const CURL_BACK_RATIO = 0.34
+/** 落定扫尾行程（页宽倍数）：折缝扫过对侧页缘即停——前翻末帧全透明、回翻末帧整页铺满 */
+export const CURL_SETTLE_SWEEP = 1.3
+
+/** 折缝圆弧（圆心 C、半径 foldR）、卷筒半径与投影圆弧覆盖的扇区、纸背深度 */
+export type CurlGeom = {
+	cx : number
+	cy : number
+	foldR : number
+	curlR : number
+	arcStart : number
+	arcSweep : number
+	/** 翻过来的纸背在折痕内侧的铺开深度（像素） */
+	flap : number
+}
+
+/** 角度归一化到 (-π, π]（求页面相对圆心覆盖的最小扇区） */
+export function normalizeRad(a : number) : number {
+	let v = a
+	while (v > Math.PI) {
+		v = v - Math.PI * 2.0
+	}
+	while (v < 0.0 - Math.PI) {
+		v = v + Math.PI * 2.0
+	}
+	return v
+}
+
+/**
+ * 卷曲几何（QQ 阅读式「折痕随手指变向」）：w/h 为页位图像素，
+ * fingerY 为触点纵向位置（页内像素），cornerRatio 为起手触点所在半区（0=上角，1=下角）。
+ *
+ * 折痕方向由「页角 K → 触点 F」决定：弧过触点、且在该点的切线与 K→F 垂直，
+ * 于是手指往哪个方向走、折痕就往哪个方向转（斜拖 → 斜折痕，上下拖 → 折痕随之倾斜），
+ * 不会永远竖直。弧半径 = |K→F| × CURL_BEND_RATIO：手离页角越近弯得越明显、越远越平缓。
+ * 圆心落在 K 一侧，故「圆内＝被掀起的一侧」＝露出下层新页，「圆外＝平铺纸面」，
+ * 两者之间是卷筒带（厚度 CURL_RADIUS_RATIO）。前翻 K 在右缘、回翻在左缘，公式同构。
+ */
+export function computeCurlGeom(dir : number, offset : number, w : number, h : number, fingerY : number, cornerRatio : number) : CurlGeom {
+	const L = Math.max(0.0, offset)
+	const k = Math.min(1.0, L / (w * CURL_RAMP_RATIO))
+	const curlR = Math.max(0.5, w * CURL_RADIUS_RATIO * k)
+	// 触点 F（横向由拖动量决定，纵向取触点高度；异常值退回页中）
+	const fyRaw = isNaN(fingerY) ? h * 0.5 : fingerY
+	const fy = Math.max(h * 0.04, Math.min(h * 0.96, fyRaw))
+	const fx = dir == 1 ? w - L : L
+	// 页角 K：起手触点所在半区对应的那个角（起手后固定，避免中途跳变）
+	const cr = isNaN(cornerRatio) ? 0.5 : Math.max(0.0, Math.min(1.0, cornerRatio))
+	const ky = cr * h
+	const kx = dir == 1 ? w : 0.0
+	// 折痕圆的圆心方向：自触点指向页角；触点贴角时退化为竖直折痕
+	let ux = kx - fx
+	let uy = ky - fy
+	let ulen = Math.sqrt(ux * ux + uy * uy)
+	if (ulen < 1.0) {
+		ux = 0.0
+		uy = ky >= fy ? 1.0 : 0.0 - 1.0
+		ulen = 1.0
+	}
+	// 半径随手到角的距离变化（折痕弯曲程度随手势而变），并给一个下限避免过小圆弧
+	const foldR = Math.max(ulen * CURL_BEND_RATIO, curlR * 4.0)
+	const cx = fx + ux / ulen * foldR
+	const cy = fy + uy / ulen * foldR
+	// 页面相对圆心覆盖的扇区（投影圆弧只画这一段，避免栅格化整圈大半径圆弧）
+	const ac = Math.atan2(h * 0.5 - cy, w * 0.5 - cx)
+	const da = normalizeRad(Math.atan2(0.0 - cy, 0.0 - cx) - ac)
+	const db = normalizeRad(Math.atan2(0.0 - cy, w - cx) - ac)
+	const dc = normalizeRad(Math.atan2(h - cy, 0.0 - cx) - ac)
+	const dd = normalizeRad(Math.atan2(h - cy, w - cx) - ac)
+	const d0 = Math.min(Math.min(da, db), Math.min(dc, dd))
+	const d1 = Math.max(Math.max(da, db), Math.max(dc, dd))
+	return {
+		cx: cx,
+		cy: cy,
+		foldR: foldR,
+		curlR: curlR,
+		arcStart: ac + d0 - 0.02,
+		arcSweep: Math.max(1.0 * Math.PI / 180.0, d1 - d0 + 0.04),
+		flap: w * CURL_BACK_RATIO
+	} as CurlGeom
+}
+
+/** 单条弧带的明暗（半径=距圆心距离，故天然随折缝弯曲，不会出现竖直条带） */
+export type CurlShadeBand = {
+	radius : number
+	width : number
+	r : number
+	g : number
+	b : number
+	a : number
+}
+
+/** 纸面底色（ARGB 整型）提亮后的 rgb 分量 */
+function highlightChannel(c : number, amount : number) : number {
+	return Math.round(c + (255 - c) * amount)
+}
+
+/**
+ * 明暗弧带清单：页边界只由「一条细线」表示——
+ * 一道淡纸色薄纱压住卷边里压缩的文字纹理，外加折缝处一条 1px 深的描边；
+ * 不再有投影带/高光带/多层渐变（那正是"多条矩形"观感的来源）。
+ * pr/pg/pb 为纸面底色的 rgb 分量（Android 取自页边像素，iOS/鸿蒙取阅读底色）。
+ */
+export function curlShadeBands(g : CurlGeom, w : number, pr : number, pg : number, pb : number) : CurlShadeBand[] {
+	const bands : CurlShadeBand[] = []
+	const curlR = g.curlR
+	// 翻过来的纸背：压一层厚纸色，让镜像文字变成"透过去的淡痕"（纸背的观感）
+	if (g.flap > 1.0) {
+		bands.push({ radius: g.foldR - curlR - g.flap * 0.5, width: g.flap * 1.02, r: highlightChannel(pr, 0.02), g: highlightChannel(pg, 0.02), b: highlightChannel(pb, 0.02), a: 0.62 } as CurlShadeBand)
+	}
+	// 折痕细线（页边界：折痕外侧不再画卷筒，只此一条线）
+	bands.push({ radius: g.foldR, width: Math.max(1.0, w * 0.0012), r: 0, g: 0, b: 0, a: 0.16 } as CurlShadeBand)
+	return bands
+}
+
+/** 卷筒表面覆盖的弧长（卷曲角 π/2 对应的纸面长度）：超过它的纸面已翻过卷筒顶、落在折痕内侧 */
+export function curlRollArc(g : CurlGeom) : number {
+	return CURL_PHI_MAX * g.curlR
+}
+
+/**
+ * 纸面上距折痕 d 的点在屏幕上的投影半径（相对圆心 C）：
+ *   d ≤ 卷筒弧长      → 贴在卷筒表面：r - R·sin(d/R)
+ *   d > 卷筒弧长      → 已翻过卷筒顶，平铺在折痕内侧（纸背）：r - R - (d - 卷筒弧长)
+ * d ≤ 0（折痕内侧的原始平铺纸面）不参与投影。
+ */
+export function curlProjectedR(g : CurlGeom, d : number) : number {
+	if (d <= 0.0) {
+		return g.foldR - d
+	}
+	const arc = curlRollArc(g)
+	if (d <= arc) {
+		return g.foldR - g.curlR * Math.sin(d / g.curlR)
+	}
+	// 纸背：按固定深度渐近压缩铺在折痕内侧（1:1 镜像会整页重影，压成一条带才像翻页）
+	const t = (d - arc) / g.flap
+	const k = t / (1.0 + Math.abs(t))
+	return Math.max(0.0, g.foldR - g.curlR - g.flap * k)
+}
+
+/** 卷筒投影环带（canvas 端按环带缩放绘制整页位图逼近网格重投影） */
+export type CurlBand = {
+	/** 投影半径外沿（靠折缝侧） */
+	outer : number
+	/** 投影半径内沿（靠剪影侧） */
+	inner : number
+	/** 该环带的绕圆心缩放比 */
+	scale : number
+}
+
+/**
+ * 把「卷筒 + 纸背」按源距离 d 等分成 count 个环带（第 i 带覆盖 d ∈ [i·Δ, (i+1)·Δ]），
+ * 带内用绕折缝圆心 C 的等比缩放（比例取带中值）近似径向重投影；
+ * d 覆盖到「翻过来的纸背铺满到圆心」为止，故卷筒内外两侧都能画出来。
+ */
+export function curlBands(g : CurlGeom, count : number) : CurlBand[] {
+	const list : CurlBand[] = []
+	const R = g.curlR
+	const dMax = curlRollArc(g) + Math.max(0.5, g.foldR - R)
+	const n = Math.max(2, count)
+	for (let i = 0; i < n; i = i + 1) {
+		const d0 = dMax * i / n
+		const d1 = dMax * (i + 1) / n
+		const dMid = (d0 + d1) * 0.5
+		const outer = curlProjectedR(g, d0)
+		const inner = curlProjectedR(g, d1)
+		const srcR = g.foldR - dMid
+		const scale = srcR > 0.5 ? curlProjectedR(g, dMid) / srcR : 1.0
+		list.push({ outer: outer, inner: inner, scale: scale } as CurlBand)
+	}
+	return list
+}

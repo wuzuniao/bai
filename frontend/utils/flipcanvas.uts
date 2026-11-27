@@ -1,0 +1,376 @@
+/**
+ * 仿真卷曲画布引擎（iOS / 鸿蒙）：与 Android 原生引擎（utils/flipengine.uts）同一套几何与明暗，
+ * 差异只在"怎么把位图投到卷筒上"——
+ *   Android 用 Canvas.drawBitmapMesh 逐顶点重投影；
+ *   本引擎用 canvas 2D 的「环带裁剪 + 绕折缝圆心等比缩放」逼近同一条径向映射
+ *   （卷曲是纯径向映射：角度不变、半径由 r - R·sin(d/R) 决定，故每个等 d 环带内可用统一缩放近似）。
+ *
+ * 位图来源：uni.getElementById(...).takeSnapshot（App 三端 5.02+ 支持），
+ * 空闲时预热当前页/上一页快照，跟手开始即有图可画；未就绪的帧返回 false 由宿主回落 CSS 翻页。
+ */
+import { computeCurlGeom, curlBands, curlShadeBands, CURL_SETTLE_SWEEP } from '@/utils/curlgeom.uts'
+import type { CurlBand, CurlShadeBand } from '@/utils/curlgeom.uts'
+
+/** 画布与两个待截页层的模板 id（模板改名须同步） */
+const CANVAS_ID = 'flip-curl-canvas'
+const CAPTURE_CURRENT_ID = 'flip-layer-current'
+const CAPTURE_PREV_ID = 'flip-layer-prev'
+
+/** 落定补间时长（ms，与原生引擎/CSS 版同节奏） */
+const SETTLE_MS = 280
+/** 落定提交后保持末帧的时长（等宿主把新页渲染上去，避免清画布瞬间闪回旧页） */
+const HOLD_MS = 120
+/** 卷筒环带数：24 段时弧线已看不出折线感 */
+const BAND_COUNT = 24
+
+let canvasCtx : CanvasContext | null = null
+let c2d : CanvasRenderingContext2D | null = null
+let ctxPending = false
+/** 画布逻辑尺寸（CSS px）与设备像素比（画布按 dpr 放大，绘制坐标仍用 CSS px） */
+let boxW = 0.0
+let boxH = 0.0
+let dpr = 1.0
+/** 两个页层的快照位图（各自缓存，宿主复位时一并作废） */
+let imgCurrent : Image | null = null
+let imgPrev : Image | null = null
+let readyCurrent = false
+let readyPrev = false
+let snapCurrentPending = false
+let snapPrevPending = false
+/** 纸面底色分量（明暗弧带的纸色薄纱/剪影高光用） */
+let paperR = 255.0
+let paperG = 255.0
+let paperB = 255.0
+/** 最近一帧参数（快照晚到时补画一帧用） */
+let lastDir = 0
+let lastOffset = 0.0
+let lastPageW = 0.0
+let lastPageH = 0.0
+/** 是否处于跟手绘制中（快照晚到时只有跟手期才补画一帧，避免静态页上突然出现卷曲帧） */
+let dragging = false
+/** 触点纵向位置（0-1 的页高比例）：折痕经过该高度，随手指上下移动 */
+let fingerRatio = 0.5
+/** 起手触点所在半区（0=上角 / 1=下角）：决定折痕绕哪个页角卷，起手后固定 */
+let cornerRatio = 0.5
+
+let token = 0
+let settleTimer = -1
+let holdTimer = -1
+
+/** 十六进制纸色（#rrggbb）→ 分量；非法值回落白色 */
+function parsePaper(hex : string) : void {
+	let s = hex
+	if (s.length > 0 && s.charAt(0) == '#') {
+		s = s.substring(1)
+	}
+	if (s.length < 6) {
+		paperR = 255.0
+		paperG = 255.0
+		paperB = 255.0
+		return
+	}
+	const r = parseInt(s.substring(0, 2), 16)
+	const g = parseInt(s.substring(2, 4), 16)
+	const b = parseInt(s.substring(4, 6), 16)
+	paperR = isNaN(r) ? 255.0 : r * 1.0
+	paperG = isNaN(g) ? 255.0 : g * 1.0
+	paperB = isNaN(b) ? 255.0 : b * 1.0
+}
+
+/** 懒创建画布上下文（createCanvasContextAsync 为异步，未就绪时本帧回落 CSS） */
+function ensureContext() : boolean {
+	if (c2d != null) {
+		return true
+	}
+	if (ctxPending) {
+		return false
+	}
+	ctxPending = true
+	uni.createCanvasContextAsync({
+		id: CANVAS_ID,
+		success: (cc : CanvasContext) => {
+			ctxPending = false
+			canvasCtx = cc
+			c2d = cc.getContext('2d')
+		},
+		fail: () => {
+			ctxPending = false
+		}
+	})
+	return false
+}
+
+/** 画布尺寸跟随页面（尺寸变化才重设，避免逐帧累积 scale） */
+function ensureBox(w : number, h : number) : void {
+	const ctx = c2d
+	if (ctx == null) {
+		return
+	}
+	if (Math.abs(boxW - w) < 0.5 && Math.abs(boxH - h) < 0.5) {
+		return
+	}
+	const info = uni.getDeviceInfo()
+	const ratio = info.devicePixelRatio
+	dpr = ratio == null ? 1.0 : Math.max(1.0, ratio)
+	boxW = w
+	boxH = h
+	const canvas = ctx.canvas
+	canvas.width = Math.round(w * dpr)
+	canvas.height = Math.round(h * dpr)
+	// 重设尺寸会重置变换，这里只补一次 dpr 缩放
+	ctx.scale(dpr, dpr)
+}
+
+/** 清空画布（透明：露出下层真实页层） */
+function clearCanvas() : void {
+	const ctx = c2d
+	if (ctx == null || boxW <= 0) {
+		return
+	}
+	ctx.clearRect(0.0, 0.0, boxW, boxH)
+}
+
+/** 解码快照临时文件为画布可用位图（load 完成后补画最近一帧） */
+function loadSnapshot(path : string, dir : number) : void {
+	const cc = canvasCtx
+	if (cc == null) {
+		return
+	}
+	const img = cc.createImage()
+	img.onload = () : void => {
+		if (dir == 1) {
+			imgCurrent = img
+			readyCurrent = true
+		} else {
+			imgPrev = img
+			readyPrev = true
+		}
+		// 跟手仍在进行且该方向就绪：补画一帧（首帧因快照未到而回落过 CSS）
+		if (dragging && lastDir == dir && lastPageW > 0) {
+			drawFrame(dir, lastOffset, lastPageW, lastPageH)
+		}
+	}
+	img.src = path
+}
+
+/** 触发页层快照（同方向已在途则跳过） */
+function capture(dir : number) : void {
+	const pending = dir == 1 ? snapCurrentPending : snapPrevPending
+	if (pending) {
+		return
+	}
+	const el = uni.getElementById(dir == 1 ? CAPTURE_CURRENT_ID : CAPTURE_PREV_ID)
+	if (el == null) {
+		return
+	}
+	if (dir == 1) {
+		snapCurrentPending = true
+	} else {
+		snapPrevPending = true
+	}
+	el.takeSnapshot({
+		type: 'file',
+		success: (res) => {
+			if (dir == 1) {
+				snapCurrentPending = false
+			} else {
+				snapPrevPending = false
+			}
+			loadSnapshot(res.tempFilePath, dir)
+		},
+		fail: () => {
+			if (dir == 1) {
+				snapCurrentPending = false
+			} else {
+				snapPrevPending = false
+			}
+		}
+	})
+}
+
+/**
+ * 绘制一帧：平铺纸面（整页扣除折缝圆盘）+ 卷边环带（绕圆心等比缩放）+ 同心弧明暗。
+ * 折缝以外保持透明，露出下层目标页——与 Android 的剪影遮蔽口径一致。
+ */
+function drawFrame(dir : number, offset : number, pageW : number, pageH : number) : boolean {
+	const ctx = c2d
+	const img = dir == 1 ? imgCurrent : imgPrev
+	const ready = dir == 1 ? readyCurrent : readyPrev
+	if (ctx == null || img == null || !ready || pageW <= 0 || boxW <= 0) {
+		return false
+	}
+	lastDir = dir
+	lastOffset = offset
+	lastPageW = pageW
+	lastPageH = pageH
+	const offN = Math.max(0.0, offset * boxW / pageW)
+	const geom = computeCurlGeom(dir, offN, boxW, boxH, fingerRatio * boxH, cornerRatio)
+	ctx.clearRect(0.0, 0.0, boxW, boxH)
+	// 平铺纸面：页面矩形扣掉「卷起的圆盘」（反向圆弧做洞，用 non-zero 填充规则）
+	ctx.save()
+	ctx.beginPath()
+	ctx.rect(0.0, 0.0, boxW, boxH)
+	ctx.arc(geom.cx, geom.cy, geom.foldR, 0.0, Math.PI * 2.0, true)
+	ctx.clip()
+	ctx.drawImage(img, 0.0, 0.0, boxW, boxH)
+	ctx.restore()
+	// 卷筒环带：每带裁剪到自身环带后，按该带的半径比绕圆心整体缩放绘制
+	const bands = curlBands(geom, BAND_COUNT)
+	for (let i = 0; i < bands.length; i = i + 1) {
+		const b = bands[i] as CurlBand
+		if (b.outer <= b.inner + 0.2) {
+			continue
+		}
+		ctx.save()
+		ctx.beginPath()
+		ctx.arc(geom.cx, geom.cy, b.outer, 0.0, Math.PI * 2.0, false)
+		ctx.arc(geom.cx, geom.cy, b.inner, 0.0, Math.PI * 2.0, true)
+		ctx.clip()
+		ctx.translate(geom.cx, geom.cy)
+		ctx.scale(b.scale, b.scale)
+		ctx.translate(0.0 - geom.cx, 0.0 - geom.cy)
+		ctx.drawImage(img, 0.0, 0.0, boxW, boxH)
+		ctx.restore()
+	}
+	// 明暗：弧带清单与 Android 完全同源（curlgeom.curlShadeBands）
+	const shades = curlShadeBands(geom, boxW, paperR, paperG, paperB)
+	for (let i = 0; i < shades.length; i = i + 1) {
+		const s = shades[i] as CurlShadeBand
+		if (s.radius <= 0.0 || s.width <= 0.0) {
+			continue
+		}
+		ctx.beginPath()
+		ctx.arc(geom.cx, geom.cy, s.radius, geom.arcStart, geom.arcStart + geom.arcSweep, false)
+		ctx.lineWidth = s.width
+		ctx.strokeStyle = 'rgba(' + Math.round(s.r).toString() + ',' + Math.round(s.g).toString() + ',' + Math.round(s.b).toString() + ',' + s.a.toString() + ')'
+		ctx.stroke()
+	}
+	return true
+}
+
+/** 空闲预热：先把两个页层的快照准备好（跟手首帧即可用，避免起手一瞬回落 CSS） */
+export function flipCanvasPrewarm(paper : string) : void {
+	if (!ensureContext()) {
+		return
+	}
+	parsePaper(paper)
+	if (!readyCurrent) {
+		capture(1)
+	}
+	if (!readyPrev) {
+		capture(-1)
+	}
+}
+
+/**
+ * 跟手一帧：返回是否已由画布接管（false 时宿主继续走 CSS 翻页）。
+ * paper 为纸面底色（#rrggbb），用于卷筒薄纱与剪影高光的取色。
+ */
+export function flipCanvasFrame(mode : string, dir : number, offset : number, pageW : number, pageH : number, paper : string, finger : number, corner : number) : boolean {
+	if (mode != '仿真' || dir == 0 || pageW <= 0 || pageH <= 0) {
+		return false
+	}
+	parsePaper(paper)
+	fingerRatio = isNaN(finger) ? 0.5 : Math.max(0.0, Math.min(1.0, finger))
+	cornerRatio = isNaN(corner) ? 0.5 : Math.max(0.0, Math.min(1.0, corner))
+	lastDir = dir
+	lastOffset = offset
+	lastPageW = pageW
+	lastPageH = pageH
+	dragging = true
+	if (!ensureContext()) {
+		return false
+	}
+	ensureBox(pageW, pageH)
+	const ready = dir == 1 ? readyCurrent : readyPrev
+	if (!ready) {
+		capture(dir)
+		return false
+	}
+	return drawFrame(dir, offset, pageW, pageH)
+}
+
+/** 卷曲补间单帧（模块级递归：UTS 局部函数不能被箭头回调引用） */
+function runTick(myToken : number, dir : number, from : number, to : number, pageW : number, pageH : number, start : number, commit : boolean, done : () => void) : void {
+	if (myToken != token) {
+		return
+	}
+	const t = Math.min(1.0, (Date.now() - start) / SETTLE_MS)
+	const e = 1.0 - (1.0 - t) * (1.0 - t) * (1.0 - t)
+	drawFrame(dir, from + (to - from) * e, pageW, pageH)
+	if (t < 1.0) {
+		settleTimer = setTimeout(() : void => {
+			runTick(myToken, dir, from, to, pageW, pageH, start, commit, done)
+		}, 16)
+		return
+	}
+	settleTimer = -1
+	if (commit) {
+		// 末帧保持一小段：宿主在 done 里切内容，等 Vue 渲染完再清画布
+		done()
+		holdTimer = setTimeout(() : void => {
+			holdTimer = -1
+			clearCanvas()
+		}, HOLD_MS)
+	} else {
+		clearCanvas()
+		done()
+	}
+}
+
+/**
+ * 落定/回弹补间：返回是否接管（false 时宿主走 CSS 补间）。
+ * commit=true 时折缝扫出页缘（CURL_SETTLE_SWEEP 倍页宽），回弹归零。
+ */
+export function flipCanvasSettle(mode : string, dir : number, offset : number, pageW : number, pageH : number, paper : string, commit : boolean, done : () => void) : boolean {
+	if (mode != '仿真' || dir == 0 || pageW <= 0) {
+		return false
+	}
+	const ready = dir == 1 ? readyCurrent : readyPrev
+	if (!ready) {
+		return false
+	}
+	dragging = false
+	parsePaper(paper)
+	token = token + 1
+	const myToken = token
+	if (holdTimer != -1) {
+		clearTimeout(holdTimer)
+		holdTimer = -1
+	}
+	// 提交时折缝整条扫过对侧页缘（前翻末段再整层淡出收边）
+	const to = commit ? pageW * CURL_SETTLE_SWEEP : 0.0
+	runTick(myToken, dir, offset, to, pageW, pageH, Date.now(), commit, done)
+	return true
+}
+
+/** 复位：作废补间、清空画布，并让快照失效（内容/主题变化后必须重新截取） */
+export function flipCanvasReset() : void {
+	token = token + 1
+	if (settleTimer != -1) {
+		clearTimeout(settleTimer)
+		settleTimer = -1
+	}
+	if (holdTimer != -1) {
+		clearTimeout(holdTimer)
+		holdTimer = -1
+	}
+	dragging = false
+	clearCanvas()
+	imgCurrent = null
+	imgPrev = null
+	readyCurrent = false
+	readyPrev = false
+	lastDir = 0
+	lastOffset = 0.0
+}
+
+/** 页面卸载：释放画布与位图引用（快照临时文件由系统回收） */
+export function flipCanvasDispose() : void {
+	flipCanvasReset()
+	canvasCtx = null
+	c2d = null
+	ctxPending = false
+	boxW = 0.0
+	boxH = 0.0
+}

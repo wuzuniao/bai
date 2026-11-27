@@ -132,8 +132,8 @@
 				<view v-if="hasPrevPage" id="flip-layer-prev" class="page-layer" :class="flipSettling ? 'page-layer-settle' : ''" :style="'background-color:' + readerBg + ';' + prevLayerStyle">
 					<!-- #ifdef APP-IOS || APP-HARMONY -->
 					<!-- 仿真卷曲（APP 端真实实现）：回翻时前缘为卷起纸筒弧面 + 落在下层的投影 -->
-					<view v-if="pageTurn == '仿真' && flipDir == -1 && flipOffset > 0" class="page-curl-roller page-curl-roller-right"></view>
-					<view v-if="pageTurn == '仿真' && flipDir == -1 && flipOffset > 0" class="page-curl-shadow page-curl-shadow-right"></view>
+					<view v-if="pageTurn == '仿真' && flipDir == -1 && flipOffset > 0 && !curlCanvasOn" class="page-curl-roller page-curl-roller-right"></view>
+					<view v-if="pageTurn == '仿真' && flipDir == -1 && flipOffset > 0 && !curlCanvasOn" class="page-curl-shadow page-curl-shadow-right"></view>
 					<!-- #endif -->
 					<view class="content-inner" :style="'padding-top:' + contentTopPx + 'px;padding-bottom:' + contentBottomPx + 'px'">
 						<view v-if="prevPageIndex === 0" class="chapter-header">
@@ -175,8 +175,8 @@
 				<view v-if="hasNextPage" id="flip-layer-next" class="page-layer" :class="flipSettling ? 'page-layer-settle' : ''" :style="'background-color:' + readerBg + ';' + nextLayerStyle">
 					<!-- #ifdef APP-IOS || APP-HARMONY -->
 					<!-- 仿真卷曲（APP 端真实实现）：前翻时前缘为卷起纸筒弧面 + 落在下层的投影 -->
-					<view v-if="pageTurn == '仿真' && flipDir == 1 && flipOffset > 0" class="page-curl-roller page-curl-roller-left"></view>
-					<view v-if="pageTurn == '仿真' && flipDir == 1 && flipOffset > 0" class="page-curl-shadow page-curl-shadow-left"></view>
+					<view v-if="pageTurn == '仿真' && flipDir == 1 && flipOffset > 0 && !curlCanvasOn" class="page-curl-roller page-curl-roller-left"></view>
+					<view v-if="pageTurn == '仿真' && flipDir == 1 && flipOffset > 0 && !curlCanvasOn" class="page-curl-shadow page-curl-shadow-left"></view>
 					<!-- #endif -->
 					<view class="content-inner" :style="'padding-top:' + contentTopPx + 'px;padding-bottom:' + contentBottomPx + 'px'">
 						<view v-if="nextPageIndex === 0" class="chapter-header">
@@ -221,6 +221,11 @@
 				<!-- #ifdef APP-ANDROID -->
 				<!-- 仿真卷曲浮层（App 原生管线）：flipengine 写入位图背景，无事件绑定不拦截触摸；z 序在页层之上 -->
 				<view id="flip-curl-overlay" class="flip-curl-overlay"></view>
+				<!-- #endif -->
+				<!-- #ifdef APP-IOS || APP-HARMONY -->
+				<!-- 仿真卷曲画布（iOS/鸿蒙管线）：flipcanvas 在同一套卷曲几何下逐帧重绘页层位图；
+				     与 Android 浮层同样无事件绑定，不拦截触摸；尺寸由引擎按页面实测宽高设定 -->
+				<canvas id="flip-curl-canvas" type="2d" class="flip-curl-canvas"></canvas>
 				<!-- #endif -->
 			</view>
 			<!-- 底部信息栏（组件化：进度/百分比/贴底计算与滚动淡入淡出出现时机内聚 ReaderFooterBar，滚动信号经 ref 驱动） -->
@@ -376,6 +381,10 @@
 	// #ifdef APP-ANDROID
 	// 原生翻页引擎（仅 Android：原生视图位移/补间 + Canvas 卷曲；其他端仍走 CSS 实现）
 	import { flipNativeBegin, flipNativeCancel, flipNativeFollow, flipNativeSettle, flipNativeReset, flipNativeDispose } from '@/utils/flipengine.uts'
+	// #endif
+	// #ifdef APP-IOS || APP-HARMONY
+	// 仿真卷曲画布引擎（iOS/鸿蒙：截取页层位图后按同一套卷曲几何重投影到 canvas 卷筒）
+	import { flipCanvasPrewarm, flipCanvasFrame, flipCanvasSettle, flipCanvasReset, flipCanvasDispose } from '@/utils/flipcanvas.uts'
 	// #endif
 	// #ifdef MP-WEIXIN
 	import { buildShareAppContent } from '@/utils/shareCover.uts'
@@ -653,6 +662,8 @@
 	const flipSettling = ref(false)
 	/** 翻页方向：1 下一页 / -1 上一页 */
 	const flipDir = ref(0)
+	/** iOS/鸿蒙仿真卷曲画布是否已接管本帧（true 时页层不再滑入滑出，卷筒由 utils/flipcanvas.uts 绘制） */
+	const curlCanvasOn = ref(false)
 	/** 左右滑动翻页手势（Stitch 设置面板"翻页"模式：左滑下一章、右滑上一章，水平位移阈值避免与纵向滚动冲突） */
 	let touchStartX = 0
 	let touchStartY = 0
@@ -1017,9 +1028,9 @@
 		// #endif
 	}
 	/** 上一页层样式：常驻屏左外预渲染，回翻跟手/补间时作为目标层滑入 */
-	const prevLayerStyle = computed(() : string => flipPrevLayerStyle(pageW.value, flipDir.value, flipOffset.value, flipActive.value))
+	const prevLayerStyle = computed(() : string => flipPrevLayerStyle(pageW.value, flipDir.value, flipOffset.value, flipActive.value, curlCanvasOn.value))
 	/** 下一页层样式：常驻屏右外预渲染，前翻跟手/补间时作为目标层滑入 */
-	const nextLayerStyle = computed(() : string => flipNextLayerStyle(pageW.value, flipDir.value, flipOffset.value, flipActive.value))
+	const nextLayerStyle = computed(() : string => flipNextLayerStyle(pageW.value, flipDir.value, flipOffset.value, flipActive.value, curlCanvasOn.value))
 	/** 覆盖模式遮罩透明度（滑入的下一页上，仅前翻）：出现越多遮罩越浅，落定归零 */
 	const coverNextMaskOpacity = computed(() : number => flipCoverNextOpacity(pageW.value, flipOffset.value))
 	/** 覆盖模式遮罩透明度（当前页上，仅回翻）：被上一页取代越多越深 */
@@ -2707,7 +2718,7 @@
 	 */
 	const pageTurn = ref(defaultPageTurn())
 	/** 当前页层样式（几何规则见 utils/flipstyle.uts，随翻页模式/方向/位移变化） */
-	const currentLayerStyle = computed(() : string => flipCurrentLayerStyle(pageTurn.value, flipDir.value, flipOffset.value, flipActive.value, flipSettling.value))
+	const currentLayerStyle = computed(() : string => flipCurrentLayerStyle(pageTurn.value, flipDir.value, flipOffset.value, flipActive.value, flipSettling.value, curlCanvasOn.value))
 	if (restoredModes.indexOf(restoredSettings.pageTurn) >= 0) {
 		pageTurn.value = restoredSettings.pageTurn
 	} else {
@@ -2715,6 +2726,37 @@
 	}
 	/** 是否上下滚动模式（语义化别名，正文手势/定位/渲染均按此分支；信息栏显隐随其下行组件） */
 	const scrollMode = computed(() : boolean => pageTurn.value == '滚动')
+	// #ifdef APP-IOS || APP-HARMONY
+	/**
+	 * 卷曲画布的快照缓存跟随「内容身份」：章/页/字号/模式/底色任一变化即作废快照并重新预热。
+	 * 防抖 250ms：连续翻页只截一次，且避开翻页落定的渲染高峰。
+	 */
+	let curlPrewarmTimer = -1
+	watch(() : string => currentChapterId.value + '|' + pageIndex.value + '|' + fontSize.value + '|' + pageTurn.value + '|' + readerBg.value, () : void => {
+		if (curlPrewarmTimer != -1) {
+			clearTimeout(curlPrewarmTimer)
+		}
+		curlPrewarmTimer = setTimeout(() : void => {
+			curlPrewarmTimer = -1
+			curlCanvasOn.value = false
+			if (pageTurn.value == '滚动') {
+				// 滚动模式下列表分支渲染、画布随 page-stack 卸载：连上下文一并释放，切回翻页时重建
+				flipCanvasDispose()
+				return
+			}
+			flipCanvasReset()
+			if (pageTurn.value == '仿真') {
+				flipCanvasPrewarm(readerBg.value)
+			}
+		}, 250)
+	})
+	// 首次进入：等排版/渲染稳定后预热两个页层的快照（跟手首帧即可画出卷筒）
+	setTimeout(() : void => {
+		if (pageTurn.value == '仿真') {
+			flipCanvasPrewarm(readerBg.value)
+		}
+	}, 600)
+	// #endif
 	/**
 	 * 滚动模式锚点实测（停止滚动 300ms 后防抖执行）：滚动位置的绝对 scrollTop 含已拼接前置章的累计高，
 	 * 而恢复时只渲染当前章（单章高度远小于绝对值，scroll-top 会被 clamp 到章尾），直接保存会导致恢复定位错乱；
@@ -2802,7 +2844,17 @@
 				flipNativeCancel()
 				flipNativeBegin(pageTurn.value, dir, pageW.value)
 			}
-			flipNativeFollow(pageTurn.value, dir, flipOffset.value, pageW.value)
+			const fingerRatio = pageH.value > 0 ? Math.max(0.03, Math.min(0.97, y / pageH.value)) : 0.5
+			const cornerRatio = touchStartY < pageH.value * 0.5 ? 0.0 : 1.0
+			flipNativeFollow(pageTurn.value, dir, flipOffset.value, pageW.value, fingerRatio, cornerRatio)
+			// #endif
+			// #ifdef APP-IOS || APP-HARMONY
+			// 画布卷曲：快照就绪时由画布接管（未就绪的帧返回 false，本帧继续走 CSS 滑入）
+			const fingerRatio = pageH.value > 0 ? Math.max(0.03, Math.min(0.97, y / pageH.value)) : 0.5
+			const cornerRatio = touchStartY < pageH.value * 0.5 ? 0.0 : 1.0
+			if (flipCanvasFrame(pageTurn.value, dir, flipOffset.value, pageW.value, pageH.value, readerBg.value, fingerRatio, cornerRatio)) {
+				curlCanvasOn.value = true
+			}
 			// #endif
 			return
 		}
@@ -4108,6 +4160,54 @@
 		}
 		// #endif
 		// #ifndef APP-ANDROID
+		// #ifdef APP-IOS || APP-HARMONY
+		// 画布卷曲收尾：达阈值补间到折缝扫出页缘再切内容，未达阈值回弹归零（与 Android 原生引擎同节奏）
+		if (flipActive.value && curlCanvasOn.value) {
+			const done = flipOffset.value > pageW.value * 0.35 || Math.abs(dx) > 80
+			const d = flipDir.value
+			const commit = done && flipHasTarget.value
+			flipSettling.value = true
+			if (flipCanvasSettle(pageTurn.value, d, flipOffset.value, pageW.value, pageH.value, readerBg.value, commit, () : void => {
+				if (done) {
+					flipPage(d)
+				}
+				flipActive.value = false
+				flipDir.value = 0
+				flipOffset.value = 0
+				flipSettling.value = false
+				curlCanvasOn.value = false
+			})) {
+				return
+			}
+			// 快照缺失（画布未接管）：交回下方 CSS 补间
+			flipSettling.value = false
+		}
+		// 快速水平轻扫（画布接管）：从零开始补间整段卷曲，省掉先跟手再落定
+		if (pageTurn.value == '仿真' && Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 2) {
+			const d = dx < 0 ? 1 : -1
+			const canFlip = d == 1 ? hasNextPage.value : hasPrevPage.value
+			if (canFlip) {
+				flipActive.value = true
+				flipDir.value = d
+				flipSettling.value = true
+				if (flipCanvasSettle(pageTurn.value, d, 0, pageW.value, pageH.value, readerBg.value, true, () : void => {
+					flipPage(d)
+					flipActive.value = false
+					flipDir.value = 0
+					flipOffset.value = 0
+					flipSettling.value = false
+					curlCanvasOn.value = false
+				})) {
+					curlCanvasOn.value = true
+					settlePull()
+					return
+				}
+				flipActive.value = false
+				flipDir.value = 0
+				flipSettling.value = false
+			}
+		}
+		// #endif
 		// 翻页跟手收尾：位移过阈值（或快速轻扫）且有目标页时，先补间到满行程再切换内容；否则回弹归位
 		if (flipActive.value) {
 			const done = flipOffset.value > pageW.value * 0.35 || Math.abs(dx) > 80
@@ -4292,6 +4392,10 @@
 		// 原生翻页引擎释放（作废定时器/动画、恢复被隐藏页层、释放卷曲位图引用）
 		flipNativeDispose()
 		// #endif
+		// #ifdef APP-IOS || APP-HARMONY
+		// 画布卷曲释放（作废补间、清画布、释放位图引用）
+		flipCanvasDispose()
+		// #endif
 		// 卸载期必须立即落盘：防抖窗口内的最后一次翻页不能在页面销毁后丢失
 		flushProgress()
 		recordReadingSession()
@@ -4384,6 +4488,18 @@
 		left: 0;
 		right: 0;
 		top: 0;
+		bottom: 0;
+		z-index: 5;
+	}
+	/* #endif */
+
+	/* #ifdef APP-IOS || APP-HARMONY */
+	/* 仿真卷曲画布：与 Android 浮层同层同 z 序，引擎逐帧重绘（无事件绑定故不拦截触摸） */
+	.flip-curl-canvas {
+		position: absolute;
+		left: 0;
+		top: 0;
+		right: 0;
 		bottom: 0;
 		z-index: 5;
 	}

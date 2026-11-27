@@ -281,10 +281,10 @@ function bookmarksFromStored(raw : string) : Bookmark[] {
 	return list
 }
 
-/** 当前端默认翻页模式（APP 端含安卓/iOS/鸿蒙默认仿真；H5/微信小程序不支持仿真默认滚动；三处恢复点与云端缺项兜底同源引用） */
+/** 当前端默认翻页模式（APP 端含安卓/iOS/鸿蒙默认覆盖；H5/微信小程序不支持仿真默认滚动；三处恢复点与云端缺项兜底同源引用） */
 export function defaultPageTurn() : string {
 	// #ifdef APP
-	return '仿真'
+	return '覆盖'
 	// #endif
 	// #ifndef APP
 	return '滚动'

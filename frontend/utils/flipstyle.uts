@@ -3,14 +3,20 @@
  * 页面仅持 computed 薄壳（响应式依赖经参数传入自动追踪），翻页几何规则单点维护。
  * APP-ANDROID 例外：位移/补间/遮罩由 utils/flipengine.uts 的原生引擎接管，
  * 本文件只提供 idle 静态位移（与原生 reset 同值），避免逐帧 CSS 与原生动画互相覆盖。
+ * iOS/鸿蒙仿真：卷曲由 utils/flipcanvas.uts 的画布引擎绘制（curlCanvas=true），
+ * 层不再滑入滑出——移动页隐藏、目标页就位，卷筒与折缝全部由画布位图呈现。
  */
 
 /** 当前页层样式：按翻页模式产生位移与层级（跟手与回弹共用） */
-export function flipCurrentLayerStyle(mode : string, dir : number, offset : number, active : boolean, settling : boolean) : string {
+export function flipCurrentLayerStyle(mode : string, dir : number, offset : number, active : boolean, settling : boolean, curlCanvas : boolean) : string {
 	// #ifdef APP-ANDROID
 	return ''
 	// #endif
 	// #ifndef APP-ANDROID
+	if (curlCanvas) {
+		// 画布接管：前翻时移动页（当前页）由画布位图代替显示；回翻时当前页是被卷筒露出的底层
+		return (active && dir == 1) ? 'opacity:0;z-index:1' : 'z-index:1'
+	}
 	if (!active && !settling) {
 		return ''
 	}
@@ -36,7 +42,7 @@ export function flipCurrentLayerStyle(mode : string, dir : number, offset : numb
 }
 
 /** 上一页层样式：常驻屏左外预渲染（pageW 未就绪时先透明），回翻跟手/补间时作为目标层滑入（覆盖/仿真/平移通用） */
-export function flipPrevLayerStyle(pageW : number, dir : number, offset : number, active : boolean) : string {
+export function flipPrevLayerStyle(pageW : number, dir : number, offset : number, active : boolean, curlCanvas : boolean) : string {
 	// #ifdef APP-ANDROID
 	// 原生引擎接管跟手/补间位移；CSS 仅保留 idle 左侧屏外位置（新挂载层不闪叠）
 	if (pageW <= 0) {
@@ -48,6 +54,13 @@ export function flipPrevLayerStyle(pageW : number, dir : number, offset : number
 	if (pageW <= 0) {
 		return 'opacity:0;z-index:2'
 	}
+	if (curlCanvas) {
+		// 画布接管：回翻时上一页（移动页）由画布位图代替显示；前翻时保持屏外
+		if (active && dir == -1) {
+			return 'opacity:0;z-index:2'
+		}
+		return 'transform:translateX(-' + pageW + 'px);z-index:2'
+	}
 	if (active && dir == -1) {
 		return 'transform:translateX(' + (offset - pageW) + 'px);z-index:2'
 	}
@@ -56,7 +69,7 @@ export function flipPrevLayerStyle(pageW : number, dir : number, offset : number
 }
 
 /** 下一页层样式：常驻屏右外预渲染，前翻跟手/补间时作为目标层滑入（覆盖/仿真/平移通用） */
-export function flipNextLayerStyle(pageW : number, dir : number, offset : number, active : boolean) : string {
+export function flipNextLayerStyle(pageW : number, dir : number, offset : number, active : boolean, curlCanvas : boolean) : string {
 	// #ifdef APP-ANDROID
 	// 原生引擎接管跟手/补间位移；CSS 仅保留 idle 右侧屏外位置（新挂载层不闪叠）
 	if (pageW <= 0) {
@@ -67,6 +80,13 @@ export function flipNextLayerStyle(pageW : number, dir : number, offset : number
 	// #ifndef APP-ANDROID
 	if (pageW <= 0) {
 		return 'opacity:0;z-index:2'
+	}
+	if (curlCanvas) {
+		// 画布接管：前翻时下一页就是卷筒底下要露出的纸面，必须就位（不再从屏外滑入）
+		if (active && dir == 1) {
+			return 'transform:translateX(0);z-index:2'
+		}
+		return 'transform:translateX(' + pageW + 'px);z-index:2'
 	}
 	if (active && dir == 1) {
 		return 'transform:translateX(' + (pageW - offset) + 'px);z-index:2'

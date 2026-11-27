@@ -834,6 +834,30 @@
 	}
 
 	/**
+	 * 服务端封面回取为本地临时文件后再定格：网络 URL 交给微信时由微信在「发送转发」瞬间抓取，
+	 * 用户挑好友点得快就抓不到 → 卡片封面空白（快速分享丢封面的典型现象）。先落地本地则读文件无需网络。
+	 * 回取失败（未配 downloadFile 合法域名/弱网）回落服务端 URL，行为与改造前一致。
+	 */
+	function settleServerCover(url : string, sign : string) : void {
+		uni.downloadFile({
+			url: url,
+			timeout: 5000,
+			success: (res) => {
+				if (res.statusCode >= 200 && res.statusCode < 300 && res.tempFilePath.length > 0) {
+					settleCover(res.tempFilePath, sign)
+					return
+				}
+				console.warn('转发封面回取失败，沿用服务端 URL', res.statusCode, url)
+				settleCover(url, sign)
+			},
+			fail: (err) => {
+				console.warn('转发封面回取失败，沿用服务端 URL（检查小程序后台 downloadFile 合法域名）', err.errMsg, url)
+				settleCover(url, sign)
+			}
+		})
+	}
+
+	/**
 	 * 上传封面到后端换取服务端 URL（微信真机不接受本地临时文件路径作转发封面，
 	 * 网络图片路径两端通用）；成功→URL 定格，未登录/失败→回落本地路径定格
 	 * （开发者工具可用本地路径，真机回落静态兜底图）；sign 为本次封面内容签名
@@ -877,30 +901,6 @@
 			fail: (err) => {
 				console.warn('转发封面上传请求失败', err.errMsg)
 				settleCover(localPath, sign)
-			}
-		})
-	}
-
-	/**
-	 * 服务端封面回取为本地临时文件后再定格：网络 URL 交给微信时由微信在「发送转发」瞬间抓取，
-	 * 用户挑好友点得快就抓不到 → 卡片封面空白（快速分享丢封面的典型现象）。先落地本地则读文件无需网络。
-	 * 回取失败（未配 downloadFile 合法域名/弱网）回落服务端 URL，行为与改造前一致。
-	 */
-	function settleServerCover(url : string, sign : string) : void {
-		uni.downloadFile({
-			url: url,
-			timeout: 5000,
-			success: (res) => {
-				if (res.statusCode >= 200 && res.statusCode < 300 && res.tempFilePath.length > 0) {
-					settleCover(res.tempFilePath, sign)
-					return
-				}
-				console.warn('转发封面回取失败，沿用服务端 URL', res.statusCode, url)
-				settleCover(url, sign)
-			},
-			fail: (err) => {
-				console.warn('转发封面回取失败，沿用服务端 URL（检查小程序后台 downloadFile 合法域名）', err.errMsg, url)
-				settleCover(url, sign)
 			}
 		})
 	}
