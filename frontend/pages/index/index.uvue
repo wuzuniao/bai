@@ -942,14 +942,19 @@
 		font-family: $bai-font-serif;
 	}
 
-	/* 行尾标点单元（Figma: 14x19.66px，内容贴底、整体行内居中；
-	 * 统一渲染单元模型后标点即为 poem-unit 加窄宽修饰类，保持行内容总宽 510rpx 口径） */
+	/* 行尾标点单元（Figma: 14x19.66px，内容贴底回落至汉字行盒右下角；
+	 * 统一渲染单元模型后标点即为 poem-unit 加窄宽修饰类，保持行内容总宽 510rpx 口径）。
+	 * 高度须等于行盒高（拼音区 19+3+5 + 汉字行高 50 = 77rpx）并与汉字底对齐：定高盒子在
+	 * .poem-line 的 align-items:center 下会浮到拼音与汉字之间（表现为标点停在文字中间）。
+	 * 底距：汉字行高 50 − 字号 33 = 17rpx 行内余量，字形垂直居中后其底缘居行盒底上方约 8.5rpx，
+	 * 故 padding-bottom 取 8rpx 使标点底与汉字字形底齐平（取 0 会落在字形底以下、呈下坠）。
+	 * 同步义务：调整 .poem-pinyin / .poem-char 字号或行高时须同比修正高度与底距。 */
 	.poem-unit--punct {
 		width: 27rpx;
 		margin-right: 0;
-		height: 38rpx;
+		height: 77rpx;
 		justify-content: flex-end;
-		padding-bottom: 4rpx;
+		padding-bottom: 8rpx;
 	}
 
 	.poem-punct {
